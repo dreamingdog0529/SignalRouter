@@ -786,8 +786,9 @@ src/
     Editor/
     Tests/
     Samples~/
-  SignalRouter.DotNet/
+  SignalRouter.Core/
     SignalRouter.Core.csproj
+  SignalRouter.Protocol/
     SignalRouter.Protocol.csproj
   SignalRouter.McpHost/
     SignalRouter.McpHost.csproj
