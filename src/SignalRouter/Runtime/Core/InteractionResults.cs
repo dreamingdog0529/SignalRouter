@@ -32,12 +32,12 @@ namespace SignalRouter
         Cancelled = 2,
     }
 
-    public sealed class RejectionInfo : IEquatable<RejectionInfo>
+    public sealed record RejectionInfo
     {
         public RejectionInfo(InteractionRejectionCode code, string message)
         {
             InteractionContract.RequireDefinedEnum(code, nameof(code));
-            InteractionContract.RequireIdentifier(message, nameof(message));
+            InteractionContract.RequireMessage(message, nameof(message));
             Code = code;
             Message = message;
         }
@@ -45,28 +45,9 @@ namespace SignalRouter
         public InteractionRejectionCode Code { get; }
 
         public string Message { get; }
-
-        public bool Equals(RejectionInfo? other)
-        {
-            return other != null
-                && Code == other.Code
-                && string.Equals(Message, other.Message, StringComparison.Ordinal);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as RejectionInfo);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.CombineHashCodes(
-                (int)Code,
-                StringComparer.Ordinal.GetHashCode(Message));
-        }
     }
 
-    public sealed class InteractionStageProgress : IEquatable<InteractionStageProgress>
+    public sealed record InteractionStageProgress
     {
         public InteractionStageProgress(string id, int index, InteractionStageStatus status)
         {
@@ -87,27 +68,6 @@ namespace SignalRouter
         public int Index { get; }
 
         public InteractionStageStatus Status { get; }
-
-        public bool Equals(InteractionStageProgress? other)
-        {
-            return other != null
-                && string.Equals(Id, other.Id, StringComparison.Ordinal)
-                && Index == other.Index
-                && Status == other.Status;
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as InteractionStageProgress);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.CombineHashCodes(
-                StringComparer.Ordinal.GetHashCode(Id),
-                Index,
-                (int)Status);
-        }
     }
 
     public sealed class StageProgress : IEquatable<StageProgress>
@@ -199,11 +159,7 @@ namespace SignalRouter
             IEnumerable<string> completedStageIds)
         {
             InteractionContract.RequireIdentifier(exceptionType, nameof(exceptionType));
-            if (message == null)
-            {
-                throw new ArgumentNullException(nameof(message));
-            }
-
+            InteractionContract.RequireMessage(message, nameof(message));
             InteractionContract.RequireOptionalIdentifier(applicationCode, nameof(applicationCode));
             InteractionContract.RequireIdentifier(failedStageId, nameof(failedStageId));
             if (failedStageIndex < 0)
@@ -301,7 +257,7 @@ namespace SignalRouter
         }
     }
 
-    public sealed class StateProbeObservation : IEquatable<StateProbeObservation>
+    public sealed record StateProbeObservation
     {
         public StateProbeObservation(string probeId, string hash)
         {
@@ -314,25 +270,6 @@ namespace SignalRouter
         public string ProbeId { get; }
 
         public string Hash { get; }
-
-        public bool Equals(StateProbeObservation? other)
-        {
-            return other != null
-                && string.Equals(ProbeId, other.ProbeId, StringComparison.Ordinal)
-                && string.Equals(Hash, other.Hash, StringComparison.Ordinal);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as StateProbeObservation);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.CombineHashCodes(
-                StringComparer.Ordinal.GetHashCode(ProbeId),
-                StringComparer.Ordinal.GetHashCode(Hash));
-        }
     }
 
     public sealed class StateObservation : IEquatable<StateObservation>
@@ -341,7 +278,6 @@ namespace SignalRouter
             new StateObservation(Array.Empty<StateProbeObservation>());
 
         private readonly ReadOnlyCollection<StateProbeObservation> probes;
-        private readonly Dictionary<string, string> hashes;
 
         public StateObservation(IEnumerable<StateProbeObservation> probes)
         {
@@ -351,7 +287,7 @@ namespace SignalRouter
             }
 
             var copy = new List<StateProbeObservation>();
-            hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+            var ids = new HashSet<string>(StringComparer.Ordinal);
             foreach (var probe in probes)
             {
                 if (probe == null)
@@ -359,12 +295,11 @@ namespace SignalRouter
                     throw new ArgumentException("Observations must not contain null.", nameof(probes));
                 }
 
-                if (hashes.ContainsKey(probe.ProbeId))
+                if (!ids.Add(probe.ProbeId))
                 {
                     throw new ArgumentException("Probe IDs must be unique.", nameof(probes));
                 }
 
-                hashes.Add(probe.ProbeId, probe.Hash);
                 copy.Add(probe);
             }
 
@@ -380,21 +315,6 @@ namespace SignalRouter
         public IReadOnlyList<StateProbeObservation> Probes
         {
             get { return probes; }
-        }
-
-        public bool TryGetHash(string probeId, out string? hash)
-        {
-            if (probeId == null)
-            {
-                throw new ArgumentNullException(nameof(probeId));
-            }
-
-            return hashes.TryGetValue(probeId, out hash);
-        }
-
-        public bool HasSameHashes(StateObservation? other)
-        {
-            return Equals(other);
         }
 
         public bool Equals(StateObservation? other)
@@ -413,7 +333,7 @@ namespace SignalRouter
         }
     }
 
-    public sealed class StatePropertyChange : IEquatable<StatePropertyChange>
+    public sealed record StatePropertyChange
     {
         public StatePropertyChange(string path, InteractionValue before, InteractionValue after)
         {
@@ -433,27 +353,6 @@ namespace SignalRouter
         public InteractionValue Before { get; }
 
         public InteractionValue After { get; }
-
-        public bool Equals(StatePropertyChange? other)
-        {
-            return other != null
-                && string.Equals(Path, other.Path, StringComparison.Ordinal)
-                && Before.Equals(other.Before)
-                && After.Equals(other.After);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as StatePropertyChange);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.CombineHashCodes(
-                StringComparer.Ordinal.GetHashCode(Path),
-                Before.GetHashCode(),
-                After.GetHashCode());
-        }
     }
 
     public sealed class StateProbeDiff : IEquatable<StateProbeDiff>
@@ -761,7 +660,7 @@ namespace SignalRouter
                         throw new ArgumentException("A rejected result must not contain stages.");
                     }
 
-                    if (!before.HasSameHashes(after) || diff.Probes.Count != 0)
+                    if (!before.Equals(after) || diff.Probes.Count != 0)
                     {
                         throw new ArgumentException(
                             "A rejected result must have identical before and after state hashes.");
@@ -807,7 +706,7 @@ namespace SignalRouter
                     RequireNoError(rejection, fault);
                     if (stages.Stages.Count == 0)
                     {
-                        if (!before.HasSameHashes(after) || diff.Probes.Count != 0)
+                        if (!before.Equals(after) || diff.Probes.Count != 0)
                         {
                             throw new ArgumentException(
                                 "Cancellation before execution must not change state.");

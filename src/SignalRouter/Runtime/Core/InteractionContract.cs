@@ -40,6 +40,19 @@ namespace SignalRouter
             }
         }
 
+        public static void RequireMessage(string value, string parameterName)
+        {
+            if (value == null)
+            {
+                throw new ArgumentNullException(parameterName);
+            }
+
+            if (value.Length == 0)
+            {
+                throw new ArgumentException("The value must not be empty.", parameterName);
+            }
+        }
+
         public static void RequireOptionalIdentifier(string? value, string parameterName)
         {
             if (value != null)
