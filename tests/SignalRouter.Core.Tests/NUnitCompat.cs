@@ -14,4 +14,10 @@ internal static class NUnitCompat
     {
         Assert.That(code, constraint);
     }
+
+    public static T? Throws<T>(Action code)
+        where T : Exception
+    {
+        return Assert.Throws<T>(code);
+    }
 }
