@@ -25,11 +25,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Template starts with Actions workflows + a small Node helper under
-        # .github/scripts. Add languages here (or via init-template) once the
-        # project has real source, e.g. javascript-typescript, python, go, csharp.
+        # `actions` scans the workflow files; `csharp` scans the .NET runtime
+        # sources. C# uses build-mode `none` (buildless analysis) so CodeQL does
+        # not need the .NET SDK or a successful `dotnet build` to create the
+        # database. See docs/security-hardening.md before adding languages.
         include:
           - language: actions
+            build-mode: none
+          - language: csharp
             build-mode: none
     steps:
       - name: Report unavailable CodeQL

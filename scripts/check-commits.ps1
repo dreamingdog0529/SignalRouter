@@ -12,9 +12,20 @@ if (-not $root) {
 
 Push-Location $root
 try {
-    git show-ref --verify --quiet refs/remotes/origin/main
-    if ($LASTEXITCODE -eq 0) {
-        $commits = @(git log --format=%H origin/main..HEAD)
+    # Diff against the integration branch so every commit unique to this branch
+    # is inspected. Prefer the remote, then a local main (fetch-less clones,
+    # forks); only when neither exists do we fall back to a bounded slice.
+    $baseRef = $null
+    foreach ($candidate in 'refs/remotes/origin/main', 'refs/heads/main') {
+        git show-ref --verify --quiet $candidate
+        if ($LASTEXITCODE -eq 0) {
+            $baseRef = $candidate -replace '^refs/(remotes|heads)/', ''
+            break
+        }
+    }
+
+    if ($baseRef) {
+        $commits = @(git log --format=%H "$baseRef..HEAD")
     }
     else {
         $commits = @(git log --format=%H -5)
