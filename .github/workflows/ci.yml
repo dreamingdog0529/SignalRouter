@@ -22,31 +22,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
-      # TODO: Set up your language toolchain. Pin any action you add to a full
-      # commit SHA with a version comment (see docs/security-hardening.md), e.g.
-      #   - uses: actions/setup-node@<sha>     # v4  (Node.js)
-      #   - uses: actions/setup-go@<sha>       # v5  (Go)
-      #   - uses: actions/setup-python@<sha>   # v5  (Python)
-      #   - uses: actions/setup-dotnet@<sha>   # v6  (.NET)
-      #   - uses: dtolnay/rust-toolchain@<sha> # stable  (Rust)
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
 
-      # The initializer (scripts/init-template.ps1) fills in the build/test
-      # commands. Until then these steps no-op so the template's own CI stays
-      # green; after initialization they run your real commands.
       - name: Build
-        shell: bash
-        run: |
-          cmd='dotnet build'
-          case "$cmd" in
-            *"{{"*) echo "No build command configured yet — run scripts/init-template.ps1. Skipping." ;;
-            *) eval "$cmd" ;;
-          esac
+        run: dotnet build ./SignalRouter.slnx
 
       - name: Test
-        shell: bash
-        run: |
-          cmd='dotnet test'
-          case "$cmd" in
-            *"{{"*) echo "No test command configured yet — run scripts/init-template.ps1. Skipping." ;;
-            *) eval "$cmd" ;;
-          esac
+        run: dotnet test ./SignalRouter.slnx --no-build
