@@ -31,8 +31,8 @@ After running, review the diff and fill in the remaining `TODO` markers in
 
 ## 2. Wire up your project
 
-- [ ] Add your application/library source under `src/` and tests under `tests/`
-- [ ] Set real `build`/`test` commands (they were seeded from your answers)
+- [x] Add your application/library source under `src/` and tests under `tests/`
+- [x] Set real `build`/`test` commands (they were seeded from your answers)
 - [ ] Enable the matching ecosystem in `.github/dependabot.yml`
 - [ ] Adjust `.github/labeler.yml` paths to your layout
 - [ ] Add project languages to the matrix in `.github/workflows/codeql.yml` (template ships `actions` only)

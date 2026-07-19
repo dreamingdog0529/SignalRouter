@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>SignalRouter.Protocol</AssemblyName>
+    <RootNamespace>SignalRouter.Protocol</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/*.asmdef;**/*.meta</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../SignalRouter/Runtime/Protocol/**/*.cs" LinkBase="Runtime/Protocol" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="SignalRouter.Core.csproj" />
+  </ItemGroup>
+</Project>

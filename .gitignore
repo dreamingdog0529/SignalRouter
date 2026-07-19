@@ -1,6 +1,7 @@
 ## Build output
 bin/
 obj/
+.artifacts/
 dist/
 build/
 out/
@@ -23,6 +24,7 @@ Desktop.ini
 ## IDE / editors
 .vs/
 .idea/
+.vscode/
 *.swp
 *~
 *.code-workspace
@@ -56,3 +58,17 @@ Desktop.ini
 # .NET
 # *.nupkg
 # project.lock.json
+
+## Unity generated state
+src/SignalRouter.Unity/[Ll]ibrary/
+src/SignalRouter.Unity/[Tt]emp/
+src/SignalRouter.Unity/[Ll]ogs/
+src/SignalRouter.Unity/[Uu]ser[Ss]ettings/
+src/SignalRouter.Unity/[Oo]bj/
+src/SignalRouter.Unity/.vs/
+src/SignalRouter.Unity/.vscode/
+src/SignalRouter.Unity/*.csproj
+src/SignalRouter.Unity/*.sln
+src/SignalRouter.Unity/*.slnx
+src/SignalRouter.Unity/Assets/Packages/
+src/SignalRouter.Unity/Assets/Packages.meta

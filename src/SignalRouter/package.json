@@ -1,0 +1,11 @@
+{
+  "name": "com.dreamingdog0529.signalrouter",
+  "displayName": "SignalRouter",
+  "version": "0.1.0",
+  "unity": "6000.0",
+  "description": "Structured command routing for reproducible Unity UI interactions.",
+  "author": {
+    "name": "dreamingdog0529"
+  },
+  "license": "MIT"
+}
