@@ -53,7 +53,7 @@ with `LangVersion` set to `9.0` and warnings treated as errors. This is the enfo
 boundary for the UPM package: Runtime code must not use `record struct`, `required`, or
 PolySharp-generated types. Commands use ordinary `readonly struct` types with explicit
 value equality. Immutable result, schema, and descriptor classes use defensive copies and
-explicit structural equality.
+structural equality.
 
 The Unity development project separately sets the Standalone Player additional compiler
 argument to `-langversion:preview`. [Unity 6 officially supports C# 9][unity-csharp]; this
