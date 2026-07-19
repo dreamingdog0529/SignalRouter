@@ -1,0 +1,15 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/dreamingdog0529/SignalRouter/discussions
+    about: Ask questions and discuss with the community
+  - name: Documentation
+    url: https://github.com/dreamingdog0529/SignalRouter/blob/main/docs/development.md
+    about: Check our documentation for build, install, and development guides
+  - name: Support
+    url: https://github.com/dreamingdog0529/SignalRouter/blob/main/.github/SUPPORT.md
+    about: How to get help
+  - name: Security Vulnerability
+    url: https://github.com/dreamingdog0529/SignalRouter/security/advisories/new
+    about: Report security vulnerabilities privately

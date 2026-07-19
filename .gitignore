@@ -1,0 +1,58 @@
+## Build output
+bin/
+obj/
+dist/
+build/
+out/
+target/
+[Dd]ebug/
+[Rr]elease/
+
+## Logs / dumps
+*.log
+[Ll]og/
+[Ll]ogs/
+*.dmp
+crash_*.txt
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+## IDE / editors
+.vs/
+.idea/
+*.swp
+*~
+*.code-workspace
+*.user
+
+## Local tool caches
+.lefthook/
+.task/
+
+## Environment / secrets
+.env
+.env.local
+
+## Language-specific (uncomment what your project uses)
+# Node.js
+# node_modules/
+# npm-debug.log*
+#
+# Python
+# __pycache__/
+# *.py[cod]
+# .venv/
+# venv/
+#
+# Go
+# vendor/
+#
+# Rust
+# Cargo.lock   # keep for binaries, ignore for libraries
+#
+# .NET
+# *.nupkg
+# project.lock.json

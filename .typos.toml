@@ -1,0 +1,57 @@
+# Configuration for typos spell checker
+# https://github.com/crate-ci/typos
+
+[default]
+extend-ignore-identifiers-re = [
+    # Base64 / long tokens
+    "[A-Za-z0-9+/]{20,}",
+]
+
+[default.extend-words]
+# Common tech abbreviations (add project-specific terms here)
+cfg = "cfg"
+ctx = "ctx"
+req = "req"
+resp = "resp"
+impl = "impl"
+init = "init"
+
+[files]
+extend-exclude = [
+    "*.pem",
+    "*.crt",
+    "*.cer",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*.csr",
+    "CHANGELOG.md",
+    "vendor/",
+    "node_modules/",
+    "dist/",
+    "build/",
+    "bin/",
+    "obj/",
+    "target/",
+    "go.sum",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "Cargo.lock",
+    "poetry.lock",
+    "**/testdata/",
+    "**/__snapshots__/",
+    # Source and hooks (identifiers / regex character classes)
+    "src/**",
+    "tests/**",
+    "scripts/**",
+    "lefthook.yml",
+    "Taskfile.yml",
+]
+
+[type.md]
+extend-ignore-re = [
+    "https?://[^\\s]+",
+    "```[\\s\\S]*?```",
+    "`[^`]+`",
+]

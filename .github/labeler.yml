@@ -1,0 +1,62 @@
+# Configuration for actions/labeler
+# Maps file patterns to labels
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - "docs/**/*"
+
+component/docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - "docs/**/*"
+
+component/ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**/*"
+          - "Taskfile.yml"
+          - "lefthook.yml"
+          - "scripts/**/*"
+          - ".githooks/**/*"
+
+component/config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.yml"
+          - "*.yaml"
+          - "*.json"
+          - "*.toml"
+          - "release-please-config.json"
+          - ".release-please-manifest.json"
+          - "version.txt"
+          - ".typos.toml"
+
+component/tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**/*"
+          - "test/**/*"
+
+component/src:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/**/*"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/package.json"
+          - "**/package-lock.json"
+          - "**/yarn.lock"
+          - "**/pnpm-lock.yaml"
+          - "**/go.mod"
+          - "**/go.sum"
+          - "**/Cargo.toml"
+          - "**/Cargo.lock"
+          - "**/requirements*.txt"
+          - "**/pyproject.toml"
+          - "**/poetry.lock"
+          - "**/*.csproj"

@@ -1,0 +1,36 @@
+# Auto-detect text files; normalize line endings on commit.
+* text=auto
+
+# Common text files
+*.md     text diff=markdown
+*.txt    text
+*.json   text
+*.yml    text
+*.yaml   text
+*.toml   text
+*.xml    text
+*.config text
+*.svg    text
+
+# Scripts: keep platform-appropriate line endings
+*.ps1    text eol=crlf
+*.cmd    text eol=crlf
+*.bat    text eol=crlf
+*.sh     text eol=lf
+# Git hooks (no extension); must stay LF for bash on Windows
+.githooks/** text eol=lf
+
+*.gitignore text
+*.gitattributes text
+
+# Binary assets
+*.ico    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.bmp    binary
+*.pdf    binary
+*.zip    binary
+*.exe    binary
+*.dll    binary

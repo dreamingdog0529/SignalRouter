@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # GitHub Actions used by the workflows in this repository.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Lockfile for the apply-settings helper (.github/scripts/apply-settings.js).
+  - package-ecosystem: npm
+    directory: /.github/scripts
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # TODO: Enable the ecosystem(s) your project uses. Examples:
+  #
+  # - package-ecosystem: npm          # Node.js (package.json)
+  #   directory: /
+  #   schedule:
+  #     interval: weekly
+  #   open-pull-requests-limit: 10
+  #   commit-message:
+  #     prefix: "chore"
+  #     include: "scope"
+  #
+  # - package-ecosystem: pip          # Python (requirements.txt / pyproject.toml)
+  # - package-ecosystem: gomod        # Go (go.mod)
+  # - package-ecosystem: cargo        # Rust (Cargo.toml)
+  # - package-ecosystem: nuget        # .NET (*.csproj)
+  # - package-ecosystem: gradle       # Java / Kotlin
+  # - package-ecosystem: bundler      # Ruby
+  # - package-ecosystem: composer     # PHP

@@ -1,0 +1,32 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [main, master]
+
+# Requires Dependency graph (Settings → Code security).
+# Public repos: enable Dependency graph if this job 404s with GITHUB_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Dependency Review
+        # Upstream ships the major line as a moving branch (refs/heads/v5), not a
+        # tag; pin the immutable v5.0.0 release commit. Dependabot bumps this.
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: always
+          # License policy is project-specific and opt-in. The deny-licenses
+          # option is deprecated upstream (actions/dependency-review-action#997);
+          # prefer an allow-list, e.g.:
+          #   allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC

@@ -1,0 +1,8 @@
+# Configuration for the dco2 GitHub App
+# https://github.com/apps/dco2
+#
+# Install the app on this repository, then adjust options as needed.
+
+# Allow commits that are GPG-signed to skip Signed-off-by (optional).
+# require:
+#   members: true

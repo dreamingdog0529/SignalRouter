@@ -1,0 +1,49 @@
+name: Apply Repository Settings
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/settings.yml"]
+  schedule:
+    - cron: "0 9 * * 1" # Weekly Monday 9am UTC - drift check
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: |
+          verify - Apply settings then verify they were applied correctly (default)
+          apply  - Apply settings.yml to GitHub without verification
+          check  - Detect drift: compare settings.yml vs GitHub, fail if different (default on schedule)
+        type: choice
+        options: [verify, apply, check]
+        default: verify
+
+# GITHUB_TOKEN can manage labels but not all repository settings.
+# For full access: create a classic PAT with 'repo' scope, add as SETTINGS_TOKEN secret.
+
+permissions:
+  contents: read
+
+jobs:
+  settings:
+    runs-on: ubuntu-latest
+    if: github.repository_owner == github.event.repository.owner.login
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      # Install from the lockfile so the package tree is pinned by integrity hash
+      # (OpenSSF Scorecard Pinned-Dependencies).
+      - name: Install js-yaml
+        working-directory: .github/scripts
+        run: npm ci --ignore-scripts
+
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          INPUT_MODE: ${{ inputs.mode || 'apply' }}
+        with:
+          github-token: ${{ secrets.SETTINGS_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const script = require('./.github/scripts/apply-settings.js')
+            await script({ github, context, core })

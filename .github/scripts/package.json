@@ -1,0 +1,8 @@
+{
+  "name": "apply-settings",
+  "private": true,
+  "description": "Dependencies for .github/scripts/apply-settings.js",
+  "dependencies": {
+    "js-yaml": "4.2.0"
+  }
+}
