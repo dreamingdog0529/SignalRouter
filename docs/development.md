@@ -1,8 +1,9 @@
 # Developing SignalRouter
 
-> **Current status:** Version 0.1.0 provides the implementation and verification
-> foundation. Production dispatcher, command, result, registry, Unity UI, MCP host, and
-> adapter behavior remain unimplemented.
+> **Current status:** The command model, immutable command catalog and codecs, structured
+> result model, and semantic registry are implemented and verified. FIFO dispatch, stage
+> execution and state probes, record/replay, Unity UI, WebSocket, and MCP behavior remain
+> unimplemented.
 
 ## Prerequisites
 
@@ -29,7 +30,7 @@ task check
 
 `task build` performs these checks:
 
-1. Restore the pinned NuGetForUnity CLI tool and PolySharp package.
+1. Restore the pinned NuGetForUnity CLI tool and Unity NuGet dependencies.
 2. Build `SignalRouter.slnx`.
 3. Compile the Unity development project in batch mode.
 4. Confirm Unity emitted `SignalRouter.Core.dll` and `SignalRouter.Protocol.dll`.
@@ -50,8 +51,9 @@ The distributable Runtime sources live under:
 The SDK-style Core and Protocol projects compile those same files as `netstandard2.1`
 with `LangVersion` set to `9.0` and warnings treated as errors. This is the enforcement
 boundary for the UPM package: Runtime code must not use `record struct`, `required`, or
-PolySharp-generated types. Future immutable commands use ordinary `readonly struct`
-types with explicit value equality.
+PolySharp-generated types. Commands use ordinary `readonly struct` types with explicit
+value equality. Immutable result, schema, and descriptor classes use defensive copies and
+structural equality.
 
 The Unity development project separately sets the Standalone Player additional compiler
 argument to `-langversion:preview`. [Unity 6 officially supports C# 9][unity-csharp]; this
@@ -67,6 +69,13 @@ preserves the required-member and init-only polyfills without masking compilatio
 failures. Unity documents project-wide analyzer configuration through
 [`Default.globalconfig`][unity-globalconfig].
 
+NuGetForUnity also restores VitalRouter and System.Text.Json into the ignored package
+directory. Runtime asmdefs keep `overrideReferences: false`; Unity automatically
+references precompiled plug-ins in that mode. The EditMode test asmdef additionally names
+`VitalRouter.dll` because its test doubles directly implement public generic contracts
+whose constraints include `VitalRouter.ICommand`. See Unity's
+[assembly reference rules][unity-assembly-references].
+
 `CompilerSettings.props` sets `LangVersion` to `11.0` in Unity-generated IDE projects.
 CsprojModifier imports it into every generated `.csproj`; this affects IDE analysis only.
 Unity's actual compilation language is controlled by Player Settings.
@@ -79,7 +88,8 @@ Unity's actual compilation language is controlled by Player Settings.
 | [NUnit][nunit] | 4.6.1 | Pure C# tests |
 | [NUnit3TestAdapter][nunit-adapter] | 6.2.0 | Test discovery |
 | [Microsoft.NET.Test.Sdk][test-sdk] | 18.8.1 | `dotnet test` host |
-| [VitalRouter][vitalrouter] | 2.8.0 | Centrally pinned for the next runtime phase |
+| [System.Text.Json][system-text-json] | 10.0.10 | Explicit command schemas and codecs |
+| [VitalRouter][vitalrouter] | 2.8.0 | Public command marker contract |
 | [NuGetForUnity / CLI][nuget-for-unity] | 4.5.0 | Restore NuGet assets before Unity compilation |
 | [PolySharp][polysharp] | 1.16.0 | Unity development-project language polyfills |
 | [CsprojModifier][csproj-modifier] | 1.3.0 | IDE project import customization |
@@ -117,6 +127,8 @@ manifest files.
 [nunit]: https://www.nuget.org/packages/NUnit/4.6.1
 [polysharp]: https://www.nuget.org/packages/PolySharp/1.16.0
 [test-sdk]: https://www.nuget.org/packages/Microsoft.NET.Test.Sdk/18.8.1
+[system-text-json]: https://www.nuget.org/packages/System.Text.Json/10.0.10
+[unity-assembly-references]: https://docs.unity3d.com/6000.0/Documentation/Manual/assembly-definitions-referencing.html
 [unity-csharp]: https://docs.unity3d.com/6000.0/Documentation/Manual/csharp-compiler.html
 [unity-globalconfig]: https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Compilation.ScriptCompilerOptions.AnalyzerConfigPath.html
 [vitalrouter]: https://www.nuget.org/packages/VitalRouter/2.8.0

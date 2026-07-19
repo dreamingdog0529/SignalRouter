@@ -72,9 +72,10 @@ Unity ランタイム（コアは Pure C#）です。ピクセルやスクリー
 駆動する）です。UI をデータとして観測・操作したい Unity アプリ／ゲーム開発チームを対象と
 しています。
 
-> **ステータス:** version 0.1.0 では UPM package、共有ソースを使う .NET project、
-> 自動 build/test 基盤まで構築済みです。dispatcher、command、result、registry、Unity UI、
-> MCP のプロダクション機能は未実装です。対応範囲と受け入れ基準は
+> **ステータス:** UPM／共有ソースの build/test 基盤に加え、command model、
+> immutable command catalog と codec、structured result model、semantic registry を
+> 実装済みです。FIFO dispatch、stage 実行と state probe、record/replay、Unity UI、
+> WebSocket、MCP のプロダクション機能は未実装です。対応範囲と受け入れ基準は
 > [アーキテクチャ資料](docs/design.md) に定義しています。
 
 ### 使用技術
@@ -90,10 +91,10 @@ Unity ランタイム（コアは Pure C#）です。ピクセルやスクリー
 
 ## 機能
 
-以下は version 0.1.0 時点では未実装の計画機能です。
+core model は実装済みで、runtime 実行と transport 機能は計画中です。
 
-- **セマンティック UI ツリー** — 各インタラクタブル要素（`id` / `role` / `label` / 値 / 状態）を、いま何ができるかのスクショ不要な source of truth として観測。
-- **構造化コマンド** — 操作を C# 9 互換のシリアライズ可能な immutable value type（`click` / `set_value` …）としてモデル化。エージェント・テスト・リプレイ・人間の入力を単一経路に統一。
+- **セマンティック UI registry（core 実装済み）** — 登録済み要素（`id` / `role` / `label` / 値 / 状態）と catalog 検証済み操作を決定的な snapshot として観測。
+- **構造化コマンド（core 実装済み）** — 操作を C# 9 互換の immutable value（`click` / `set_value`）と厳密な versioned JSON codec でモデル化。
 - **記録 & リプレイ** — 全コマンドが必ず `IInteractionDispatcher` を通るため、terminal result 確認（キュー受理≠完了）付きで決定論的に再生。
 - **決定論的な例外モデル** — Sequential 実行で `Rejected`（検証落ち・副作用ゼロ）と `Faulted`（stage *k* で失敗・*k−1* まで適用）を分離し、中断点を正確に再現。
 - **MCP エージェント操作** — `get_ui_tree` / `wait_for` と実行系ツールでピクセルなしに UI を駆動。例外はシームで catch し、MCP 境界に漏らさない。
@@ -131,10 +132,11 @@ cd SignalRouter
 
 ## 使い方
 
-version 0.1.0 は dispatcher、command、result、registry の公開 API を意図的に実装して
-いません。UPM package は現時点で `SignalRouter.Core` と `SignalRouter.Protocol` の assembly
-境界のみを提供します。計画中の API と動作は
-[アーキテクチャ資料](docs/design.md) を参照してください。
+`SignalRouter.Core` は `ClickCommand`、`SetValueCommand`、immutable
+`InteractionCommandCatalog`、structured `InteractionResult`、
+lifetime-scoped `InteractionRegistry` を公開します。`IInteractionDispatcher` と typed
+pipeline contract は将来の実行境界を定義しますが、dispatcher と stage executor は未実装です。
+現在の保証と後続 runtime の範囲は [アーキテクチャ資料](docs/design.md) を参照してください。
 
 <p align="right">(<a href="#readme-top">トップへ戻る</a>)</p>
 

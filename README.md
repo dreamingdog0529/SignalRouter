@@ -72,10 +72,11 @@ AI agents over MCP** (an agent enumerates the operations available in the curren
 and drives them directly). It is aimed at teams building Unity apps and games who want
 their UI to be observable and controllable as data.
 
-> **Status:** Version 0.1.0 provides the UPM package, shared-source .NET projects, and
-> automated build/test foundation. Dispatcher, command, result, registry, Unity UI, and
-> MCP production features are not implemented yet. Their supported scope and acceptance
-> criteria are defined in the [architecture document](docs/design.md).
+> **Status:** The command model, immutable command catalog and codecs, structured result
+> model, and semantic registry are implemented on top of the UPM/shared-source build and
+> test foundation. FIFO dispatch, stage execution and state probes, record/replay, Unity
+> UI, WebSocket, and MCP production features remain unimplemented. Their supported scope
+> and acceptance criteria are defined in the [architecture document](docs/design.md).
 
 ### Built With
 
@@ -90,11 +91,11 @@ their UI to be observable and controllable as data.
 
 ## Features
 
-The following production capabilities are planned and are not implemented in version
-0.1.0:
+The core model is implemented; runtime execution and transport capabilities remain
+planned:
 
-- **Semantic UI tree** — observe every interactive element (`id` / `role` / `label` / value / state) as a screenshot-free source of truth for what can be done right now.
-- **Structured commands** — interactions modeled as serializable C# 9-compatible immutable value types (`click`, `set_value`, …) so agent, test, replay, and human input share one command path.
+- **Semantic UI registry (core implemented)** — observe registered elements (`id` / `role` / `label` / value / state) and their catalog-validated operations through deterministic snapshots.
+- **Structured commands (core implemented)** — interactions modeled as C# 9-compatible immutable values (`click`, `set_value`) with strict, versioned JSON codecs.
 - **Record & replay** — every command passes through `IInteractionDispatcher`, so sessions replay deterministically with terminal-result confirmation (queue-accepted ≠ done).
 - **Deterministic fault model** — sequential execution separates `Rejected` (validation, zero side effects) from `Faulted` (failed at stage *k*, with *k−1* applied) and reproduces the exact interruption point.
 - **MCP agent control** — `get_ui_tree`, `wait_for`, and execution tools let agents drive the UI without pixels; exceptions are caught at the seam and never leak across the MCP boundary.
@@ -132,10 +133,12 @@ cd SignalRouter
 
 ## Usage
 
-Version 0.1.0 intentionally exposes no dispatcher, command, result, or registry API. The
-UPM package currently establishes the `SignalRouter.Core` and `SignalRouter.Protocol`
-assembly boundaries only. See the [architecture document](docs/design.md) for the planned
-API and behavior.
+`SignalRouter.Core` exposes `ClickCommand`, `SetValueCommand`, the immutable
+`InteractionCommandCatalog`, structured `InteractionResult` values, and the
+lifetime-scoped `InteractionRegistry`. `IInteractionDispatcher` and typed pipeline
+contracts define the future execution boundary, but no dispatcher or stage executor is
+implemented yet. See the [architecture document](docs/design.md) for the current
+guarantees and deferred runtime behavior.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
