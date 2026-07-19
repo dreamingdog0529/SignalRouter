@@ -215,14 +215,17 @@ the corresponding agent, test, or replay command.
 
 ### 6.1 Command catalog
 
-Every command type is registered before use:
+Every command type is registered before use. Registration is mutable only while building;
+the resulting catalog is immutable:
 
 ```csharp
-catalog.Register<ClickCommand>(
-    wireName: "click",
-    version: 1,
-    schema: ClickCommandSchema.Instance,
-    agentVisible: true);
+var catalog = new InteractionCommandCatalogBuilder()
+    .Register<ClickCommand>(
+        wireName: "click",
+        version: 1,
+        schema: ClickCommandSchema.Instance,
+        agentVisible: true)
+    .Build();
 ```
 
 The persistent command identity is the pair `wireName + version`. Assembly-qualified
@@ -230,6 +233,17 @@ The persistent command identity is the pair `wireName + version`. Assembly-quali
 
 A version retains its original meaning permanently. A breaking field or semantic change
 requires a new command schema version and an explicit migration strategy.
+
+`Build` rejects an empty wire name, a version below 1, an invalid argument schema,
+duplicate `(wireName, version)` identities, and duplicate CLR command types. The built-in
+`click@1` and `set_value@1` codecs use `JsonElement` and `Utf8JsonWriter` directly.
+They reject non-object arguments and unknown, duplicate, missing, or incorrectly typed
+properties as `InvalidArguments`. Codecs own output property order and do not use the
+reflection serializer.
+
+Each catalog entry retains a concrete decoded struct and a closed generic
+`DispatchAsync<TCommand>` delegate. Dynamic transport requests therefore enter the same
+dispatcher API as direct C# calls without reflection-based dispatch.
 
 ## 7. Execution API
 
@@ -442,22 +456,32 @@ sequence only after the current interaction reaches a terminal state.
 
 ## 12. Structured results
 
+`InteractionResult` is a C# 9-compatible immutable sealed class. Its constructor accepts
+the following values and validates their cross-field invariants:
+
 ```csharp
-public sealed record InteractionResult(
-    long Sequence,
-    string RequestId,
-    string TargetId,
-    string CommandName,
-    int CommandVersion,
-    InteractionOrigin Origin,
-    InteractionStatus Status,
-    RejectionInfo? Rejection,
-    FaultInfo? Fault,
-    StageProgress Stages,
-    StateObservation Before,
-    StateObservation After,
-    StateDiff Diff);
+public sealed class InteractionResult : IEquatable<InteractionResult>
+{
+    public long Sequence { get; }
+    public string RequestId { get; }
+    public string TargetId { get; }
+    public string CommandName { get; }
+    public int CommandVersion { get; }
+    public InteractionOrigin Origin { get; }
+    public InteractionStatus Status { get; }
+    public RejectionInfo? Rejection { get; }
+    public FaultInfo? Fault { get; }
+    public StageProgress Stages { get; }
+    public StateObservation Before { get; }
+    public StateObservation After { get; }
+    public StateDiff Diff { get; }
+}
 ```
+
+All nested collections are defensively copied and use structural value equality.
+Rejected results contain no stages and identical before/after probe hashes. Faulted
+results end with the stage identified by `FaultInfo`; cancellation either occurs before
+the first stage or ends with a cancelled stage.
 
 ### 12.1 Standard rejection codes
 
@@ -543,16 +567,21 @@ MUST NOT mutate target or application state.
 
 ### 13.3 Descriptors
 
+`InteractionDescriptor` is a C# 9-compatible immutable sealed class with the following
+properties and explicit structural equality:
+
 ```csharp
-public sealed record InteractionDescriptor(
-    string Id,
-    string? ParentId,
-    string Role,
-    string Label,
-    InteractionValue? Value,
-    bool Visible,
-    bool Enabled,
-    IReadOnlyList<AvailableInteraction> AvailableInteractions);
+public sealed class InteractionDescriptor : IEquatable<InteractionDescriptor>
+{
+    public string Id { get; }
+    public string? ParentId { get; }
+    public string Role { get; }
+    public string Label { get; }
+    public InteractionValue? Value { get; }
+    public bool Visible { get; }
+    public bool Enabled { get; }
+    public IReadOnlyList<AvailableInteraction> AvailableInteractions { get; }
+}
 ```
 
 Initial roles:
@@ -571,6 +600,18 @@ The registry maintains:
 
 Clients MUST treat a changed session epoch as a new runtime session, even if revision
 numbers or target IDs overlap.
+
+IDs are not normalized and use ordinal comparison. Registration validates the descriptor
+ID, catalog identity, compatible argument schema, and typed pipeline before changing
+state. A second registration of the same ID throws immediately and leaves the existing
+target and revision unchanged. Successful registration, first disposal of its lifetime
+handle, and explicit descriptor-change notification each increment the revision once.
+Snapshots are sorted by ordinal target ID.
+
+Target exposure is explicit at registration. Agent snapshots omit non-agent-visible
+targets and operations whose catalog entry is not agent-visible. A target may mark a
+field as more sensitive than the catalog schema, but cannot remove catalog sensitivity
+or change argument name, type, or requiredness.
 
 ## 14. State observation
 
@@ -886,13 +927,16 @@ The MVP is complete only when all of the following are demonstrated in automated
 | D8 | Persistent target identity requires an explicit stable ID |
 | D9 | MCP runs externally; Unity connects as a loopback WebSocket client |
 | D10 | Replay verifies terminal outcomes and state hashes |
+| D11 | Command schemas and codecs use explicit System.Text.Json DOM/writer APIs; state canonicalization remains separate |
+| D12 | Command catalogs are immutable after build; wire identity and CLR command type are each unique |
+| D13 | Duplicate target registration fails immediately under ordinal ID comparison and preserves the existing registration |
 
 ## 25. Remaining implementation-level decisions
 
 These items do not change the accepted architecture, but they must be resolved and tested
 before their respective components are considered stable:
 
-- canonical JSON and serializer implementation;
+- canonical state JSON normalization and hashing;
 - the MCP host target .NET version;
 - text-input dispatch timing;
 - default artifact-root location;
