@@ -14,16 +14,27 @@ These provide:
 - Priority and progress tracking
 - Links to related issues and PRs
 
-## Themes (near term)
+## MVP Workstreams
 
-Ideas under consideration (not commitments):
+The accepted MVP architecture and completion criteria are defined in
+[docs/design.md](docs/design.md). Near-term work is organized into these workstreams:
 
-- **Prior-art evaluation** — assess [Gua](https://github.com/link1345/gua) (semantic UI tree, record/replay, MCP bridge) before building, and decide between contributing, building a complementary bus-integration layer, or not building.
-- **Semantic UI registry** — the source of truth that tracks every interactive element and answers "what can be done here now?" (`get_ui_tree`).
-- **Core request/response seam** — validation, total-order sequencing, recording, and fail-fast exception handling built on MessagePipe `RequestAll`.
-- **Deterministic record & replay** — sequential execution with `Rejected`/`Faulted` separation and exact interruption-point reproduction; `StageTracker` via filters.
-- **MCP bridge & tool surface** — external MCP server bridged to the Unity runtime over WebSocket, with domain-reload resilience and main-thread marshalling.
-- **Security posture** — treat external drive as an RCE surface: localhost-only, token auth, disabled by default in release builds.
+- **Core interaction model** — data-only `IInteractionCommand` values, command catalog,
+  structured results, stable target IDs, and the semantic UI registry.
+- **Deterministic execution** — one global FIFO, VitalRouter command routing, explicit
+  stage ordering, fail-fast execution, and partial-progress reporting.
+- **State-aware record and replay** — append-only recordings, state probes, secret
+  redaction, strict sequential replay, and structured divergence reports.
+- **uGUI integration** — Button and text-input adapters that route human input through
+  `IInteractionDispatcher`, plus EditMode and PlayMode validation.
+- **MCP runtime bridge** — an external MCP host connected to Unity over an authenticated
+  loopback WebSocket, with domain-reload recovery and main-thread handoff.
+- **Security and operability** — release-build opt-in, bounded payloads and queues,
+  artifact-root confinement, diagnostics, and compatibility checks.
+
+The initial compatibility target is Unity 6 on Windows Editor with Mono and uGUI.
+Additional controls, UI Toolkit, Player builds, IL2CPP, and other platforms follow only
+after the MVP acceptance criteria are met.
 
 ## How to Contribute
 

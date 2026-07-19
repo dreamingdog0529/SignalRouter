@@ -8,8 +8,7 @@ tasks:
     desc: Run all pre-commit checks
     cmds:
       - task: spellcheck
-      - task: commit-lint
-      - task: dco-check
+      - task: commit-check
       - task: build
       - task: test
 
@@ -18,54 +17,32 @@ tasks:
     cmds:
       - typos --config .typos.toml
 
-  commit-lint:
-    desc: Check commits follow Conventional Commits format
+  commit-check:
+    desc: Check Conventional Commits format and DCO sign-off
     cmds:
-      - |
-        pattern="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?(!)?: .+"
-        for commit in $(git log --format=%H origin/main..HEAD 2>/dev/null || git log --format=%H -5); do
-          msg=$(git log -1 --format=%s $commit)
-          if echo "$msg" | grep -Eq '^Merge '; then
-            continue
-          fi
-          if ! echo "$msg" | grep -Eq "$pattern"; then
-            echo "ERROR: Commit $commit does not follow Conventional Commits"
-            echo "  Message: $msg"
-            echo "  Format: <type>[scope]: <description>"
-            exit 1
-          fi
-        done
-        echo "All commits follow Conventional Commits format"
-
-  dco-check:
-    desc: Check commits have DCO sign-off
-    cmds:
-      - |
-        for commit in $(git log --format=%H origin/main..HEAD 2>/dev/null || git log --format=%H -5); do
-          if ! git log -1 --format=%B $commit | grep -q "^Signed-off-by:"; then
-            echo "ERROR: Commit $commit missing DCO sign-off"
-            echo "Fix with: git commit --amend -s"
-            exit 1
-          fi
-        done
-        echo "All commits have DCO sign-off"
+      - pwsh -NoProfile -File ./scripts/check-commits.ps1
 
   build:
-    desc: Build the project
+    desc: Build .NET projects and compile the Unity project
     cmds:
-      - "dotnet build"
+      - dotnet tool restore
+      - dotnet nugetforunity restore ./src/SignalRouter.Unity
+      - dotnet build ./SignalRouter.slnx
+      - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode Compile
 
   test:
-    desc: Run tests
+    desc: Run .NET and Unity EditMode tests
     cmds:
-      - "dotnet test"
+      - dotnet tool restore
+      - dotnet nugetforunity restore ./src/SignalRouter.Unity
+      - dotnet test ./SignalRouter.slnx
+      - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode Test
 
   setup:
     desc: Install tools and git hooks
     deps: [install-tools]
     cmds:
-      - lefthook install
-      - echo "Hooks installed. Prefer: git commit -s -m \"type: description\""
+      - pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-git-hooks.ps1
 
   install-tools:
     desc: Install required CLI tools (best-effort)

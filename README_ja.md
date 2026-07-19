@@ -18,7 +18,7 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/dreamingdog0529/SignalRouter/badge)](https://securityscorecards.dev/viewer/?uri=github.com/dreamingdog0529/SignalRouter)
 
 <p>
-  <a href="docs/development.md"><strong>ドキュメントを見る »</strong></a>
+  <a href="docs/design.md"><strong>アーキテクチャを読む »</strong></a>
   <br /><br />
   <a href="https://github.com/dreamingdog0529/SignalRouter/issues/new?template=bug_report.yml">バグ報告</a>
   ·
@@ -72,15 +72,16 @@ Unity ランタイム（コアは Pure C#）です。ピクセルやスクリー
 駆動する）です。UI をデータとして観測・操作したい Unity アプリ／ゲーム開発チームを対象と
 しています。
 
-> **ステータス:** 設計フェーズ — MVP は未着手です。以下のアーキテクチャとインター
-> フェースはドラフトです。意思決定の経緯と未決事項は [設計資料](docs/design.md) を参照してください。
+> **ステータス:** version 0.1.0 では UPM package、共有ソースを使う .NET project、
+> 自動 build/test 基盤まで構築済みです。dispatcher、command、result、registry、Unity UI、
+> MCP のプロダクション機能は未実装です。対応範囲と受け入れ基準は
+> [アーキテクチャ資料](docs/design.md) に定義しています。
 
 ### 使用技術
 
-- **[Unity](https://unity.com/)**（uGUI / UI Toolkit） — 観測・駆動対象の UI ランタイム
+- **[Unity 6](https://unity.com/)**（MVP は uGUI） — 観測・駆動対象の UI ランタイム
 - **Pure C#**（.NET Standard 2.1） — コアは Unity に非依存
-- **[MessagePipe](https://github.com/Cysharp/MessagePipe)** — コアの req/res シームでの `RequestAll` fan-out
-- **[VitalRouter](https://github.com/hadashiA/VitalRouter)** — 要素内の pub/sub 用コマンドバスの選択肢
+- **[VitalRouter](https://github.com/hadashiA/VitalRouter)** — 単一のプロセス内コマンドバス
 - **[Model Context Protocol](https://modelcontextprotocol.io/)**（MCP） — エージェント向けツール面。WebSocket でランタイムにブリッジ
 
 <p align="right">(<a href="#readme-top">トップへ戻る</a>)</p>
@@ -89,9 +90,11 @@ Unity ランタイム（コアは Pure C#）です。ピクセルやスクリー
 
 ## 機能
 
+以下は version 0.1.0 時点では未実装の計画機能です。
+
 - **セマンティック UI ツリー** — 各インタラクタブル要素（`id` / `role` / `label` / 値 / 状態）を、いま何ができるかのスクショ不要な source of truth として観測。
-- **構造化コマンド** — UI 操作をシリアライズ可能な `record struct` コマンド（`click` / `set_text` …）としてモデル化。エージェント・テスト・実プレイの入力を単一のコマンド型で統一。
-- **記録 & リプレイ** — 全コマンドが必ずコアの単一シームを通り記録されるため、host completion 確認（キュー受理≠完了）付きで決定論的に再生。
+- **構造化コマンド** — 操作を C# 9 互換のシリアライズ可能な immutable value type（`click` / `set_value` …）としてモデル化。エージェント・テスト・リプレイ・人間の入力を単一経路に統一。
+- **記録 & リプレイ** — 全コマンドが必ず `IInteractionDispatcher` を通るため、terminal result 確認（キュー受理≠完了）付きで決定論的に再生。
 - **決定論的な例外モデル** — Sequential 実行で `Rejected`（検証落ち・副作用ゼロ）と `Faulted`（stage *k* で失敗・*k−1* まで適用）を分離し、中断点を正確に再現。
 - **MCP エージェント操作** — `get_ui_tree` / `wait_for` と実行系ツールでピクセルなしに UI を駆動。例外はシームで catch し、MCP 境界に漏らさない。
 
@@ -101,17 +104,17 @@ Unity ランタイム（コアは Pure C#）です。ピクセルやスクリー
 
 ## はじめに
 
-本プロジェクトは設計フェーズのため、まだリリースパッケージはありません。アーキテク
-チャを追ったり試したりするにはリポジトリをクローンしてください。
+まだリリースパッケージはありません。version 0.1.0 の実装基盤をローカルで build するには
+リポジトリをクローンしてください。
 
 <a id="prerequisites"></a>
 
 ### 前提条件
 
-- Unity 2022 LTS 以降（uGUI および／または UI Toolkit）
-- Pure C# コア用の .NET Standard 2.1 ツールチェーン
-- req/res シーム用の [MessagePipe](https://github.com/Cysharp/MessagePipe)
-- エージェントから UI を駆動する場合は MCP 対応クライアント
+- 標準 Unity Hub path にインストールした Unity 6000.5.4f1
+- .NET SDK 10.0.302
+- PowerShell 7 と [Task](https://taskfile.dev/)
+- `task check` 用の [typos](https://github.com/crate-ci/typos)
 
 <a id="installation"></a>
 
@@ -128,22 +131,10 @@ cd SignalRouter
 
 ## 使い方
 
-公開 API は設計中です。想定している形は、各インタラクタブル要素が実装する単一のコア
-契約で、検証・順序採番・記録・例外処理は req/res シームでコアが担います。
-
-```csharp
-// コアが UI 要素に要求する唯一の契約。
-public interface IInteractable {
-    ElementDescriptor Describe();                 // get_ui_tree 用
-    bool CanAccept(in UiCommand cmd);             // 検証（Publish 前）
-    UniTask<ExecuteResult> ExecuteAsync(          // pub → 全 sub 完了 await → res
-        UiCommand cmd, CancellationToken ct);
-}
-```
-
-MCP エージェントは `get_ui_tree` で可能な操作を確認し、コマンドを発行し、複数フレーム
-にまたがる settle 待機には `wait_for` を使います（スクショ不要）。具体的なシグネチャは
-MVP で確定します。
+version 0.1.0 は dispatcher、command、result、registry の公開 API を意図的に実装して
+いません。UPM package は現時点で `SignalRouter.Core` と `SignalRouter.Protocol` の assembly
+境界のみを提供します。計画中の API と動作は
+[アーキテクチャ資料](docs/design.md) を参照してください。
 
 <p align="right">(<a href="#readme-top">トップへ戻る</a>)</p>
 
@@ -151,12 +142,19 @@ MVP で確定します。
 
 ## 開発
 
+repository root から次の wrapper を実行します。
+
 ```sh
-dotnet build
-dotnet test
+task build
+task test
+task check
 ```
 
-詳細な開発・ビルド手順: **[docs/development.md](docs/development.md)**
+共有 Runtime source は C# 9・`netstandard2.1` として compile し、warning も build failure
+にします。Unity 開発 project では C# 11 language feature test のため
+`-langversion:preview` を有効にしますが、UPM package 利用者に preview 設定は要求しません。
+正確な toolchain と互換性境界は **[docs/development.md](docs/development.md)** を参照してください。
+
 コントリビュート手順: **[CONTRIBUTING.md](.github/CONTRIBUTING.md)**
 
 <p align="right">(<a href="#readme-top">トップへ戻る</a>)</p>
@@ -192,6 +190,8 @@ dotnet test
 
 | 文書 | 内容 |
 |------|------|
+| [design.md](docs/design.md) | アーキテクチャ・保証・互換性・MVP 受け入れ基準 |
+| [development.md](docs/development.md) | 現在の開発状況とツール |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | 開発・テスト・PR・DCO・CI/CD・リリース |
 | [SUPPORT.md](.github/SUPPORT.md) | サポートの受け方 |
 | [ROADMAP.md](ROADMAP.md) | 方向性と提案の仕方 |
@@ -217,8 +217,8 @@ MIT © 2026 dreamingdog0529
 
 ## 謝辞
 
-<!-- TODO: プロジェクトが依拠するリソース・ライブラリ・人物を列挙してください。下の例は置き換えてください。 -->
-
-- [リソース名](https://example.com) — 提供内容
+- [VitalRouter](https://github.com/hadashiA/VitalRouter) — プロセス内コマンドルーティング
+- [Model Context Protocol](https://modelcontextprotocol.io/) — エージェント向けプロトコル
+- [oss-project-template](https://github.com/container-registry/oss-project-template) — リポジトリ自動化とコミュニティ文書の基盤
 
 <p align="right">(<a href="#readme-top">トップへ戻る</a>)</p>

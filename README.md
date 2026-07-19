@@ -18,7 +18,7 @@ English | [日本語](./README_ja.md)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/dreamingdog0529/SignalRouter/badge)](https://securityscorecards.dev/viewer/?uri=github.com/dreamingdog0529/SignalRouter)
 
 <p>
-  <a href="docs/development.md"><strong>Explore the docs »</strong></a>
+  <a href="docs/design.md"><strong>Read the architecture »</strong></a>
   <br /><br />
   <a href="https://github.com/dreamingdog0529/SignalRouter/issues/new?template=bug_report.yml">Report Bug</a>
   ·
@@ -72,16 +72,16 @@ AI agents over MCP** (an agent enumerates the operations available in the curren
 and drives them directly). It is aimed at teams building Unity apps and games who want
 their UI to be observable and controllable as data.
 
-> **Status:** Design phase — the MVP has not started yet. The architecture and the
-> interfaces below are drafts. See the [design notes](docs/design.md) for the decision
-> trail and open questions.
+> **Status:** Version 0.1.0 provides the UPM package, shared-source .NET projects, and
+> automated build/test foundation. Dispatcher, command, result, registry, Unity UI, and
+> MCP production features are not implemented yet. Their supported scope and acceptance
+> criteria are defined in the [architecture document](docs/design.md).
 
 ### Built With
 
-- **[Unity](https://unity.com/)** (uGUI / UI Toolkit) — the UI runtime being observed and driven
+- **[Unity 6](https://unity.com/)** (uGUI for the MVP) — the UI runtime being observed and driven
 - **Pure C#** (.NET Standard 2.1) — the core has no Unity dependency
-- **[MessagePipe](https://github.com/Cysharp/MessagePipe)** — in-process `RequestAll` fan-out at the core request/response seam
-- **[VitalRouter](https://github.com/hadashiA/VitalRouter)** — command bus option for element-local pub/sub
+- **[VitalRouter](https://github.com/hadashiA/VitalRouter)** — the single in-process command bus
 - **[Model Context Protocol](https://modelcontextprotocol.io/)** (MCP) — agent-facing tool surface, bridged to the runtime over WebSocket
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -90,9 +90,12 @@ their UI to be observable and controllable as data.
 
 ## Features
 
+The following production capabilities are planned and are not implemented in version
+0.1.0:
+
 - **Semantic UI tree** — observe every interactive element (`id` / `role` / `label` / value / state) as a screenshot-free source of truth for what can be done right now.
-- **Structured commands** — UI operations modeled as serializable `record struct` commands (`click`, `set_text`, …) so agent, test, and real-play input share one command type.
-- **Record & replay** — every command passes a single core seam where it is recorded, so sessions replay deterministically with host-completion confirmation (queue-accepted ≠ done).
+- **Structured commands** — interactions modeled as serializable C# 9-compatible immutable value types (`click`, `set_value`, …) so agent, test, replay, and human input share one command path.
+- **Record & replay** — every command passes through `IInteractionDispatcher`, so sessions replay deterministically with terminal-result confirmation (queue-accepted ≠ done).
 - **Deterministic fault model** — sequential execution separates `Rejected` (validation, zero side effects) from `Faulted` (failed at stage *k*, with *k−1* applied) and reproduces the exact interruption point.
 - **MCP agent control** — `get_ui_tree`, `wait_for`, and execution tools let agents drive the UI without pixels; exceptions are caught at the seam and never leak across the MCP boundary.
 
@@ -102,17 +105,17 @@ their UI to be observable and controllable as data.
 
 ## Getting Started
 
-The project is in its design phase, so there is no released package yet. To follow along
-or experiment with the architecture, clone the repository.
+There is no released package yet. Clone the repository to build the 0.1.0 implementation
+foundation locally.
 
 <a id="prerequisites"></a>
 
 ### Prerequisites
 
-- Unity 2022 LTS or newer (uGUI and/or UI Toolkit)
-- .NET Standard 2.1 toolchain for the Pure C# core
-- [MessagePipe](https://github.com/Cysharp/MessagePipe) for the request/response seam
-- An MCP-capable client if you want to drive the UI from an agent
+- Unity 6000.5.4f1 installed in the standard Unity Hub location
+- .NET SDK 10.0.302
+- PowerShell 7 and [Task](https://taskfile.dev/)
+- [typos](https://github.com/crate-ci/typos) for `task check`
 
 <a id="installation"></a>
 
@@ -129,23 +132,10 @@ cd SignalRouter
 
 ## Usage
 
-The public API is still being designed. The intended shape is a single core contract that
-each interactive element implements, with the core owning validation, ordering, recording,
-and exception handling at the request/response seam:
-
-```csharp
-// The only contract the core requires of a UI element.
-public interface IInteractable {
-    ElementDescriptor Describe();                 // powers get_ui_tree
-    bool CanAccept(in UiCommand cmd);             // validation, before publish
-    UniTask<ExecuteResult> ExecuteAsync(          // publish -> await all subs -> respond
-        UiCommand cmd, CancellationToken ct);
-}
-```
-
-An MCP agent then calls `get_ui_tree` to see the available operations, issues commands, and
-uses `wait_for` to await multi-frame settling — no screenshots involved. Concrete
-signatures will land with the MVP.
+Version 0.1.0 intentionally exposes no dispatcher, command, result, or registry API. The
+UPM package currently establishes the `SignalRouter.Core` and `SignalRouter.Protocol`
+assembly boundaries only. See the [architecture document](docs/design.md) for the planned
+API and behavior.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -153,12 +143,20 @@ signatures will land with the MVP.
 
 ## Development
 
+Run the supported wrappers from the repository root:
+
 ```sh
-dotnet build
-dotnet test
+task build
+task test
+task check
 ```
 
-Full development and build instructions: **[docs/development.md](docs/development.md)**
+The shared Runtime sources compile as C# 9 and `netstandard2.1`; warnings fail the build.
+The Unity development project enables `-langversion:preview` for C# 11 language-feature
+tests, while consumers of the UPM package do not need preview enabled. See
+**[docs/development.md](docs/development.md)** for the exact toolchain and compatibility
+boundary.
+
 How to contribute: **[CONTRIBUTING.md](.github/CONTRIBUTING.md)**
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -209,6 +207,8 @@ Repository automation and community files are adapted from
 
 | Document | Purpose |
 |----------|---------|
+| [design.md](docs/design.md) | Architecture, guarantees, compatibility, and MVP acceptance criteria |
+| [development.md](docs/development.md) | Current development status and tooling |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | Develop, test, PRs, DCO, CI/CD, releases |
 | [SUPPORT.md](.github/SUPPORT.md) | How to get help |
 | [ROADMAP.md](ROADMAP.md) | Direction and how to propose work |
@@ -234,8 +234,8 @@ MIT © 2026 dreamingdog0529
 
 ## Acknowledgments
 
-<!-- TODO: List the resources, libraries, and people your project builds on. Replace the example below. -->
-
-- [Resource name](https://example.com) — what it provided
+- [VitalRouter](https://github.com/hadashiA/VitalRouter) — in-process command routing
+- [Model Context Protocol](https://modelcontextprotocol.io/) — the agent-facing protocol
+- [oss-project-template](https://github.com/container-registry/oss-project-template) — repository automation and community-file foundation
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>

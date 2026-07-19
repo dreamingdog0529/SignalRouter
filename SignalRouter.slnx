@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SignalRouter.DotNet/SignalRouter.Core.csproj" />
+    <Project Path="src/SignalRouter.DotNet/SignalRouter.Protocol.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SignalRouter.Core.Tests/SignalRouter.Core.Tests.csproj" />
+    <Project Path="tests/SignalRouter.Protocol.Tests/SignalRouter.Protocol.Tests.csproj" />
+  </Folder>
+</Solution>

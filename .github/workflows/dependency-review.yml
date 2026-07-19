@@ -16,10 +16,18 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      - name: Report unavailable Dependency Review
+        if: ${{ github.event.repository.private && vars.DEPENDENCY_REVIEW_ENABLED != 'true' }}
+        run: |
+          echo "::notice::Dependency Review requires GitHub Advanced Security for private repositories."
+          echo "::notice::After enabling it, set the repository Actions variable DEPENDENCY_REVIEW_ENABLED=true."
+
       - name: Checkout
+        if: ${{ !github.event.repository.private || vars.DEPENDENCY_REVIEW_ENABLED == 'true' }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Dependency Review
+        if: ${{ !github.event.repository.private || vars.DEPENDENCY_REVIEW_ENABLED == 'true' }}
         # Upstream ships the major line as a moving branch (refs/heads/v5), not a
         # tag; pin the immutable v5.0.0 release commit. Dependabot bumps this.
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
