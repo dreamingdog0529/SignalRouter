@@ -187,10 +187,10 @@ Thanks to everyone who has contributed to SignalRouter. This list is updated aut
 	<tbody>
 		<tr>
             <td align="center">
-                <a href="https://github.com/dreamingdog0529">
-                    <img src="https://avatars.githubusercontent.com/u/301185108?v=4" width="100;" alt="dreamingdog0529"/>
+                <a href="https://github.com/wanx2land">
+                    <img src="https://avatars.githubusercontent.com/u/60651065?v=4" width="100;" alt="wanx2land"/>
                     <br />
-                    <sub><b>dreamingdog0529</b></sub>
+                    <sub><b>WanwanLand</b></sub>
                 </a>
             </td>
 		</tr>
