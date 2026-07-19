@@ -12,6 +12,6 @@
     <Compile Include="../SignalRouter/Runtime/Protocol/**/*.cs" LinkBase="Runtime/Protocol" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="SignalRouter.Core.csproj" />
+    <ProjectReference Include="../SignalRouter.Core/SignalRouter.Core.csproj" />
   </ItemGroup>
 </Project>

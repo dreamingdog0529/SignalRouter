@@ -13,6 +13,6 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/SignalRouter.DotNet/SignalRouter.Core.csproj" />
+    <ProjectReference Include="../../src/SignalRouter.Core/SignalRouter.Core.csproj" />
   </ItemGroup>
 </Project>

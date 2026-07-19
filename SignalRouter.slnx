@@ -1,7 +1,7 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/SignalRouter.DotNet/SignalRouter.Core.csproj" />
-    <Project Path="src/SignalRouter.DotNet/SignalRouter.Protocol.csproj" />
+    <Project Path="src/SignalRouter.Core/SignalRouter.Core.csproj" />
+    <Project Path="src/SignalRouter.Protocol/SignalRouter.Protocol.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SignalRouter.Core.Tests/SignalRouter.Core.Tests.csproj" />
