@@ -8,7 +8,8 @@ namespace SignalRouter
     /// <summary>
     /// An immutable, defensively-copied read-only list whose equality and hash code
     /// compare elements in order. Centralizes the "validated immutable collection"
-    /// mechanism shared by the interaction value types.
+    /// mechanism shared by the interaction value types. The <c>class</c> constraint
+    /// exists because the factories reject null elements.
     /// </summary>
     public sealed class EquatableList<T> : IReadOnlyList<T>, IEquatable<EquatableList<T>>
         where T : class
@@ -39,20 +40,20 @@ namespace SignalRouter
         }
 
         /// <summary>Copies <paramref name="source"/>, rejecting null elements.</summary>
-        public static EquatableList<T> Create(
+        internal static EquatableList<T> Create(
             IEnumerable<T> source,
             string parameterName,
             string nullElementMessage)
         {
-            return new EquatableList<T>(
-                CopyNonNull(source, parameterName, nullElementMessage));
+            var copy = CopyNonNull(source, parameterName, nullElementMessage);
+            return copy.Count == 0 ? EmptyInstance : new EquatableList<T>(copy);
         }
 
         /// <summary>
         /// Copies <paramref name="source"/>, rejecting null elements and duplicate keys,
         /// then orders the result by key using an ordinal comparison.
         /// </summary>
-        public static EquatableList<T> CreateSortedUniqueByKey(
+        internal static EquatableList<T> CreateSortedUniqueByKey(
             IEnumerable<T> source,
             string parameterName,
             Func<T, string> keySelector,
@@ -83,21 +84,21 @@ namespace SignalRouter
 
             copy.Sort((left, right) =>
                 StringComparer.Ordinal.Compare(keySelector(left), keySelector(right)));
-            return new EquatableList<T>(copy);
+            return copy.Count == 0 ? EmptyInstance : new EquatableList<T>(copy);
         }
 
         /// <summary>
         /// Wraps an already-validated list, taking ownership of it without copying.
         /// The caller must not mutate the list afterwards.
         /// </summary>
-        public static EquatableList<T> CreateOwned(List<T> items)
+        internal static EquatableList<T> CreateOwned(List<T> items)
         {
             if (items == null)
             {
                 throw new ArgumentNullException(nameof(items));
             }
 
-            return new EquatableList<T>(items);
+            return items.Count == 0 ? EmptyInstance : new EquatableList<T>(items);
         }
 
         public IEnumerator<T> GetEnumerator()
