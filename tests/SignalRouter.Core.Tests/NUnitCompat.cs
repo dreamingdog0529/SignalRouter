@@ -20,4 +20,10 @@ internal static class NUnitCompat
     {
         return Assert.Throws<T>(code);
     }
+
+    public static T? ThrowsAsync<T>(Func<Task> code)
+        where T : Exception
+    {
+        return Assert.ThrowsAsync<T>(code);
+    }
 }

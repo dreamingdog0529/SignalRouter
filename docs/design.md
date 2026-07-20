@@ -426,6 +426,8 @@ public interface IInteractionStage<TCommand>
 - The tracker records a stage immediately before invocation and after successful return.
 - The first exception or observed cancellation stops every later stage.
 - Rollback is not attempted in the MVP.
+- Stages MUST NOT branch business logic on `Sequence`, `RequestId`, or `Origin`; replay
+  cannot reproduce them (ADR 0005), so identity-dependent stages break strict replay.
 
 Example stage IDs:
 
@@ -512,7 +514,10 @@ rejection.
 
 Replay does not compare stack traces byte-for-byte because compiler and build changes can
 alter them. Strict replay compares status, stable fault code, failed stage ID, completed
-stage IDs, and state hashes.
+stage IDs, and state hashes. A stage supplies the stable fault code by throwing
+`InteractionFaultException`; faults raised through any other exception type carry no
+application code. Recordings persist only that code — never the exception type, message,
+or stack trace (ADR 0005).
 
 Sensitive values MUST be redacted before fault information is logged, recorded, or
 returned over MCP.
@@ -696,21 +701,32 @@ This is post-MVP and not yet designed. Open questions to resolve before it earns
 ## 15. Recording
 
 Recordings use append-only JSON Lines. The first line is a session header. Each submitted
-interaction produces a request event before execution and, when known, one terminal event:
+interaction produces a request event before execution and, when known, one terminal event.
+The v1 schema is defined by [ADR 0005](adr/0005-recording-schema-v1.md):
 
 ```json
-{"kind":"session","schemaVersion":1,"sessionId":"...","appBuild":"...","startedAt":"..."}
+{"kind":"session","schemaVersion":1,"sessionId":"...","appBuild":"...","startedAt":"2026-07-21T03:04:05.1234567Z"}
 {"kind":"interaction_requested","sequence":12,"requestId":"...","origin":"Agent",
  "command":{"name":"click","version":1,"targetId":"menu.start","arguments":{}}}
 {"kind":"interaction_completed","sequence":12,"requestId":"...",
- "result":{"status":"Faulted","failedStageId":"click.sound",
-   "completedStageIds":["click.apply-state","click.transition"],
+ "result":{"status":"Faulted",
+   "stages":[{"id":"click.apply-state","status":"Completed"},
+             {"id":"click.transition","status":"Completed"},
+             {"id":"click.sound","status":"Faulted"}],
    "faultCode":"AudioDeviceUnavailable"},
- "state":{"beforeHash":"...","afterHash":"..."}}
+ "state":{"before":{"semantic-ui":"..."},"after":{"semantic-ui":"..."}}}
 ```
 
+Stage progress is recorded as the full index-ordered array (the failed stage is the last
+element); a `Rejected` terminal carries `rejectionCode` instead of `faultCode`; and
+`state.before`/`state.after` map each probe ID to its hash. Fault codes hold only the
+stable `ApplicationCode` — never the .NET exception type, message, or stack trace. An
+argument the catalog schema marks sensitive is recorded as a
+`{"$secret":"<name>@<version>/<argument>"}` reference.
+
 JSON Lines was selected so a process interruption can be recovered by discarding only an
-incomplete final line.
+incomplete final line; per ADR 0005 the terminating newline is the write-commit marker,
+so an unterminated final line is discarded even when it parses.
 
 ### 15.1 Recording guarantees
 
@@ -987,6 +1003,7 @@ The MVP is complete only when all of the following are demonstrated in automated
 | D14 | Core and Protocol are .NET-first packable libraries; Unity consumes them as NuGet packages via NuGetForUnity, superseding the earlier single-source UPM layout |
 | D15 | State snapshots use a constrained canonical JSON subset with SHA-256 lowercase-hex hashing, not RFC 8785; transient queue state is excluded from the hash (ADR 0001) |
 | D16 | Property-level state diffs are provided by the probe (`IStatePropertyDiffProvider`); the semantic-ui diff enumerates matched-target scalar fields (ADR 0002), per-field `Added`/`Removed` changes for target additions/removals (ADR 0003), and nested `availableInteractions`/argument-schema changes — additions, removals, field changes, and membership-preserving reordering (ADR 0004) |
+| D17 | Recording schema v1 is strict JSON Lines with per-probe state hash maps, full stage arrays, application-code-only fault codes, deterministic catalog-floor secret keys, newline write-commit truncation recovery, and fail-fast recorder poisoning (ADR 0005) |
 
 ## 25. Remaining implementation-level decisions
 

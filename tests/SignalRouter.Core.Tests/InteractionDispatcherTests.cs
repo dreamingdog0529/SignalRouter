@@ -255,10 +255,40 @@ public sealed class InteractionDispatcherTests
                 result.Fault!.ExceptionType,
                 Is.EqualTo(typeof(InvalidOperationException).FullName));
             Assert.That(result.Fault.Message, Is.EqualTo("boom"));
+            Assert.That(result.Fault.ApplicationCode, Is.Null);
             Assert.That(result.Fault.FailedStageId, Is.EqualTo("execute"));
             Assert.That(
                 result.Stages.Stages[0].Status,
                 Is.EqualTo(InteractionStageStatus.Faulted));
+        });
+    }
+
+    [Test]
+    public async Task AnInteractionFaultExceptionCarriesItsApplicationCodeIntoTheFault()
+    {
+        using var harness = new Harness();
+        harness.Register(
+            "menu.start",
+            fault: new InteractionFaultException(
+                "AudioDeviceUnavailable",
+                "The audio device is unavailable."));
+
+        var result = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options());
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(InteractionStatus.Faulted));
+            Assert.That(
+                result.Fault!.ApplicationCode,
+                Is.EqualTo("AudioDeviceUnavailable"));
+            Assert.That(
+                result.Fault.ExceptionType,
+                Is.EqualTo(typeof(InteractionFaultException).FullName));
+            Assert.That(
+                result.Fault.Message,
+                Is.EqualTo("The audio device is unavailable."));
         });
     }
 

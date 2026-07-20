@@ -191,6 +191,34 @@ namespace SignalRouter
         public EquatableList<string> CompletedStageIds { get; }
     }
 
+    // The public channel for stages to fault with a stable application code
+    // (design §12.2): the dispatcher copies ApplicationCode into FaultInfo, and the
+    // recorder persists that code — never the exception type or message — as the
+    // recording's faultCode. Faults raised through any other exception type carry
+    // no application code and record faultCode null.
+    public sealed class InteractionFaultException : Exception
+    {
+        public InteractionFaultException(string applicationCode, string message)
+            : this(applicationCode, message, null)
+        {
+        }
+
+        public InteractionFaultException(string applicationCode, string message, Exception? innerException)
+            : base(ValidateMessage(message), innerException)
+        {
+            InteractionContract.RequireIdentifier(applicationCode, nameof(applicationCode));
+            ApplicationCode = applicationCode;
+        }
+
+        public string ApplicationCode { get; }
+
+        private static string ValidateMessage(string message)
+        {
+            InteractionContract.RequireMessage(message, nameof(message));
+            return message;
+        }
+    }
+
     public sealed record StateProbeObservation
     {
         public StateProbeObservation(string probeId, string hash)

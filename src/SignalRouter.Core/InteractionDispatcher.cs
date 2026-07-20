@@ -16,6 +16,7 @@ namespace SignalRouter
         private readonly InteractionCommandCatalog catalog;
         private readonly InteractionRegistry registry;
         private readonly InteractionStateProbeRegistry? probes;
+        private readonly InteractionRecorder? recorder;
         private readonly Router router;
         private readonly AsyncLocal<InteractionExecutionScope?> currentScope =
             new AsyncLocal<InteractionExecutionScope?>();
@@ -40,10 +41,32 @@ namespace SignalRouter
             InteractionRegistry registry,
             InteractionStateProbeRegistry? probes,
             int idempotencyCacheCapacity = DefaultIdempotencyCacheCapacity)
+            : this(catalog, registry, probes, null, idempotencyCacheCapacity)
+        {
+        }
+
+        public InteractionDispatcher(
+            InteractionCommandCatalog catalog,
+            InteractionRegistry registry,
+            InteractionStateProbeRegistry? probes,
+            InteractionRecorder? recorder,
+            int idempotencyCacheCapacity = DefaultIdempotencyCacheCapacity)
         {
             this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             this.registry = registry ?? throw new ArgumentNullException(nameof(registry));
             this.probes = probes;
+            if (recorder != null
+                && !string.Equals(recorder.SessionId, registry.SessionEpoch, StringComparison.Ordinal))
+            {
+                // Probe hashes encode the registry epoch (ADR 0001); a recording whose
+                // header advertises a different session could never replay against a
+                // registry reconstructed from that header.
+                throw new ArgumentException(
+                    "The recorder's session ID must match the registry's session epoch.",
+                    nameof(recorder));
+            }
+
+            this.recorder = recorder;
             if (idempotencyCacheCapacity < 1)
             {
                 throw new ArgumentOutOfRangeException(
@@ -147,6 +170,16 @@ namespace SignalRouter
             }
             catch (Exception exception)
             {
+                // A terminal-append failure happens after the side effects ran: the
+                // executed result must stay cached (and satisfy concurrent waiters)
+                // or a retry with the same key would repeat those side effects.
+                var completed = (exception as InteractionRecordingException)?.CompletedResult;
+                if (completed != null && IsIdempotentResultCacheable(completed))
+                {
+                    pending.TrySetResult(completed);
+                    throw;
+                }
+
                 lock (idempotencyGate)
                 {
                     idempotencyCache.Remove(idempotencyKey);
@@ -198,7 +231,22 @@ namespace SignalRouter
             // policy) so dequeued resolution and execution marshal back onto it instead
             // of resuming on an arbitrary thread-pool thread.
             var callerContext = SynchronizationContext.Current;
-            var request = AssignIdentity(chainQueue: true, out var queueSlot);
+
+            // Step 3 (design §7.1): the request event's redacted argument payload is
+            // serialized outside the enqueue lock; the append itself happens inside
+            // AssignIdentity so request events land in sequence order (§15.1).
+            RecordingRequestPayload? payload = null;
+            if (recorder != null)
+            {
+                payload = new RecordingRequestPayload(
+                    options.Origin,
+                    commandName,
+                    commandVersion,
+                    command.TargetId,
+                    InteractionRecordingRedaction.SerializeArguments(entry, command));
+            }
+
+            var request = AssignIdentity(chainQueue: true, out var queueSlot, payload);
             InteractionResult result;
             InteractionExecutionScope? scope = null;
             StateProbeReading? beforeReading = null;
@@ -208,24 +256,29 @@ namespace SignalRouter
                 if (!await TryAwaitPredecessorAsync(queueSlot.Predecessor, cancellationToken)
                     .ConfigureAwait(false))
                 {
-                    return CancelledBeforeStart(
+                    return RecordCompleted(CancelledBeforeStart(
                         request,
                         command.TargetId,
                         commandName,
                         commandVersion,
-                        options.Origin);
+                        options.Origin));
                 }
 
                 predecessorObserved = true;
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    return CancelledBeforeStart(
+                    return RecordCompleted(CancelledBeforeStart(
                         request,
                         command.TargetId,
                         commandName,
                         commandVersion,
-                        options.Origin);
+                        options.Origin));
                 }
+
+                // A recorder poisoned by an earlier append failure must not let
+                // already-queued work execute stages unrecorded: recording is a
+                // guarantee (§15.1), so this dispatch fails before any side effect.
+                recorder?.ThrowIfFaulted();
 
                 if (callerContext != null)
                 {
@@ -326,6 +379,23 @@ namespace SignalRouter
                         scope,
                         CaptureAfter(beforeReading));
                 }
+
+                // Step 10 (design §7.1): append the terminal event inside the outer
+                // try so a failed append still releases the queue slot below.
+                try
+                {
+                    RecordCompleted(result);
+                }
+                catch
+                {
+                    // The interaction still reached a terminal state: mark the scope
+                    // terminal and start its queued continuations so they are not
+                    // silently dropped and the retained context cannot accept more.
+                    // Each continuation re-enters dispatch and fails fast against the
+                    // failed recorder.
+                    StartContinuations(scope, callerContext);
+                    throw;
+                }
             }
             finally
             {
@@ -404,9 +474,13 @@ namespace SignalRouter
             return null;
         }
 
-        private RequestIdentity AssignIdentity(bool chainQueue, out QueueSlot queueSlot)
+        private RequestIdentity AssignIdentity(
+            bool chainQueue,
+            out QueueSlot queueSlot,
+            RecordingRequestPayload? payload = null)
         {
             long sequence;
+            string requestId;
             Task predecessor;
             TaskCompletionSource<bool>? tail = null;
             lock (gate)
@@ -417,6 +491,27 @@ namespace SignalRouter
                 }
 
                 sequence = checked(++nextSequence);
+                requestId = Guid.NewGuid().ToString("N");
+
+                // The request event is appended under the enqueue lock — the only
+                // place the §15.1 sequence-order guarantee holds under concurrent
+                // enqueue — and before the queue-tail swap, so a failed append
+                // leaves the FIFO chain untouched instead of stranding successors
+                // behind a tail that will never complete. Durability before the
+                // first stage follows because the line is flushed at enqueue and
+                // stages only run after dequeue.
+                if (payload != null)
+                {
+                    recorder!.AppendRequested(
+                        sequence,
+                        requestId,
+                        payload.Origin,
+                        payload.CommandName,
+                        payload.CommandVersion,
+                        payload.TargetId,
+                        payload.ArgumentsJson);
+                }
+
                 predecessor = queueTail;
                 if (chainQueue)
                 {
@@ -427,7 +522,35 @@ namespace SignalRouter
             }
 
             queueSlot = new QueueSlot(predecessor, tail);
-            return new RequestIdentity(sequence, Guid.NewGuid().ToString("N"));
+            return new RequestIdentity(sequence, requestId);
+        }
+
+        private InteractionResult RecordCompleted(InteractionResult result)
+        {
+            if (recorder == null)
+            {
+                return result;
+            }
+
+            try
+            {
+                recorder.AppendCompleted(result);
+            }
+            catch (Exception exception) when (
+                !(exception is InteractionInvariantViolationException))
+            {
+                // The interaction already executed; the result is real but was not
+                // persisted. Carrying it on the exception lets the idempotency path
+                // keep the cache truthful so a retry does not repeat side effects.
+                throw new InteractionRecordingException(
+                    InteractionRecordingError.RecorderFailed,
+                    "The interaction executed but its terminal recording event could "
+                    + "not be appended.",
+                    exception,
+                    result);
+            }
+
+            return result;
         }
 
         private static async ValueTask<bool> TryAwaitPredecessorAsync(
@@ -734,12 +857,22 @@ namespace SignalRouter
                 exception.GetType().FullName ?? exception.GetType().Name,
                 message,
                 exception.StackTrace,
-                exception is InteractionInvariantViolationException
-                    ? InvariantViolationCode
-                    : null,
+                ApplicationCodeFor(exception),
                 failedStageId,
                 failedStageIndex,
                 completedStageIds);
+        }
+
+        private static string? ApplicationCodeFor(Exception exception)
+        {
+            if (exception is InteractionInvariantViolationException)
+            {
+                return InvariantViolationCode;
+            }
+
+            return exception is InteractionFaultException fault
+                ? fault.ApplicationCode
+                : null;
         }
 
         private static string FormatRejection(string format, string targetId)
@@ -782,6 +915,33 @@ namespace SignalRouter
             public long Sequence { get; }
 
             public string RequestId { get; }
+        }
+
+        private sealed class RecordingRequestPayload
+        {
+            public RecordingRequestPayload(
+                InteractionOrigin origin,
+                string commandName,
+                int commandVersion,
+                string targetId,
+                byte[] argumentsJson)
+            {
+                Origin = origin;
+                CommandName = commandName;
+                CommandVersion = commandVersion;
+                TargetId = targetId;
+                ArgumentsJson = argumentsJson;
+            }
+
+            public InteractionOrigin Origin { get; }
+
+            public string CommandName { get; }
+
+            public int CommandVersion { get; }
+
+            public string TargetId { get; }
+
+            public byte[] ArgumentsJson { get; }
         }
 
         private readonly struct QueueSlot
@@ -840,7 +1000,8 @@ namespace SignalRouter
             {
                 // The continuation re-enters the FIFO queue and normalizes its own
                 // outcome into a result; its terminal status is observed through the
-                // recorder (item 5), so there is no caller to propagate to here.
+                // recorder's interaction_completed event, so there is no caller to
+                // propagate to here.
                 _ = continuation(dispatcher);
             }
         }
