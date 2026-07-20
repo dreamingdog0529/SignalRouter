@@ -1,0 +1,11 @@
+{
+  "name": "com.dreamingdog0529.signalrouter",
+  "displayName": "SignalRouter for Unity",
+  "version": "0.1.0",
+  "unity": "6000.0",
+  "description": "Unity integration for SignalRouter. Consumes the SignalRouter.Core and SignalRouter.Protocol NuGet packages (restored via NuGetForUnity) and provides the uGUI adapters and editor tooling for reproducible command-driven UI interactions.",
+  "author": {
+    "name": "dreamingdog0529"
+  },
+  "license": "MIT"
+}

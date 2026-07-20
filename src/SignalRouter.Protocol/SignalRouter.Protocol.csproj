@@ -6,11 +6,12 @@
     <LangVersion>9.0</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <DefaultItemExcludes>$(DefaultItemExcludes);**/*.asmdef;**/*.meta</DefaultItemExcludes>
   </PropertyGroup>
-  <ItemGroup>
-    <Compile Include="../SignalRouter/Runtime/Protocol/**/*.cs" LinkBase="Runtime/Protocol" />
-  </ItemGroup>
+  <PropertyGroup>
+    <PackageId>SignalRouter.Protocol</PackageId>
+    <Description>Transport protocol contracts for SignalRouter: the versioned envelope and typed payloads exchanged across the runtime WebSocket and MCP boundary.</Description>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../SignalRouter.Core/SignalRouter.Core.csproj" />
   </ItemGroup>

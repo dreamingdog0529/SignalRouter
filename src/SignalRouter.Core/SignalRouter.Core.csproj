@@ -6,11 +6,12 @@
     <LangVersion>9.0</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <DefaultItemExcludes>$(DefaultItemExcludes);**/*.asmdef;**/*.meta</DefaultItemExcludes>
   </PropertyGroup>
-  <ItemGroup>
-    <Compile Include="../SignalRouter/Runtime/Core/**/*.cs" LinkBase="Runtime/Core" />
-  </ItemGroup>
+  <PropertyGroup>
+    <PackageId>SignalRouter.Core</PackageId>
+    <Description>Command-driven interaction runtime core for reproducible Unity UI interactions: command model, immutable command catalog and codecs, structured results, and the semantic registry.</Description>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Text.Json" />
     <PackageReference Include="VitalRouter" />

@@ -26,16 +26,21 @@ tasks:
     desc: Build .NET projects and compile the Unity project
     cmds:
       - dotnet tool restore
-      - dotnet nugetforunity restore ./src/SignalRouter.Unity
+      # Build/pack the SDK projects first so the local feed holds the
+      # SignalRouter.Core/Protocol packages that NuGetForUnity restores next.
       - dotnet build ./SignalRouter.slnx
+      - dotnet nugetforunity restore ./src/SignalRouter.Unity
       - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode Compile
 
   test:
     desc: Run .NET and Unity EditMode tests
     cmds:
       - dotnet tool restore
+      # Build/pack first so the local feed holds the SignalRouter.Core/Protocol
+      # packages that NuGetForUnity restores for the Unity EditMode tests.
+      - dotnet build ./SignalRouter.slnx
       - dotnet nugetforunity restore ./src/SignalRouter.Unity
-      - dotnet test ./SignalRouter.slnx
+      - dotnet test ./SignalRouter.slnx --no-build
       - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode Test
 
   setup:

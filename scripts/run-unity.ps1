@@ -91,15 +91,19 @@ if ($compileErrors) {
 }
 
 if ($Mode -eq 'Compile') {
-    $scriptAssemblies = Join-Path $projectPath 'Library/ScriptAssemblies'
+    # SignalRouter.Core/Protocol are consumed as NuGet packages restored by
+    # NuGetForUnity from the local feed, not compiled from source by Unity.
+    # Verify the restore delivered the assemblies the project depends on.
+    $packagesRoot = Join-Path $projectPath 'Assets/Packages'
     foreach ($assemblyName in @('SignalRouter.Core.dll', 'SignalRouter.Protocol.dll')) {
-        $assemblyPath = Join-Path $scriptAssemblies $assemblyName
-        if (-not (Test-Path -LiteralPath $assemblyPath -PathType Leaf)) {
-            throw "Unity compile did not produce $assemblyPath."
+        $restored = Get-ChildItem -LiteralPath $packagesRoot -Recurse -Filter $assemblyName -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if (-not $restored) {
+            throw "NuGetForUnity did not restore $assemblyName under $packagesRoot; build and pack the SDK projects into the local feed before restoring."
         }
     }
 
-    Write-Host "Unity $unityVersion compiled SignalRouter.Core and SignalRouter.Protocol."
+    Write-Host "Unity $unityVersion compiled cleanly; SignalRouter.Core and SignalRouter.Protocol restored from the local feed."
     return
 }
 
