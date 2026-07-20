@@ -1,9 +1,10 @@
 # Developing SignalRouter
 
 > **Current status:** The command model, immutable command catalog and codecs, structured
-> result model, semantic registry, FIFO dispatch, deterministic stage execution, and
-> hash-level state probes are implemented and verified. Property-level semantic-UI state
-> diffs, record/replay, Unity UI, WebSocket, and MCP behavior remain unimplemented.
+> result model, semantic registry, FIFO dispatch, deterministic stage execution, hash-level
+> state probes, and semantic-UI property-level diffs (matched-target scalar fields) are
+> implemented and verified. Structural property diffs (target add/remove, nested
+> interactions), record/replay, Unity UI, WebSocket, and MCP behavior remain unimplemented.
 
 ## Prerequisites
 
