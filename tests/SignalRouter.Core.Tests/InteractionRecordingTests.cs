@@ -326,7 +326,7 @@ public sealed class InteractionRecordingTests
     }
 
     [Test]
-    public void AnAppendBeyondTheSizeBoundFailsAndPoisonsTheRecorder()
+    public void AnAppendBeyondTheSizeBoundSealsTheRecorderAgainstNewWork()
     {
         using var sink = new MemoryStream();
         using var harness = new RecordingHarness(
@@ -342,8 +342,69 @@ public sealed class InteractionRecordingTests
         NUnitCompat.Multiple(() =>
         {
             Assert.That(first!.Error, Is.EqualTo(InteractionRecordingError.SizeLimitExceeded));
-            Assert.That(second!.Error, Is.EqualTo(InteractionRecordingError.RecorderFailed));
+            Assert.That(second!.Error, Is.EqualTo(InteractionRecordingError.SizeLimitExceeded));
             Assert.That(harness.ExecutionLog, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task AnOversizedSuccessorRequestSealsWithoutLosingInFlightTerminals()
+    {
+        using var harness = new RecordingHarness(
+            options: RecorderOptions(maxRecordingBytes: 1200));
+        var blocker = harness.RegisterClick("menu.first", gate: true);
+
+        var first = harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.first"),
+            Options()).AsTask();
+        await blocker.Started.Task;
+
+        // This request line alone exceeds the bound, so its append is refused
+        // before any byte is written; the file stays intact and sealed.
+        var oversizedTarget = "menu." + new string('x', 2000);
+        var oversized = NUnitCompat.ThrowsAsync<InteractionRecordingException>(async () =>
+            await harness.Dispatcher.DispatchAsync(new ClickCommand(oversizedTarget), Options()));
+
+        blocker.Release();
+        var firstResult = await first;
+        var recording = Load(harness.Sink);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(oversized!.Error, Is.EqualTo(InteractionRecordingError.SizeLimitExceeded));
+            Assert.That(firstResult.Status, Is.EqualTo(InteractionStatus.Succeeded));
+            Assert.That(recording.Interactions.Single().HasKnownOutcome, Is.True);
+            Assert.That(harness.ExecutionLog, Is.EqualTo(new[] { "menu.first" }));
+        });
+    }
+
+    [Test]
+    public async Task ATerminalAppendFailureStillDrainsQueuedContinuations()
+    {
+        using var sink = new FlakySink { FailAfterLines = 2 };
+        using var harness = new RecordingHarness(sink);
+        InteractionContext? captured = null;
+        harness.RegisterClick("menu.start", onExecute: (context, _) =>
+        {
+            captured = context;
+            context.EnqueueContinuation(new ClickCommand("menu.next"), Options());
+            return default;
+        });
+        harness.RegisterClick("menu.next");
+
+        var failure = NUnitCompat.ThrowsAsync<InteractionRecordingException>(async () =>
+            await harness.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options()));
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(failure!.CompletedResult, Is.Not.Null);
+            Assert.That(captured, Is.Not.Null);
+
+            // The scope was marked terminal despite the failed terminal append, so
+            // the retained context refuses further continuations.
+            NUnitCompat.ThatThrows(
+                () => captured!.EnqueueContinuation(new ClickCommand("menu.next"), Options()),
+                Throws.InvalidOperationException);
         });
     }
 
@@ -683,6 +744,35 @@ public sealed class InteractionRecordingTests
     }
 
     [Test]
+    public void MismatchedBeforeAndAfterProbeSetsAreCorruption()
+    {
+        var hash = new string('a', 64);
+        var mismatched = "{\"kind\":\"interaction_completed\",\"sequence\":1"
+            + ",\"requestId\":\"" + RequestId(1) + "\""
+            + ",\"result\":{\"status\":\"Succeeded\",\"stages\":"
+            + "[{\"id\":\"execute\",\"status\":\"Completed\"}]}"
+            + ",\"state\":{\"before\":{\"probe-a\":\"" + hash + "\"}"
+            + ",\"after\":{\"probe-b\":\"" + hash + "\"}}}";
+        var content = Header() + "\n" + Requested(1) + "\n" + mismatched + "\n";
+
+        Assert.That(
+            LoadFailure(content).Error,
+            Is.EqualTo(InteractionRecordingError.CorruptEntry));
+    }
+
+    [Test]
+    public void ANonScalarArgumentValueFromACodecIsAnInvariantViolation()
+    {
+        var entry = NestedCatalog().Get<NestedValueCommand>();
+
+        NUnitCompat.ThatThrows(
+            () => InteractionRecordingRedaction.SerializeArguments(
+                entry,
+                new NestedValueCommand("menu.start")),
+            Throws.TypeOf<InteractionInvariantViolationException>());
+    }
+
+    [Test]
     public void ANonExecutedOutcomeWithNonEmptyStateMapsIsCorruption()
     {
         var hash = new string('a', 64);
@@ -920,6 +1010,13 @@ public sealed class InteractionRecordingTests
             .Build();
     }
 
+    private static InteractionCommandCatalog NestedCatalog()
+    {
+        return new InteractionCommandCatalogBuilder()
+            .Register("nested", 1, NestedValueCommandSchema.Instance, true)
+            .Build();
+    }
+
     private static string CreateArtifactRoot()
     {
         var root = Path.Combine(
@@ -1044,6 +1141,51 @@ public sealed class InteractionRecordingTests
         }
     }
 
+    private readonly struct NestedValueCommand : IInteractionCommand
+    {
+        public NestedValueCommand(string targetId)
+        {
+            TargetId = targetId;
+        }
+
+        public string TargetId { get; }
+    }
+
+    // A codec that writes an object-valued argument — the shape schema v1 forbids —
+    // to prove non-scalar arguments fail before anything is recorded.
+    private sealed class NestedValueCommandSchema : IInteractionCommandSchema<NestedValueCommand>
+    {
+        private NestedValueCommandSchema()
+        {
+        }
+
+        public static NestedValueCommandSchema Instance { get; } = new();
+
+        public InteractionArgumentSchema Arguments { get; } = new(new[]
+        {
+            new InteractionArgumentDefinition(
+                "value",
+                InteractionArgumentType.String,
+                required: true,
+                sensitive: false),
+        });
+
+        public NestedValueCommand Decode(string targetId, JsonElement arguments)
+        {
+            return new NestedValueCommand(targetId);
+        }
+
+        public void WriteArguments(Utf8JsonWriter writer, in NestedValueCommand command)
+        {
+            writer.WriteStartObject();
+            writer.WritePropertyName("value");
+            writer.WriteStartObject();
+            writer.WriteBoolean("nested", true);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+    }
+
     private sealed class RecordingHarness : IDisposable
     {
         private readonly InteractionRegistry registry;
@@ -1110,7 +1252,8 @@ public sealed class InteractionRecordingTests
             string targetId,
             bool gate = false,
             Exception? fault = null,
-            CancellationTokenSource? observeCancellation = null)
+            CancellationTokenSource? observeCancellation = null,
+            Func<InteractionContext, CancellationToken, ValueTask>? onExecute = null)
         {
             var blocker = new Blocker(gate);
             var pipeline = new RecordingPipeline<ClickCommand>(
@@ -1118,7 +1261,8 @@ public sealed class InteractionRecordingTests
                 this,
                 blocker,
                 fault,
-                observeCancellation);
+                observeCancellation,
+                onExecute);
             var target = new RecordingTarget(
                 targetId,
                 "click",
@@ -1136,6 +1280,7 @@ public sealed class InteractionRecordingTests
                 this,
                 new Blocker(gated: false),
                 null,
+                null,
                 null);
             var target = new RecordingTarget(
                 targetId,
@@ -1152,6 +1297,7 @@ public sealed class InteractionRecordingTests
                 targetId,
                 this,
                 new Blocker(gated: false),
+                null,
                 null,
                 null);
             var target = new RecordingTarget(
@@ -1261,19 +1407,22 @@ public sealed class InteractionRecordingTests
         private readonly Blocker blocker;
         private readonly Exception? fault;
         private readonly CancellationTokenSource? observeCancellation;
+        private readonly Func<InteractionContext, CancellationToken, ValueTask>? onExecute;
 
         public RecordingPipeline(
             string targetId,
             RecordingHarness harness,
             Blocker blocker,
             Exception? fault,
-            CancellationTokenSource? observeCancellation)
+            CancellationTokenSource? observeCancellation,
+            Func<InteractionContext, CancellationToken, ValueTask>? onExecute)
         {
             this.targetId = targetId;
             this.harness = harness;
             this.blocker = blocker;
             this.fault = fault;
             this.observeCancellation = observeCancellation;
+            this.onExecute = onExecute;
         }
 
         public InteractionValidation Validate(in TCommand command)
@@ -1301,6 +1450,10 @@ public sealed class InteractionRecordingTests
             }
 
             harness.LogExecution(targetId);
+            if (onExecute != null)
+            {
+                await onExecute(context, cancellationToken);
+            }
         }
     }
 }

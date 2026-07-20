@@ -59,6 +59,7 @@ namespace SignalRouter
         private long bytesWritten;
         private long lastRequestedSequence;
         private bool faulted;
+        private bool capacityExhausted;
         private bool disposed;
 
         internal string SessionId
@@ -140,6 +141,7 @@ namespace SignalRouter
             lock (sync)
             {
                 ThrowIfNotWritable();
+                ThrowIfCapacityExhausted();
                 if (sequence <= lastRequestedSequence)
                 {
                     throw new InteractionInvariantViolationException(
@@ -164,6 +166,12 @@ namespace SignalRouter
         {
             lock (sync)
             {
+                // Deliberately not gated on exhausted capacity: a capacity failure is
+                // detected before any byte is written, so the file is intact and a
+                // terminal for an already-recorded request must still be appendable —
+                // otherwise one oversized successor enqueue would turn every in-flight
+                // interaction into OutcomeUnknown. The per-line size check below still
+                // applies to this terminal itself.
                 ThrowIfNotWritable();
                 if (completedSequences.Contains(result.Sequence))
                 {
@@ -192,11 +200,15 @@ namespace SignalRouter
             }
         }
 
+        // Guard for work that has not started executing: once the recorder can no
+        // longer guarantee a terminal event — poisoned sink or exhausted capacity —
+        // side effects must not run (§15.1).
         internal void ThrowIfFaulted()
         {
             lock (sync)
             {
                 ThrowIfNotWritable();
+                ThrowIfCapacityExhausted();
             }
         }
 
@@ -236,12 +248,26 @@ namespace SignalRouter
             }
         }
 
+        private void ThrowIfCapacityExhausted()
+        {
+            if (capacityExhausted)
+            {
+                throw new InteractionRecordingException(
+                    InteractionRecordingError.SizeLimitExceeded,
+                    "The recording reached its size bound; no further interactions can "
+                    + "be recorded in this session.");
+            }
+        }
+
         private void WriteLine(byte[] payload)
         {
             var lineLength = (long)payload.Length + 1;
             if (bytesWritten + lineLength > options.MaxRecordingBytes)
             {
-                faulted = true;
+                // Detected before any byte is written: the file stays valid, so this
+                // seals the session (no new request events) without poisoning it —
+                // pending terminals may still be appended if they fit.
+                capacityExhausted = true;
                 throw new InteractionRecordingException(
                     InteractionRecordingError.SizeLimitExceeded,
                     "Appending this event would exceed the recording size bound of "
@@ -431,22 +457,38 @@ namespace SignalRouter
 
             var raw = buffer.WrittenSpan.ToArray();
 
-            // Utf8JsonWriter output is well-formed, so the root is an object exactly
-            // when the first byte is '{'. The strict reader requires an argument
-            // object, so a non-object codec output must fail here on both paths.
-            if (raw.Length == 0 || raw[0] != (byte)'{')
+            // Schema v1 argument values are scalars (secret markers are produced only
+            // by the redaction below), and the reader enforces exactly that. Codec
+            // output violating the shape must fail here — before anything is written
+            // that the recorder's own reader would reject.
+            using var document = JsonDocument.Parse(raw);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
             {
                 throw new InteractionInvariantViolationException(
                     "Command codecs must serialize arguments as a JSON object.");
+            }
+
+            foreach (var property in root.EnumerateObject())
+            {
+                switch (property.Value.ValueKind)
+                {
+                    case JsonValueKind.String:
+                    case JsonValueKind.Number:
+                    case JsonValueKind.True:
+                    case JsonValueKind.False:
+                        break;
+                    default:
+                        throw new InteractionInvariantViolationException(
+                            "Command codecs must serialize argument values as JSON "
+                            + "scalars in recording schema v1.");
+                }
             }
 
             if (!HasSensitiveArgument(entry.Arguments))
             {
                 return raw;
             }
-
-            using var document = JsonDocument.Parse(raw);
-            var root = document.RootElement;
 
             var redacted = new ArrayBufferWriter<byte>();
             using (var writer = new Utf8JsonWriter(redacted))

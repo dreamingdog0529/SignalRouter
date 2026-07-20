@@ -74,8 +74,10 @@ the session header. `schemaVersion` is 1 and is independent of command schema ve
    marker.
 
 5. **Strict readers.** Unknown kinds, unknown or duplicate fields, numeric enum
-   spellings, non-canonical hashes (not 64 lowercase hex), and unsupported
-   `schemaVersion` values are rejected (§15.1 "reject … rather than guessing"). Any
+   spellings, non-canonical hashes (not 64 lowercase hex), mismatched before/after
+   probe sets, secret references contradicting their request's command metadata, and
+   unsupported `schemaVersion` values are rejected (§15.1 "reject … rather than
+   guessing"). Any
    schema addition therefore bumps `schemaVersion`. The version gate runs before field
    validation so a future header rejects as an unsupported version, not an unknown field.
 
@@ -91,13 +93,20 @@ the session header. `schemaVersion` is 1 and is independent of command schema ve
    the strongest flush netstandard2.1 offers, not a hardware write-through guarantee. A
    configurable `MaxRecordingBytes` (default 64 MiB) is checked before each append.
 
-8. **Failure semantics.** Recording is a guarantee, not best effort: any environmental
-   append failure (sink I/O, size bound) poisons the recorder; later appends fail fast,
-   new dispatches fail at enqueue, and already-queued work fails before its first stage.
-   A terminal-append failure happens after side effects ran, so the dispatcher keeps the
-   executed result in the idempotency cache (and satisfies concurrent waiters with it)
-   before propagating — a retry with the same key must not repeat side effects. Recovery
-   means constructing a new dispatcher and recorder.
+8. **Failure semantics.** Recording is a guarantee, not best effort, with two distinct
+   failure states. A **sink I/O failure poisons** the recorder — the file may hold a
+   partial line, so every later append fails fast. A **size-bound breach seals** it —
+   detected before any byte is written, the file stays valid, so no new request events
+   are accepted (new dispatches fail at enqueue, already-queued work fails before its
+   first stage), but a terminal event for an already-recorded request may still be
+   appended if it fits; one oversized successor enqueue therefore cannot turn every
+   in-flight interaction into `OutcomeUnknown`. A terminal-append failure happens after
+   side effects ran, so the dispatcher keeps the executed result in the idempotency
+   cache (and satisfies concurrent waiters with it), and still marks the execution
+   scope terminal and starts its queued continuations, before propagating — a retry
+   with the same key must not repeat side effects, and a retained context must not
+   accept further continuations. Recovery means constructing a new dispatcher and
+   recorder.
 
 9. **Confinement.** File recordings resolve against a caller-supplied artifact root:
    rooted relative paths are rejected, `..` segments are resolved by full-path

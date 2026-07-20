@@ -382,7 +382,20 @@ namespace SignalRouter
 
                 // Step 10 (design §7.1): append the terminal event inside the outer
                 // try so a failed append still releases the queue slot below.
-                RecordCompleted(result);
+                try
+                {
+                    RecordCompleted(result);
+                }
+                catch
+                {
+                    // The interaction still reached a terminal state: mark the scope
+                    // terminal and start its queued continuations so they are not
+                    // silently dropped and the retained context cannot accept more.
+                    // Each continuation re-enters dispatch and fails fast against the
+                    // failed recorder.
+                    StartContinuations(scope, callerContext);
+                    throw;
+                }
             }
             finally
             {

@@ -67,6 +67,7 @@ namespace SignalRouter
             }
 
             var progress = new StageProgress(stages);
+            RequireMatchingProbeSets(before, after);
             ValidateShape(status, progress, rejectionCode, faultCode, before, after);
             Status = status;
             Stages = progress.Stages;
@@ -180,6 +181,36 @@ namespace SignalRouter
                 throw new ArgumentException(
                     status + " outcomes must not carry rejection or fault codes.",
                     nameof(status));
+            }
+        }
+
+        // Dispatcher-produced results always observe the same pinned probes before
+        // and after (design §12), so a recording whose maps cover different probe
+        // sets cannot be genuine and must not reach strict replay.
+        private static void RequireMatchingProbeSets(
+            StateObservation before,
+            StateObservation after)
+        {
+            var beforeProbes = before.Probes;
+            var afterProbes = after.Probes;
+            if (beforeProbes.Count != afterProbes.Count)
+            {
+                throw new ArgumentException(
+                    "Before and after state maps must cover the same probes.",
+                    nameof(after));
+            }
+
+            for (var index = 0; index < beforeProbes.Count; index++)
+            {
+                if (!string.Equals(
+                    beforeProbes[index].ProbeId,
+                    afterProbes[index].ProbeId,
+                    StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        "Before and after state maps must cover the same probes.",
+                        nameof(after));
+                }
             }
         }
 
