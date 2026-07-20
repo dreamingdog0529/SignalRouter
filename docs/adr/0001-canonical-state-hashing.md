@@ -42,8 +42,12 @@ Adopt a **constrained internal canonical form** with SHA-256 hashing.
 2. **Canonical form.** Object keys are emitted in ascending **ordinal** order; duplicate
    keys are rejected. Arrays preserve source order. Output has no insignificant whitespace
    and uses `System.Text.Json`'s default string escaping. Encoding is UTF-8.
-3. **Hash.** SHA-256 over the canonical UTF-8 bytes, rendered as **lowercase hexadecimal**
-   (64 characters). This satisfies the identifier constraints already enforced on
+3. **Hash.** SHA-256 over the canonical UTF-8 bytes of a **versioned envelope**
+   (`{"snapshot":<canonical snapshot>,"version":N}`, where `N` is the probe's schema
+   version), rendered as **lowercase hexadecimal** (64 characters). Binding the version into
+   the hash means a breaking probe schema bump changes the hash even when the payload is
+   byte-identical, so strict replay cannot interpret a hash under the wrong schema. The
+   result satisfies the identifier constraints already enforced on
    `StateProbeObservation.Hash`.
 4. **Redaction ordering.** Redaction is the probe's responsibility and happens before the
    snapshot is produced, so secret values never reach canonicalization or hashing
