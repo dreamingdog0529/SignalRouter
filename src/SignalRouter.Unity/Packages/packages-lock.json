@@ -7,12 +7,6 @@
       "dependencies": {},
       "hash": "ae633b0cc98208d07e65ac2d9aabb246c7200ebe"
     },
-    "com.dreamingdog0529.signalrouter": {
-      "version": "file:../../SignalRouter",
-      "depth": 0,
-      "source": "local",
-      "dependencies": {}
-    },
     "com.github-glitchenzo.nugetforunity": {
       "version": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity#v4.5.0",
       "depth": 0,

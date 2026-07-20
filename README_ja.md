@@ -72,7 +72,7 @@ Unity ランタイム（コアは Pure C#）です。ピクセルやスクリー
 駆動する）です。UI をデータとして観測・操作したい Unity アプリ／ゲーム開発チームを対象と
 しています。
 
-> **ステータス:** UPM／共有ソースの build/test 基盤に加え、command model、
+> **ステータス:** .NET-first の build/test 基盤に加え、command model、
 > immutable command catalog と codec、structured result model、semantic registry を
 > 実装済みです。FIFO dispatch、stage 実行と state probe、record/replay、Unity UI、
 > WebSocket、MCP のプロダクション機能は未実装です。対応範囲と受け入れ基準は
@@ -152,10 +152,10 @@ task test
 task check
 ```
 
-共有 Runtime source は C# 9・`netstandard2.1` として compile し、warning も build failure
-にします。Unity 開発 project では C# 11 language feature test のため
-`-langversion:preview` を有効にしますが、UPM package 利用者に preview 設定は要求しません。
-正確な toolchain と互換性境界は **[docs/development.md](docs/development.md)** を参照してください。
+`SignalRouter.Core` と `SignalRouter.Protocol` は C# 9・`netstandard2.1` として compile し、
+warning も build failure にします。Unity 開発 project では C# 11 language feature test のため
+`-langversion:preview` を有効にしますが、配布される NuGet package の利用者に preview 設定は
+要求しません。正確な toolchain と互換性境界は **[docs/development.md](docs/development.md)** を参照してください。
 
 コントリビュート手順: **[CONTRIBUTING.md](.github/CONTRIBUTING.md)**
 

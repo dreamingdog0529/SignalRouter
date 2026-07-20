@@ -812,35 +812,38 @@ Remote binding is not an MVP configuration option.
 
 ## 20. Source and package layout
 
-The proposed repository layout keeps one source of truth for code compiled by both Unity
-and SDK-style .NET projects:
+Core and Protocol are authored as standalone .NET SDK projects and shipped as NuGet
+packages. The Unity project consumes those packages as precompiled assemblies instead of
+recompiling their source:
 
 ```text
 src/
-  SignalRouter/                         # UPM package root
-    package.json
-    Runtime/
-      Core/                             # No Unity dependency
-      VitalRouter/
-      Protocol/                         # No Unity dependency
-      Unity/
-    Editor/
-    Tests/
-    Samples~/
-  SignalRouter.Core/
+  SignalRouter.Core/                    # netstandard2.1, packable (source of truth)
     SignalRouter.Core.csproj
-  SignalRouter.Protocol/
+  SignalRouter.Protocol/                # netstandard2.1, packable
     SignalRouter.Protocol.csproj
-  SignalRouter.McpHost/
+  SignalRouter.McpHost/                 # external MCP host process (planned)
     SignalRouter.McpHost.csproj
-  SignalRouter.Unity/                   # Development and integration-test project
+  SignalRouter.Unity/                   # Unity development and integration-test project
+    Assets/
+      SignalRouter.Unity/               # exportable UPM package (Unity integration)
+        package.json
+        Runtime/                        # uGUI adapters (planned)
+        Editor/                         # editor tooling (planned)
+        Tests/Editor/                   # EditMode tests over the restored packages
 tests/
   SignalRouter.Core.Tests/
   SignalRouter.Protocol.Tests/
 ```
 
-SDK-style projects compile the same files under `Runtime/Core` and `Runtime/Protocol`.
-Pure C# code is not copied into a second implementation tree.
+`SignalRouter.Core` and `SignalRouter.Protocol` build as `netstandard2.1` and pack to a
+shared local feed (`../.local-feed`). NuGetForUnity restores those packages into the Unity
+project, and Unity references the resulting DLLs through `overrideReferences` assembly
+definitions. Pure C# code has a single implementation tree under `src/SignalRouter.Core`
+and `src/SignalRouter.Protocol`, with no duplicate source copy. The
+Unity-specific integration (uGUI adapters, editor tooling) lives under
+`Assets/SignalRouter.Unity` as an exportable UPM package that depends on the restored Core
+and Protocol assemblies.
 
 Planned assemblies:
 
@@ -902,7 +905,7 @@ The MVP is complete only when all of the following are demonstrated in automated
 
 ## 23. Implementation order
 
-1. UPM package, assembly definitions, and Pure C# test projects
+1. Packable Core and Protocol SDK projects, the local feed and NuGetForUnity restore, Unity assembly definitions, and Pure C# test projects
 2. Command model, command catalog, result model, and semantic registry
 3. FIFO dispatcher and VitalRouter integration
 4. Stage pipeline, progress tracker, and state probes
@@ -930,6 +933,7 @@ The MVP is complete only when all of the following are demonstrated in automated
 | D11 | Command schemas and codecs use explicit System.Text.Json DOM/writer APIs; state canonicalization remains separate |
 | D12 | Command catalogs are immutable after build; wire identity and CLR command type are each unique |
 | D13 | Duplicate target registration fails immediately under ordinal ID comparison and preserves the existing registration |
+| D14 | Core and Protocol are .NET-first packable libraries; Unity consumes them as NuGet packages via NuGetForUnity, superseding the earlier single-source UPM layout |
 
 ## 25. Remaining implementation-level decisions
 

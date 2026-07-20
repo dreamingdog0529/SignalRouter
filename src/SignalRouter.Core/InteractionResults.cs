@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 
 namespace SignalRouter
 {
@@ -70,12 +69,10 @@ namespace SignalRouter
         public InteractionStageStatus Status { get; }
     }
 
-    public sealed class StageProgress : IEquatable<StageProgress>
+    public sealed record StageProgress
     {
         private static readonly StageProgress EmptyInstance =
             new StageProgress(Array.Empty<InteractionStageProgress>());
-
-        private readonly ReadOnlyCollection<InteractionStageProgress> stages;
 
         public StageProgress(IEnumerable<InteractionStageProgress> stages)
         {
@@ -116,7 +113,7 @@ namespace SignalRouter
                 copy.Add(stage);
             }
 
-            this.stages = new ReadOnlyCollection<InteractionStageProgress>(copy.ToArray());
+            Stages = EquatableList<InteractionStageProgress>.CreateOwned(copy);
         }
 
         public static StageProgress Empty
@@ -124,31 +121,11 @@ namespace SignalRouter
             get { return EmptyInstance; }
         }
 
-        public IReadOnlyList<InteractionStageProgress> Stages
-        {
-            get { return stages; }
-        }
-
-        public bool Equals(StageProgress? other)
-        {
-            return other != null && InteractionContract.SequenceEqual(Stages, other.Stages);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as StageProgress);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.GetSequenceHashCode(Stages);
-        }
+        public EquatableList<InteractionStageProgress> Stages { get; }
     }
 
-    public sealed class FaultInfo : IEquatable<FaultInfo>
+    public sealed record FaultInfo
     {
-        private readonly ReadOnlyCollection<string> completedStageIds;
-
         public FaultInfo(
             string exceptionType,
             string message,
@@ -196,7 +173,7 @@ namespace SignalRouter
             ApplicationCode = applicationCode;
             FailedStageId = failedStageId;
             FailedStageIndex = failedStageIndex;
-            this.completedStageIds = new ReadOnlyCollection<string>(copy.ToArray());
+            CompletedStageIds = EquatableList<string>.CreateOwned(copy);
         }
 
         public string ExceptionType { get; }
@@ -211,50 +188,7 @@ namespace SignalRouter
 
         public int FailedStageIndex { get; }
 
-        public IReadOnlyList<string> CompletedStageIds
-        {
-            get { return completedStageIds; }
-        }
-
-        public bool Equals(FaultInfo? other)
-        {
-            return other != null
-                && string.Equals(ExceptionType, other.ExceptionType, StringComparison.Ordinal)
-                && string.Equals(Message, other.Message, StringComparison.Ordinal)
-                && string.Equals(StackTrace, other.StackTrace, StringComparison.Ordinal)
-                && string.Equals(ApplicationCode, other.ApplicationCode, StringComparison.Ordinal)
-                && string.Equals(FailedStageId, other.FailedStageId, StringComparison.Ordinal)
-                && FailedStageIndex == other.FailedStageIndex
-                && InteractionContract.SequenceEqual(
-                    CompletedStageIds,
-                    other.CompletedStageIds,
-                    StringComparer.Ordinal);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as FaultInfo);
-        }
-
-        public override int GetHashCode()
-        {
-            var hash = InteractionContract.CombineHashCodes(
-                StringComparer.Ordinal.GetHashCode(ExceptionType),
-                StringComparer.Ordinal.GetHashCode(Message),
-                FailedStageIndex);
-            hash = InteractionContract.CombineHashCodes(
-                hash,
-                StackTrace == null ? 0 : StringComparer.Ordinal.GetHashCode(StackTrace));
-            hash = InteractionContract.CombineHashCodes(
-                hash,
-                ApplicationCode == null ? 0 : StringComparer.Ordinal.GetHashCode(ApplicationCode));
-            hash = InteractionContract.CombineHashCodes(
-                hash,
-                StringComparer.Ordinal.GetHashCode(FailedStageId));
-            return InteractionContract.CombineHashCodes(
-                hash,
-                InteractionContract.GetSequenceHashCode(CompletedStageIds, StringComparer.Ordinal));
-        }
+        public EquatableList<string> CompletedStageIds { get; }
     }
 
     public sealed record StateProbeObservation
@@ -272,39 +206,19 @@ namespace SignalRouter
         public string Hash { get; }
     }
 
-    public sealed class StateObservation : IEquatable<StateObservation>
+    public sealed record StateObservation
     {
         private static readonly StateObservation EmptyInstance =
             new StateObservation(Array.Empty<StateProbeObservation>());
 
-        private readonly ReadOnlyCollection<StateProbeObservation> probes;
-
         public StateObservation(IEnumerable<StateProbeObservation> probes)
         {
-            if (probes == null)
-            {
-                throw new ArgumentNullException(nameof(probes));
-            }
-
-            var copy = new List<StateProbeObservation>();
-            var ids = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var probe in probes)
-            {
-                if (probe == null)
-                {
-                    throw new ArgumentException("Observations must not contain null.", nameof(probes));
-                }
-
-                if (!ids.Add(probe.ProbeId))
-                {
-                    throw new ArgumentException("Probe IDs must be unique.", nameof(probes));
-                }
-
-                copy.Add(probe);
-            }
-
-            copy.Sort((left, right) => StringComparer.Ordinal.Compare(left.ProbeId, right.ProbeId));
-            this.probes = new ReadOnlyCollection<StateProbeObservation>(copy.ToArray());
+            Probes = EquatableList<StateProbeObservation>.CreateSortedUniqueByKey(
+                probes,
+                nameof(probes),
+                probe => probe.ProbeId,
+                "Observations must not contain null.",
+                "Probe IDs must be unique.");
         }
 
         public static StateObservation Empty
@@ -312,25 +226,7 @@ namespace SignalRouter
             get { return EmptyInstance; }
         }
 
-        public IReadOnlyList<StateProbeObservation> Probes
-        {
-            get { return probes; }
-        }
-
-        public bool Equals(StateObservation? other)
-        {
-            return other != null && InteractionContract.SequenceEqual(Probes, other.Probes);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as StateObservation);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.GetSequenceHashCode(Probes);
-        }
+        public EquatableList<StateProbeObservation> Probes { get; }
     }
 
     public sealed record StatePropertyChange
@@ -355,10 +251,8 @@ namespace SignalRouter
         public InteractionValue After { get; }
     }
 
-    public sealed class StateProbeDiff : IEquatable<StateProbeDiff>
+    public sealed record StateProbeDiff
     {
-        private readonly ReadOnlyCollection<StatePropertyChange> changes;
-
         public StateProbeDiff(
             string probeId,
             string beforeHash,
@@ -373,33 +267,15 @@ namespace SignalRouter
                 throw new ArgumentException("A probe diff requires different hashes.");
             }
 
-            if (changes == null)
-            {
-                throw new ArgumentNullException(nameof(changes));
-            }
-
-            var copy = new List<StatePropertyChange>();
-            var paths = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var change in changes)
-            {
-                if (change == null)
-                {
-                    throw new ArgumentException("Changes must not contain null.", nameof(changes));
-                }
-
-                if (!paths.Add(change.Path))
-                {
-                    throw new ArgumentException("Change paths must be unique.", nameof(changes));
-                }
-
-                copy.Add(change);
-            }
-
-            copy.Sort((left, right) => StringComparer.Ordinal.Compare(left.Path, right.Path));
+            Changes = EquatableList<StatePropertyChange>.CreateSortedUniqueByKey(
+                changes,
+                nameof(changes),
+                change => change.Path,
+                "Changes must not contain null.",
+                "Change paths must be unique.");
             ProbeId = probeId;
             BeforeHash = beforeHash;
             AfterHash = afterHash;
-            this.changes = new ReadOnlyCollection<StatePropertyChange>(copy.ToArray());
         }
 
         public string ProbeId { get; }
@@ -408,70 +284,22 @@ namespace SignalRouter
 
         public string AfterHash { get; }
 
-        public IReadOnlyList<StatePropertyChange> Changes
-        {
-            get { return changes; }
-        }
-
-        public bool Equals(StateProbeDiff? other)
-        {
-            return other != null
-                && string.Equals(ProbeId, other.ProbeId, StringComparison.Ordinal)
-                && string.Equals(BeforeHash, other.BeforeHash, StringComparison.Ordinal)
-                && string.Equals(AfterHash, other.AfterHash, StringComparison.Ordinal)
-                && InteractionContract.SequenceEqual(Changes, other.Changes);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as StateProbeDiff);
-        }
-
-        public override int GetHashCode()
-        {
-            var hash = InteractionContract.CombineHashCodes(
-                StringComparer.Ordinal.GetHashCode(ProbeId),
-                StringComparer.Ordinal.GetHashCode(BeforeHash),
-                StringComparer.Ordinal.GetHashCode(AfterHash));
-            return InteractionContract.CombineHashCodes(
-                hash,
-                InteractionContract.GetSequenceHashCode(Changes));
-        }
+        public EquatableList<StatePropertyChange> Changes { get; }
     }
 
-    public sealed class StateDiff : IEquatable<StateDiff>
+    public sealed record StateDiff
     {
         private static readonly StateDiff EmptyInstance =
             new StateDiff(Array.Empty<StateProbeDiff>());
 
-        private readonly ReadOnlyCollection<StateProbeDiff> probes;
-
         public StateDiff(IEnumerable<StateProbeDiff> probes)
         {
-            if (probes == null)
-            {
-                throw new ArgumentNullException(nameof(probes));
-            }
-
-            var copy = new List<StateProbeDiff>();
-            var ids = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var probe in probes)
-            {
-                if (probe == null)
-                {
-                    throw new ArgumentException("Diffs must not contain null.", nameof(probes));
-                }
-
-                if (!ids.Add(probe.ProbeId))
-                {
-                    throw new ArgumentException("Probe diff IDs must be unique.", nameof(probes));
-                }
-
-                copy.Add(probe);
-            }
-
-            copy.Sort((left, right) => StringComparer.Ordinal.Compare(left.ProbeId, right.ProbeId));
-            this.probes = new ReadOnlyCollection<StateProbeDiff>(copy.ToArray());
+            Probes = EquatableList<StateProbeDiff>.CreateSortedUniqueByKey(
+                probes,
+                nameof(probes),
+                probe => probe.ProbeId,
+                "Diffs must not contain null.",
+                "Probe diff IDs must be unique.");
         }
 
         public static StateDiff Empty
@@ -479,28 +307,10 @@ namespace SignalRouter
             get { return EmptyInstance; }
         }
 
-        public IReadOnlyList<StateProbeDiff> Probes
-        {
-            get { return probes; }
-        }
-
-        public bool Equals(StateDiff? other)
-        {
-            return other != null && InteractionContract.SequenceEqual(Probes, other.Probes);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as StateDiff);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.GetSequenceHashCode(Probes);
-        }
+        public EquatableList<StateProbeDiff> Probes { get; }
     }
 
-    public sealed class InteractionResult : IEquatable<InteractionResult>
+    public sealed record InteractionResult
     {
         public InteractionResult(
             long sequence,
@@ -582,48 +392,6 @@ namespace SignalRouter
         public StateObservation After { get; }
 
         public StateDiff Diff { get; }
-
-        public bool Equals(InteractionResult? other)
-        {
-            return other != null
-                && Sequence == other.Sequence
-                && string.Equals(RequestId, other.RequestId, StringComparison.Ordinal)
-                && string.Equals(TargetId, other.TargetId, StringComparison.Ordinal)
-                && string.Equals(CommandName, other.CommandName, StringComparison.Ordinal)
-                && CommandVersion == other.CommandVersion
-                && Origin == other.Origin
-                && Status == other.Status
-                && Equals(Rejection, other.Rejection)
-                && Equals(Fault, other.Fault)
-                && Stages.Equals(other.Stages)
-                && Before.Equals(other.Before)
-                && After.Equals(other.After)
-                && Diff.Equals(other.Diff);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as InteractionResult);
-        }
-
-        public override int GetHashCode()
-        {
-            var hash = InteractionContract.CombineHashCodes(
-                Sequence.GetHashCode(),
-                StringComparer.Ordinal.GetHashCode(RequestId),
-                StringComparer.Ordinal.GetHashCode(TargetId));
-            hash = InteractionContract.CombineHashCodes(
-                hash,
-                StringComparer.Ordinal.GetHashCode(CommandName),
-                CommandVersion);
-            hash = InteractionContract.CombineHashCodes(hash, (int)Origin, (int)Status);
-            hash = InteractionContract.CombineHashCodes(hash, Rejection == null ? 0 : Rejection.GetHashCode());
-            hash = InteractionContract.CombineHashCodes(hash, Fault == null ? 0 : Fault.GetHashCode());
-            hash = InteractionContract.CombineHashCodes(hash, Stages.GetHashCode());
-            hash = InteractionContract.CombineHashCodes(hash, Before.GetHashCode());
-            hash = InteractionContract.CombineHashCodes(hash, After.GetHashCode());
-            return InteractionContract.CombineHashCodes(hash, Diff.GetHashCode());
-        }
 
         private static void ValidateStatus(
             InteractionStatus status,
