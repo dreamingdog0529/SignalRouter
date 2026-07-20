@@ -34,8 +34,8 @@ public sealed class StateCanonicalizerTests
     [Test]
     public void KeyOrderDoesNotChangeTheHash()
     {
-        var first = StateCanonicalizer.ComputeHash(Snapshot("{\"a\":1,\"b\":2}"));
-        var second = StateCanonicalizer.ComputeHash(Snapshot("{\"b\":2,\"a\":1}"));
+        var first = StateCanonicalizer.ComputeHash(1, Snapshot("{\"a\":1,\"b\":2}"));
+        var second = StateCanonicalizer.ComputeHash(1, Snapshot("{\"b\":2,\"a\":1}"));
 
         Assert.That(first, Is.EqualTo(second));
     }
@@ -43,13 +43,22 @@ public sealed class StateCanonicalizerTests
     [Test]
     public void HashIsSixtyFourLowercaseHexCharacters()
     {
-        var hash = StateCanonicalizer.ComputeHash(Snapshot("{\"a\":1}"));
+        var hash = StateCanonicalizer.ComputeHash(1, Snapshot("{\"a\":1}"));
 
         NUnitCompat.Multiple(() =>
         {
             Assert.That(hash, Has.Length.EqualTo(64));
             Assert.That(hash, Does.Match("^[0-9a-f]{64}$"));
         });
+    }
+
+    [Test]
+    public void ProbeVersionChangesTheHashForAnIdenticalPayload()
+    {
+        var first = StateCanonicalizer.ComputeHash(1, Snapshot("{\"a\":1}"));
+        var second = StateCanonicalizer.ComputeHash(2, Snapshot("{\"a\":1}"));
+
+        Assert.That(first, Is.Not.EqualTo(second));
     }
 
     [Test]

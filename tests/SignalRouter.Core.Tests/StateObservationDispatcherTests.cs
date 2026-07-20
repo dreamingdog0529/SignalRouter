@@ -100,6 +100,30 @@ public sealed class StateObservationDispatcherTests
     }
 
     [Test]
+    public async Task ProbeInvariantViolationDuringCaptureFailsFastInsteadOfFaulting()
+    {
+        using var harness = new ProbeHarness(
+            withProbes: true,
+            extraProbe: new NullSnapshotProbe());
+        harness.Register("menu.start");
+
+        // A probe that yields no snapshot is dispatcher infrastructure failing, not an
+        // application-stage fault: it must escape rather than normalize into a Faulted result
+        // that the idempotency cache would retain (ADR 0001).
+        InteractionInvariantViolationException? caught = null;
+        try
+        {
+            await harness.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+        }
+        catch (InteractionInvariantViolationException exception)
+        {
+            caught = exception;
+        }
+
+        Assert.That(caught, Is.Not.Null);
+    }
+
+    [Test]
     public async Task DispatcherWithoutProbeRegistryKeepsEmptyObservations()
     {
         using var harness = new ProbeHarness(withProbes: false);
@@ -134,7 +158,7 @@ public sealed class StateObservationDispatcherTests
         private readonly InteractionRegistry registry;
         private readonly List<IInteractionTargetRegistration> registrations = new();
 
-        public ProbeHarness(bool withProbes)
+        public ProbeHarness(bool withProbes, IInteractionStateProbe? extraProbe = null)
         {
             var catalog = InteractionCommandCatalog.CreateMvp();
             registry = new InteractionRegistry(catalog, "session-1");
@@ -144,6 +168,10 @@ public sealed class StateObservationDispatcherTests
                 probes = new InteractionStateProbeRegistry();
                 probes.Register(new SemanticUiStateProbe(registry));
                 probes.Register(new InteractionRuntimeStateProbe(registry));
+                if (extraProbe != null)
+                {
+                    probes.Register(extraProbe);
+                }
             }
 
             Dispatcher = new InteractionDispatcher(catalog, registry, probes);
@@ -207,6 +235,17 @@ public sealed class StateObservationDispatcherTests
             resolved = null;
             return false;
         }
+    }
+
+    // A misbehaving probe that returns no snapshot, standing in for infrastructure failure
+    // (a null or uncanonicalizable capture) during before-state observation.
+    private sealed class NullSnapshotProbe : IInteractionStateProbe
+    {
+        public string Id => "broken";
+
+        public int Version => 1;
+
+        public StateProbeSnapshot Capture() => null!;
     }
 
     // A single-stage pipeline that runs the target's configured stage action inside execution,
