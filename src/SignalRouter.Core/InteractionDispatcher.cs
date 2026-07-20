@@ -15,6 +15,7 @@ namespace SignalRouter
 
         private readonly InteractionCommandCatalog catalog;
         private readonly InteractionRegistry registry;
+        private readonly InteractionStateProbeRegistry? probes;
         private readonly Router router;
         private readonly AsyncLocal<InteractionExecutionScope?> currentScope =
             new AsyncLocal<InteractionExecutionScope?>();
@@ -29,10 +30,12 @@ namespace SignalRouter
         public InteractionDispatcher(
             InteractionCommandCatalog catalog,
             InteractionRegistry registry,
+            InteractionStateProbeRegistry? probes = null,
             int idempotencyCacheCapacity = DefaultIdempotencyCacheCapacity)
         {
             this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             this.registry = registry ?? throw new ArgumentNullException(nameof(registry));
+            this.probes = probes;
             if (idempotencyCacheCapacity < 1)
             {
                 throw new ArgumentOutOfRangeException(
@@ -190,6 +193,7 @@ namespace SignalRouter
             var request = AssignIdentity(chainQueue: true, out var queueSlot);
             InteractionResult result;
             InteractionExecutionScope? scope = null;
+            StateProbeReading? beforeReading = null;
             var predecessorObserved = false;
             try
             {
@@ -248,6 +252,11 @@ namespace SignalRouter
                         context.AttachScope(scope);
                         currentScope.Value = scope;
                         activeScope = scope;
+
+                        // Step 5 (design §7.1): capture the before-state observation
+                        // immediately before any side effect. Null probe registry keeps the
+                        // pre-probe behavior (empty observations) for existing callers.
+                        beforeReading = probes?.Read();
                         await router.PublishAsync(command, cancellationToken).ConfigureAwait(false);
                         result = Succeeded(
                             request,
@@ -255,7 +264,8 @@ namespace SignalRouter
                             commandName,
                             commandVersion,
                             options.Origin,
-                            scope);
+                            scope,
+                            CaptureAfter(beforeReading));
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -266,7 +276,8 @@ namespace SignalRouter
                         commandName,
                         commandVersion,
                         options.Origin,
-                        scope);
+                        scope,
+                        CaptureAfter(beforeReading));
                 }
                 catch (Exception exception)
                 {
@@ -277,7 +288,8 @@ namespace SignalRouter
                         commandVersion,
                         options.Origin,
                         exception,
-                        scope);
+                        scope,
+                        CaptureAfter(beforeReading));
                 }
                 finally
                 {
@@ -481,7 +493,8 @@ namespace SignalRouter
             string commandName,
             int commandVersion,
             InteractionOrigin origin,
-            InteractionExecutionScope? scope)
+            InteractionExecutionScope? scope,
+            StateCapture state)
         {
             var tracker = scope?.Context.Tracker;
             var stages = tracker != null && tracker.RecordedAnything
@@ -498,9 +511,9 @@ namespace SignalRouter
                 rejection: null,
                 fault: null,
                 stages,
-                StateObservation.Empty,
-                StateObservation.Empty,
-                StateDiff.Empty);
+                state.Before,
+                state.After,
+                state.Diff);
         }
 
         private static InteractionResult Faulted(
@@ -510,7 +523,8 @@ namespace SignalRouter
             int commandVersion,
             InteractionOrigin origin,
             Exception exception,
-            InteractionExecutionScope? scope)
+            InteractionExecutionScope? scope,
+            StateCapture state)
         {
             var tracker = scope?.Context.Tracker;
             StageProgress stages;
@@ -545,9 +559,9 @@ namespace SignalRouter
                 rejection: null,
                 fault,
                 stages,
-                StateObservation.Empty,
-                StateObservation.Empty,
-                StateDiff.Empty);
+                state.Before,
+                state.After,
+                state.Diff);
         }
 
         private static InteractionResult CancelledDuringExecution(
@@ -556,10 +570,12 @@ namespace SignalRouter
             string commandName,
             int commandVersion,
             InteractionOrigin origin,
-            InteractionExecutionScope? scope)
+            InteractionExecutionScope? scope,
+            StateCapture state)
         {
             var tracker = scope?.Context.Tracker;
             StageProgress stages;
+            var effectiveState = state;
             if (tracker != null && tracker.HasPending)
             {
                 stages = tracker.BuildTerminal(InteractionStageStatus.Cancelled);
@@ -568,7 +584,10 @@ namespace SignalRouter
             {
                 // A stage pipeline cancelled before its first stage: no stage ran, so the result
                 // carries no stages and stays out of the idempotency cache (no side effects).
+                // Cancellation before the first stage must not change state (design §8.1), so it
+                // reports no observation regardless of the probe registry.
                 stages = StageProgress.Empty;
+                effectiveState = StateCapture.Empty;
             }
             else
             {
@@ -588,9 +607,9 @@ namespace SignalRouter
                 rejection: null,
                 fault: null,
                 stages,
-                StateObservation.Empty,
-                StateObservation.Empty,
-                StateDiff.Empty);
+                effectiveState.Before,
+                effectiveState.After,
+                effectiveState.Diff);
         }
 
         private static InteractionResult Rejected(
@@ -640,6 +659,24 @@ namespace SignalRouter
                 StateDiff.Empty);
         }
 
+        // Step 8 (design §7.1): capture the after-state observation by re-reading the same
+        // probes captured before publish, and derive the before/after/diff triple. A null
+        // before reading (no probe registry, or a path with no side effects) yields empty
+        // observations, matching pre-probe behavior.
+        private static StateCapture CaptureAfter(StateProbeReading? before)
+        {
+            if (before == null)
+            {
+                return StateCapture.Empty;
+            }
+
+            var after = before.ReadSame();
+            return new StateCapture(
+                before.ToObservation(),
+                after.ToObservation(),
+                StateProbeReading.Diff(before, after));
+        }
+
         private static StageProgress SingleStage(InteractionStageStatus status)
         {
             return new StageProgress(
@@ -681,6 +718,27 @@ namespace SignalRouter
                 System.Globalization.CultureInfo.InvariantCulture,
                 format,
                 targetId);
+        }
+
+        private readonly struct StateCapture
+        {
+            public static readonly StateCapture Empty = new StateCapture(
+                StateObservation.Empty,
+                StateObservation.Empty,
+                StateDiff.Empty);
+
+            public StateCapture(StateObservation before, StateObservation after, StateDiff diff)
+            {
+                Before = before;
+                After = after;
+                Diff = diff;
+            }
+
+            public StateObservation Before { get; }
+
+            public StateObservation After { get; }
+
+            public StateDiff Diff { get; }
         }
 
         private readonly struct RequestIdentity
