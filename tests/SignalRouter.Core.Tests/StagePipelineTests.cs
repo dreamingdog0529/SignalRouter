@@ -161,6 +161,67 @@ public sealed class StagePipelineTests
         });
     }
 
+    [Test]
+    public void CancellationBeforeTheFirstStageRecordsNoStageAndStaysUncacheable()
+    {
+        // A cancellation observed before the first stage runs (design §12) must leave the progress
+        // empty so the dispatcher reports no side effects and the idempotency cache does not retain
+        // it. See IsIdempotentResultCacheable, which keys cacheability on a non-empty stage list.
+        var context = new InteractionContext(
+            1,
+            "req-1",
+            new InteractionDispatchOptions(InteractionOrigin.Test));
+        var log = new ConcurrentQueue<string>();
+        var pipeline = new StagePipeline<ClickCommand>(new[]
+        {
+            new Stage("click.apply", 10, log),
+            new Stage("click.transition", 20, log),
+        });
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.ThrowsAsync<OperationCanceledException>(
+            (Func<Task>)(() =>
+                pipeline.ExecuteAsync(new ClickCommand("menu.start"), context, cts.Token).AsTask()));
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(log.ToArray(), Is.Empty);
+            Assert.That(context.Tracker.IsStageDriven, Is.True);
+            Assert.That(context.Tracker.HasPending, Is.False);
+            Assert.That(context.Tracker.RecordedAnything, Is.False);
+        });
+    }
+
+    [Test]
+    public async Task StagesResumeOnTheCallerSynchronizationContext()
+    {
+        // Under the main-thread policy (design §17.2), a stage that completes asynchronously must
+        // resume on the caller context so later stages keep running on the Unity main thread.
+        using var harness = new StageHarness();
+        using var syncContext = new SingleThreadSynchronizationContext();
+        var secondStageThread = 0;
+
+        harness.Register("menu.start", new StagePipeline<ClickCommand>(new IInteractionStage<ClickCommand>[]
+        {
+            new AsyncStage("click.apply", 10, async () => await Task.Yield()),
+            new AsyncStage("click.transition", 20, () =>
+            {
+                secondStageThread = Environment.CurrentManagedThreadId;
+                return default;
+            }),
+        }));
+
+        await syncContext.Run(async () =>
+        {
+            await harness.Dispatcher
+                .DispatchAsync(new ClickCommand("menu.start"), Options())
+                .AsTask();
+        });
+
+        Assert.That(secondStageThread, Is.EqualTo(syncContext.ThreadId));
+    }
+
     private static InteractionDispatchOptions Options(
         InteractionOrigin origin = InteractionOrigin.Test)
     {
@@ -196,6 +257,30 @@ public sealed class StagePipelineTests
             log.Enqueue(Id);
             action?.Invoke(cancellationToken);
             return default;
+        }
+    }
+
+    private sealed class AsyncStage : IInteractionStage<ClickCommand>
+    {
+        private readonly Func<ValueTask> body;
+
+        public AsyncStage(string id, int order, Func<ValueTask> body)
+        {
+            Id = id;
+            Order = order;
+            this.body = body;
+        }
+
+        public string Id { get; }
+
+        public int Order { get; }
+
+        public async ValueTask ExecuteAsync(
+            ClickCommand command,
+            InteractionContext context,
+            CancellationToken cancellationToken)
+        {
+            await body();
         }
     }
 
