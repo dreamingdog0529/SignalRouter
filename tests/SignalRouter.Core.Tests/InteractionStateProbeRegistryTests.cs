@@ -97,6 +97,58 @@ public sealed class InteractionStateProbeRegistryTests
     }
 
     [Test]
+    public void AChangedDiffProviderProbeCarriesItsPropertyChanges()
+    {
+        var registry = new InteractionStateProbeRegistry();
+        var probe = new DiffProbe(
+            "semantic-ui",
+            "{\"a\":1}",
+            () => new[]
+            {
+                new StatePropertyChange(
+                    "targets[x].label",
+                    InteractionValue.FromString("before"),
+                    InteractionValue.FromString("after")),
+            });
+        registry.Register(probe);
+
+        var before = registry.Read();
+        probe.Payload = "{\"a\":2}";
+        var after = before.ReadSame();
+        var diff = StateProbeReading.Diff(before, after);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(diff.Probes[0].Changes, Has.Count.EqualTo(1));
+            Assert.That(diff.Probes[0].Changes[0].Path, Is.EqualTo("targets[x].label"));
+        });
+    }
+
+    [Test]
+    public void ADiffProviderThatEmitsAnInvalidChangeFailsFastAsAnInvariantViolation()
+    {
+        var registry = new InteractionStateProbeRegistry();
+        // A change whose before equals its after violates StatePropertyChange's contract; a
+        // provider that produces one is dispatcher infrastructure misbehaving, not an
+        // application fault, so it must escape as an invariant violation (ADR 0001 rule 5).
+        var probe = new DiffProbe(
+            "semantic-ui",
+            "{\"a\":1}",
+            () => new[]
+            {
+                new StatePropertyChange("targets[x].label", InteractionValue.Null, InteractionValue.Null),
+            });
+        registry.Register(probe);
+
+        var before = registry.Read();
+        probe.Payload = "{\"a\":2}";
+        var after = before.ReadSame();
+
+        NUnitCompat.Throws<InteractionInvariantViolationException>(
+            () => StateProbeReading.Diff(before, after));
+    }
+
+    [Test]
     public void ANullSnapshotFailsFastAsAnInvariantViolation()
     {
         var registry = new InteractionStateProbeRegistry();
@@ -132,6 +184,38 @@ public sealed class InteractionStateProbeRegistryTests
         public StateProbeSnapshot Capture()
         {
             return Payload == null ? null! : StateProbeSnapshot.FromJson(Payload);
+        }
+    }
+
+    // A probe that also provides property-level changes, so a test can drive
+    // StateProbeReading.Diff's provider path with a controlled change set (or a bad one).
+    private sealed class DiffProbe : IInteractionStateProbe, IStatePropertyDiffProvider
+    {
+        private readonly Func<IReadOnlyList<StatePropertyChange>> diff;
+
+        public DiffProbe(string id, string payload, Func<IReadOnlyList<StatePropertyChange>> diff)
+        {
+            Id = id;
+            Payload = payload;
+            this.diff = diff;
+        }
+
+        public string Id { get; }
+
+        public int Version => 1;
+
+        public string Payload { get; set; }
+
+        public StateProbeSnapshot Capture()
+        {
+            return StateProbeSnapshot.FromJson(Payload);
+        }
+
+        public IReadOnlyList<StatePropertyChange> DiffProperties(
+            StateProbeSnapshot before,
+            StateProbeSnapshot after)
+        {
+            return diff();
         }
     }
 }
