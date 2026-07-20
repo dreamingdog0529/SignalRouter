@@ -413,6 +413,36 @@ public sealed class InteractionRecordingTests
     }
 
     [Test]
+    public void ARecorderSessionMismatchIsRejectedAtDispatcherConstruction()
+    {
+        using var sink = new MemoryStream();
+        var catalog = InteractionCommandCatalog.CreateMvp();
+        var registry = new InteractionRegistry(catalog, "session-1");
+        using var recorder = new InteractionRecorder(
+            sink,
+            new InteractionRecorderOptions("other-session", "build-1", new FixedClock(FixedInstant)),
+            leaveOpen: true);
+
+        NUnitCompat.ThatThrows(
+            () => new InteractionDispatcher(catalog, registry, null, recorder),
+            Throws.ArgumentException);
+    }
+
+    [Test]
+    public void ANonObjectCodecOutputFailsBeforeAnythingIsRecorded()
+    {
+        using var harness = new RecordingHarness(catalog: BrokenCatalog());
+        harness.RegisterBroken("menu.start");
+
+        NUnitCompat.ThatThrows(
+            () => harness.Dispatcher.DispatchAsync(
+                new BrokenCommand("menu.start"),
+                Options()).AsTask().GetAwaiter().GetResult(),
+            Throws.TypeOf<InteractionInvariantViolationException>());
+        Assert.That(Lines(harness.Sink), Has.Length.EqualTo(1));
+    }
+
+    [Test]
     public void OutOfContractAppendsAreInvariantViolations()
     {
         using var sink = new MemoryStream();
@@ -632,13 +662,41 @@ public sealed class InteractionRecordingTests
     public void RequiredSecretKeysListEachDistinctKeyOnce()
     {
         var secretArguments =
-            "{\"value\":{\"$secret\":\"set_secret@1/value\"}}";
+            "{\"value\":{\"$secret\":\"click@1/value\"}}";
         var content = Header() + "\n"
             + Requested(1, arguments: secretArguments) + "\n"
             + Requested(2, arguments: secretArguments) + "\n";
 
         var recording = Load(content);
-        Assert.That(recording.RequiredSecretKeys, Is.EqualTo(new[] { "set_secret@1/value" }));
+        Assert.That(recording.RequiredSecretKeys, Is.EqualTo(new[] { "click@1/value" }));
+    }
+
+    [Test]
+    public void ASecretReferenceThatContradictsItsRequestMetadataIsCorruption()
+    {
+        var content = Header() + "\n"
+            + Requested(1, arguments: "{\"value\":{\"$secret\":\"other@1/value\"}}") + "\n";
+
+        Assert.That(
+            LoadFailure(content).Error,
+            Is.EqualTo(InteractionRecordingError.CorruptEntry));
+    }
+
+    [Test]
+    public void ANonExecutedOutcomeWithNonEmptyStateMapsIsCorruption()
+    {
+        var hash = new string('a', 64);
+        var rejected = "{\"kind\":\"interaction_completed\",\"sequence\":1"
+            + ",\"requestId\":\"" + RequestId(1) + "\""
+            + ",\"result\":{\"status\":\"Rejected\",\"stages\":[]"
+            + ",\"rejectionCode\":\"TargetNotFound\"}"
+            + ",\"state\":{\"before\":{\"p\":\"" + hash + "\"}"
+            + ",\"after\":{\"p\":\"" + hash + "\"}}}";
+        var content = Header() + "\n" + Requested(1) + "\n" + rejected + "\n";
+
+        Assert.That(
+            LoadFailure(content).Error,
+            Is.EqualTo(InteractionRecordingError.CorruptEntry));
     }
 
     // ------------------------------------------------------------- file I/O
@@ -851,6 +909,14 @@ public sealed class InteractionRecordingTests
             .Build();
     }
 
+    private static InteractionCommandCatalog BrokenCatalog()
+    {
+        return new InteractionCommandCatalogBuilder()
+            .Register("click", 1, ClickCommandSchema.Instance, true)
+            .Register("broken", 1, BrokenCommandSchema.Instance, true)
+            .Build();
+    }
+
     private static string CreateArtifactRoot()
     {
         var root = Path.Combine(
@@ -938,6 +1004,43 @@ public sealed class InteractionRecordingTests
         }
     }
 
+    private readonly struct BrokenCommand : IInteractionCommand
+    {
+        public BrokenCommand(string targetId)
+        {
+            TargetId = targetId;
+        }
+
+        public string TargetId { get; }
+    }
+
+    // A codec that violates the arguments-are-an-object contract, to prove the
+    // recorder fails fast instead of writing a line its own reader rejects.
+    private sealed class BrokenCommandSchema : IInteractionCommandSchema<BrokenCommand>
+    {
+        private BrokenCommandSchema()
+        {
+        }
+
+        public static BrokenCommandSchema Instance { get; } = new();
+
+        public InteractionArgumentSchema Arguments
+        {
+            get { return InteractionArgumentSchema.Empty; }
+        }
+
+        public BrokenCommand Decode(string targetId, JsonElement arguments)
+        {
+            return new BrokenCommand(targetId);
+        }
+
+        public void WriteArguments(Utf8JsonWriter writer, in BrokenCommand command)
+        {
+            writer.WriteStartArray();
+            writer.WriteEndArray();
+        }
+    }
+
     private sealed class RecordingHarness : IDisposable
     {
         private readonly InteractionRegistry registry;
@@ -1021,6 +1124,23 @@ public sealed class InteractionRecordingTests
                 pipeline);
             registrations.Add(registry.Register(target, true));
             return blocker;
+        }
+
+        public void RegisterBroken(string targetId)
+        {
+            var pipeline = new RecordingPipeline<BrokenCommand>(
+                targetId,
+                this,
+                new Blocker(gated: false),
+                null,
+                null);
+            var target = new RecordingTarget(
+                targetId,
+                "broken",
+                1,
+                BrokenCommandSchema.Instance.Arguments,
+                pipeline);
+            registrations.Add(registry.Register(target, true));
         }
 
         public void RegisterSecret(string targetId)

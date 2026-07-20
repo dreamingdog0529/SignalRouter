@@ -135,7 +135,7 @@ namespace SignalRouter
                             nameof(stages));
                     }
 
-                    RequireUnchangedState(before, after, status);
+                    RequireEmptyState(before, after, status);
                     break;
                 case InteractionStatus.Faulted:
                     if (rejectionCode != null)
@@ -157,7 +157,7 @@ namespace SignalRouter
                     RequireNoCodes(rejectionCode, faultCode, status);
                     if (last == null)
                     {
-                        RequireUnchangedState(before, after, status);
+                        RequireEmptyState(before, after, status);
                     }
                     else if (last.Status != InteractionStageStatus.Cancelled)
                     {
@@ -183,16 +183,18 @@ namespace SignalRouter
             }
         }
 
-        private static void RequireUnchangedState(
+        // Schema v1 records empty state maps for outcomes that never executed
+        // (Rejected, cancelled before start): the dispatcher builds them from
+        // StateObservation.Empty, so anything else is not a valid recording.
+        private static void RequireEmptyState(
             StateObservation before,
             StateObservation after,
             InteractionStatus status)
         {
-            if (!before.Equals(after))
+            if (before.Probes.Count != 0 || after.Probes.Count != 0)
             {
                 throw new ArgumentException(
-                    status + " outcomes without stages must observe identical before "
-                    + "and after state.",
+                    status + " outcomes without stages must carry empty state maps.",
                     nameof(after));
             }
         }
@@ -591,7 +593,7 @@ namespace SignalRouter
                 InteractionRecordingSchema.VersionProperty,
                 InteractionRecordingSchema.TargetIdProperty,
                 InteractionRecordingSchema.ArgumentsProperty);
-            CollectSecretKeys(state, arguments, lineNumber);
+            CollectSecretKeys(state, arguments, commandName, commandVersion, lineNumber);
 
             RecordedRequest request;
             try
@@ -827,6 +829,8 @@ namespace SignalRouter
         private static void CollectSecretKeys(
             ParseState state,
             JsonElement arguments,
+            string commandName,
+            int commandVersion,
             int lineNumber)
         {
             var names = new HashSet<string>(StringComparer.Ordinal);
@@ -845,8 +849,40 @@ namespace SignalRouter
                     case JsonValueKind.False:
                         break;
                     case JsonValueKind.Object:
-                        state.SecretKeys.Add(ReadSecretKey(property.Value, lineNumber));
+                    {
+                        var key = ReadSecretKey(property.Value, lineNumber);
+
+                        // The key grammar is deterministic (ADR 0005), so a marker
+                        // that disagrees with its own request metadata is corruption;
+                        // accepting it would let replay inject the wrong secret.
+                        string expected;
+                        try
+                        {
+                            expected = InteractionRecordingSecret.KeyFor(
+                                commandName,
+                                commandVersion,
+                                property.Name);
+                        }
+                        catch (ArgumentException exception)
+                        {
+                            throw Corrupt(
+                                lineNumber,
+                                "the secret reference's command or argument name is invalid",
+                                exception);
+                        }
+
+                        if (!string.Equals(key, expected, StringComparison.Ordinal))
+                        {
+                            throw Corrupt(
+                                lineNumber,
+                                "the secret reference '" + key
+                                + "' does not match its command and argument ('"
+                                + expected + "')");
+                        }
+
+                        state.SecretKeys.Add(key);
                         break;
+                    }
                     default:
                         throw Corrupt(
                             lineNumber,

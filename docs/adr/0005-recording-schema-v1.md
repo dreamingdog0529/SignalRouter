@@ -158,6 +158,8 @@ the session header. `schemaVersion` is 1 and is independent of command schema ve
   pairing, secret-key inventory.
 - `InteractionDispatcher` — request append inside the enqueue lock, terminal append on
   every terminal path, poison guard before stages, idempotency-cache preservation on
-  terminal-append failure.
+  terminal-append failure. Attaching a recorder whose session ID differs from the
+  registry's session epoch is rejected at construction: probe hashes encode the epoch,
+  so a mismatched header could never replay.
 - `InteractionFaultException` — the public channel for stages to fault with a stable
   application code, so `faultCode` is populatable (§12.2).

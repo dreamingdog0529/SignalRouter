@@ -61,6 +61,11 @@ namespace SignalRouter
         private bool faulted;
         private bool disposed;
 
+        internal string SessionId
+        {
+            get { return options.SessionId; }
+        }
+
         public InteractionRecorder(Stream stream, InteractionRecorderOptions options, bool leaveOpen = false)
         {
             if (stream == null)
@@ -425,6 +430,16 @@ namespace SignalRouter
             }
 
             var raw = buffer.WrittenSpan.ToArray();
+
+            // Utf8JsonWriter output is well-formed, so the root is an object exactly
+            // when the first byte is '{'. The strict reader requires an argument
+            // object, so a non-object codec output must fail here on both paths.
+            if (raw.Length == 0 || raw[0] != (byte)'{')
+            {
+                throw new InteractionInvariantViolationException(
+                    "Command codecs must serialize arguments as a JSON object.");
+            }
+
             if (!HasSensitiveArgument(entry.Arguments))
             {
                 return raw;
@@ -432,11 +447,6 @@ namespace SignalRouter
 
             using var document = JsonDocument.Parse(raw);
             var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                throw new InteractionInvariantViolationException(
-                    "Command codecs must serialize arguments as a JSON object.");
-            }
 
             var redacted = new ArrayBufferWriter<byte>();
             using (var writer = new Utf8JsonWriter(redacted))
@@ -515,7 +525,13 @@ namespace SignalRouter
             var fullRoot = Path.GetFullPath(artifactRoot);
             var trimmedRoot = TrimTrailingSeparators(fullRoot);
             var fullPath = Path.GetFullPath(Path.Combine(trimmedRoot, relativePath));
-            var prefix = trimmedRoot + Path.DirectorySeparatorChar;
+
+            // A filesystem root ("/", "C:\") survives trimming with its separator
+            // intact; appending another would build "//" and reject every valid path.
+            var prefix = trimmedRoot[trimmedRoot.Length - 1] == Path.DirectorySeparatorChar
+                || trimmedRoot[trimmedRoot.Length - 1] == Path.AltDirectorySeparatorChar
+                ? trimmedRoot
+                : trimmedRoot + Path.DirectorySeparatorChar;
             if (!fullPath.StartsWith(prefix, StringComparison.Ordinal))
             {
                 throw new ArgumentException(

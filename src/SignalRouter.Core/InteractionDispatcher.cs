@@ -55,6 +55,17 @@ namespace SignalRouter
             this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             this.registry = registry ?? throw new ArgumentNullException(nameof(registry));
             this.probes = probes;
+            if (recorder != null
+                && !string.Equals(recorder.SessionId, registry.SessionEpoch, StringComparison.Ordinal))
+            {
+                // Probe hashes encode the registry epoch (ADR 0001); a recording whose
+                // header advertises a different session could never replay against a
+                // registry reconstructed from that header.
+                throw new ArgumentException(
+                    "The recorder's session ID must match the registry's session epoch.",
+                    nameof(recorder));
+            }
+
             this.recorder = recorder;
             if (idempotencyCacheCapacity < 1)
             {
