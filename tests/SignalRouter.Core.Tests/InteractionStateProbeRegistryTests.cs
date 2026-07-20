@@ -149,6 +149,57 @@ public sealed class InteractionStateProbeRegistryTests
     }
 
     [Test]
+    public void ADiffProviderThatEmitsDuplicatePathsFailsFastAsAnInvariantViolation()
+    {
+        var registry = new InteractionStateProbeRegistry();
+        // Duplicate Paths are rejected by StateProbeDiff's own validation; that rejection must
+        // still be reported as a dispatcher invariant violation, not a raw ArgumentException.
+        var probe = new DiffProbe(
+            "semantic-ui",
+            "{\"a\":1}",
+            () => new[]
+            {
+                new StatePropertyChange(
+                    "targets[x].label",
+                    InteractionValue.FromString("a"),
+                    InteractionValue.FromString("b")),
+                new StatePropertyChange(
+                    "targets[x].label",
+                    InteractionValue.FromString("c"),
+                    InteractionValue.FromString("d")),
+            });
+        registry.Register(probe);
+
+        var before = registry.Read();
+        probe.Payload = "{\"a\":2}";
+        var after = before.ReadSame();
+
+        NUnitCompat.Throws<InteractionInvariantViolationException>(
+            () => StateProbeReading.Diff(before, after));
+    }
+
+    [Test]
+    public void ADiffProviderThatThrowsWhileDiffingFailsFastAsAnInvariantViolation()
+    {
+        var registry = new InteractionStateProbeRegistry();
+        // A provider that throws a non-argument exception while reading its own snapshot (e.g.
+        // an unexpected value kind) is still a dispatcher invariant violation per the
+        // IStatePropertyDiffProvider contract.
+        var probe = new DiffProbe(
+            "semantic-ui",
+            "{\"a\":1}",
+            () => throw new InvalidOperationException("unexpected value kind"));
+        registry.Register(probe);
+
+        var before = registry.Read();
+        probe.Payload = "{\"a\":2}";
+        var after = before.ReadSame();
+
+        NUnitCompat.Throws<InteractionInvariantViolationException>(
+            () => StateProbeReading.Diff(before, after));
+    }
+
+    [Test]
     public void ANullSnapshotFailsFastAsAnInvariantViolation()
     {
         var registry = new InteractionStateProbeRegistry();
