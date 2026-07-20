@@ -710,7 +710,10 @@ public sealed class InteractionRecordingTests
             NUnitCompat.Multiple(() =>
             {
                 NUnitCompat.ThatThrows(
-                    () => InteractionRecorder.CreateFile(root, "..\\outside.jsonl", RecorderOptions()),
+                    () => InteractionRecorder.CreateFile(
+                        root,
+                        Path.Combine("..", "outside.jsonl"),
+                        RecorderOptions()),
                     Throws.ArgumentException);
                 NUnitCompat.ThatThrows(
                     () => InteractionRecorder.CreateFile(
