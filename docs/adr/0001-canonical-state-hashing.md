@@ -73,7 +73,8 @@ replay-compared state hash.
   with external JCS tooling. Probes must stay within the value subset (fractional values are
   encoded as strings). Revisiting interoperability later would be a new ADR.
 - **Scope.** This ADR covers hash-level observation. Property-level semantic-UI diffs
-  (`StatePropertyChange`) remain deferred (design.md §14) and do not affect the hash.
+  (`StatePropertyChange`) are addressed separately by [ADR 0002](0002-semantic-ui-property-diff.md)
+  and do not affect the hash.
 
 ## Implementation
 

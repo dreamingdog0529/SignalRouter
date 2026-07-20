@@ -34,6 +34,17 @@ public sealed class StateObservationDispatcherTests
             Assert.That(result.Diff.Probes[0].ProbeId, Is.EqualTo(SemanticUiStateProbe.ProbeId));
             Assert.That(result.Diff.Probes[0].BeforeHash, Is.EqualTo(semanticBefore));
             Assert.That(result.Diff.Probes[0].AfterHash, Is.EqualTo(semanticAfter));
+            // The semantic-ui probe now explains the hash change as a property-level change.
+            Assert.That(result.Diff.Probes[0].Changes, Has.Count.EqualTo(1));
+            Assert.That(
+                result.Diff.Probes[0].Changes[0].Path,
+                Is.EqualTo("targets[menu.start].label"));
+            Assert.That(
+                result.Diff.Probes[0].Changes[0].Before,
+                Is.EqualTo(InteractionValue.FromString("before")));
+            Assert.That(
+                result.Diff.Probes[0].Changes[0].After,
+                Is.EqualTo(InteractionValue.FromString("after")));
         });
     }
 

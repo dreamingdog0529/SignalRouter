@@ -649,10 +649,13 @@ The MVP state diff contains:
 - property-level changes for semantic UI descriptors.
 
 Hash-level before/after observation and diff are implemented. Property-level
-`StatePropertyChange` output for semantic UI descriptors is deferred to a follow-up; a
-changed probe currently reports its before/after hashes with an empty change set. Generic
-JSON Patch output is deferred until a stable canonicalization and size policy has been
-proven.
+`StatePropertyChange` output for semantic UI descriptors is implemented for **matched-target
+scalar fields** (`role`, `label`, `parentId`, `visible`, `enabled`, `value` of a target
+present in both snapshots), via a probe's optional `IStatePropertyDiffProvider`, defined by
+[ADR 0002](adr/0002-semantic-ui-property-diff.md). Target additions/removals and nested
+`availableInteractions` changes still change the hash but are not yet enumerated as property
+changes; the hash remains authoritative for those. Generic JSON Patch output is deferred
+until a stable canonicalization and size policy has been proven.
 
 ## 15. Recording
 
@@ -943,6 +946,7 @@ The MVP is complete only when all of the following are demonstrated in automated
 | D13 | Duplicate target registration fails immediately under ordinal ID comparison and preserves the existing registration |
 | D14 | Core and Protocol are .NET-first packable libraries; Unity consumes them as NuGet packages via NuGetForUnity, superseding the earlier single-source UPM layout |
 | D15 | State snapshots use a constrained canonical JSON subset with SHA-256 lowercase-hex hashing, not RFC 8785; transient queue state is excluded from the hash (ADR 0001) |
+| D16 | Property-level state diffs are provided by the probe (`IStatePropertyDiffProvider`); the semantic-ui diff enumerates matched-target scalar fields, while add/remove and nested interaction changes stay hash-level (ADR 0002) |
 
 ## 25. Remaining implementation-level decisions
 
