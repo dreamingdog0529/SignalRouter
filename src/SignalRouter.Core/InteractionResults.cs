@@ -229,26 +229,48 @@ namespace SignalRouter
         public EquatableList<StateProbeObservation> Probes { get; }
     }
 
+    public enum StatePropertyChangeKind
+    {
+        Modified = 0,
+        Added = 1,
+        Removed = 2,
+    }
+
     public sealed record StatePropertyChange
     {
-        public StatePropertyChange(string path, InteractionValue before, InteractionValue after)
+        public StatePropertyChange(string path, InteractionValue? before, InteractionValue? after)
         {
             InteractionContract.RequireIdentifier(path, nameof(path));
-            Before = before ?? throw new ArgumentNullException(nameof(before));
-            After = after ?? throw new ArgumentNullException(nameof(after));
-            if (Before.Equals(After))
+            if (before == null && after == null)
+            {
+                throw new ArgumentException(
+                    "At least one of before or after must be present.");
+            }
+
+            if (before != null && after != null && before.Equals(after))
             {
                 throw new ArgumentException("Before and after values must differ.");
             }
 
+            Before = before;
+            After = after;
+            Kind = before == null
+                ? StatePropertyChangeKind.Added
+                : after == null
+                    ? StatePropertyChangeKind.Removed
+                    : StatePropertyChangeKind.Modified;
             Path = path;
         }
 
         public string Path { get; }
 
-        public InteractionValue Before { get; }
+        // Null on the absent side of an Added (Before) or Removed (After) change; both sides are
+        // present and differ for a Modified change.
+        public InteractionValue? Before { get; }
 
-        public InteractionValue After { get; }
+        public InteractionValue? After { get; }
+
+        public StatePropertyChangeKind Kind { get; }
     }
 
     public sealed record StateProbeDiff

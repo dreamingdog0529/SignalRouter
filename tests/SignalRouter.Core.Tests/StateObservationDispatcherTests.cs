@@ -49,6 +49,47 @@ public sealed class StateObservationDispatcherTests
     }
 
     [Test]
+    public async Task RegisteringATargetDuringAStageYieldsPerFieldAddedChanges()
+    {
+        using var harness = new ProbeHarness(withProbes: true);
+
+        // The stage registers a new target between the before and after captures, so the
+        // semantic-ui snapshot gains a target present only in the after state; the diff must
+        // enumerate it as per-field Added changes (ADR 0003).
+        harness.Register(
+            "menu.start",
+            _ => harness.Registry.Register(new MutableTarget("menu.extra", null), true));
+
+        var result = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options());
+
+        var semanticDiff = result.Diff.Probes.Single(
+            probe => probe.ProbeId == SemanticUiStateProbe.ProbeId);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(InteractionStatus.Succeeded));
+            Assert.That(
+                semanticDiff.Changes.Select(change => change.Path),
+                Is.SupersetOf(new[]
+                {
+                    "targets[menu.extra].role",
+                    "targets[menu.extra].label",
+                }));
+            Assert.That(
+                semanticDiff.Changes
+                    .Where(change => change.Path.StartsWith("targets[menu.extra]."))
+                    .Select(change => change.Kind),
+                Has.All.EqualTo(StatePropertyChangeKind.Added));
+            var label = semanticDiff.Changes.Single(
+                change => change.Path == "targets[menu.extra].label");
+            Assert.That(label.Before, Is.Null);
+            Assert.That(label.After, Is.EqualTo(InteractionValue.FromString("before")));
+        });
+    }
+
+    [Test]
     public async Task NonMutatingInteractionYieldsEqualObservationsAndAnEmptyDiff()
     {
         using var harness = new ProbeHarness(withProbes: true);
@@ -189,6 +230,8 @@ public sealed class StateObservationDispatcherTests
         }
 
         public InteractionDispatcher Dispatcher { get; }
+
+        public InteractionRegistry Registry => registry;
 
         public MutableTarget Register(string targetId, Action<MutableTarget>? stage = null)
         {

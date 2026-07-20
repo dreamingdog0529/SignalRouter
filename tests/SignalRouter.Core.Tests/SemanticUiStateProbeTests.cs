@@ -101,7 +101,7 @@ public sealed class SemanticUiStateProbeTests
     }
 
     [Test]
-    public void AnAddedTargetIsNotEnumerated()
+    public void AnAddedTargetIsEnumeratedAsPerFieldAddedChanges()
     {
         var catalog = InteractionCommandCatalog.CreateMvp();
         var registry = new InteractionRegistry(catalog, "session-1");
@@ -109,17 +109,69 @@ public sealed class SemanticUiStateProbeTests
         var probe = new SemanticUiStateProbe(registry);
 
         var before = probe.Capture();
-        registry.Register(new FakeTarget("menu.options"), true);
+        registry.Register(new FakeTarget("menu.options") { Role = "button", Label = "Options" }, true);
         var after = probe.Capture();
+        var changes = probe.DiffProperties(before, after);
 
-        // The added target changes the hash but has no before counterpart to diff against, so
-        // it is not enumerated (add/remove is deferred, ADR 0002).
+        // Every scalar field of the added target is enumerated as an Added change (before absent),
+        // so presence is expressed per field (ADR 0003). The pre-existing target is unchanged.
         NUnitCompat.Multiple(() =>
         {
             Assert.That(
-                StateCanonicalizer.ComputeHash(probe.Version, before),
-                Is.Not.EqualTo(StateCanonicalizer.ComputeHash(probe.Version, after)));
-            Assert.That(probe.DiffProperties(before, after), Is.Empty);
+                changes.Select(change => change.Path),
+                Is.EquivalentTo(new[]
+                {
+                    "targets[menu.options].role",
+                    "targets[menu.options].label",
+                    "targets[menu.options].parentId",
+                    "targets[menu.options].visible",
+                    "targets[menu.options].enabled",
+                    "targets[menu.options].value",
+                }));
+            Assert.That(
+                changes.Select(change => change.Kind),
+                Has.All.EqualTo(StatePropertyChangeKind.Added));
+            Assert.That(changes.Select(change => change.Before), Has.All.Null);
+            var role = Single(changes, "targets[menu.options].role");
+            Assert.That(role.After, Is.EqualTo(InteractionValue.FromString("button")));
+            var parentId = Single(changes, "targets[menu.options].parentId");
+            Assert.That(parentId.After, Is.EqualTo(InteractionValue.Null));
+        });
+    }
+
+    [Test]
+    public void ARemovedTargetIsEnumeratedAsPerFieldRemovedChanges()
+    {
+        var catalog = InteractionCommandCatalog.CreateMvp();
+        var registry = new InteractionRegistry(catalog, "session-1");
+        registry.Register(new FakeTarget("menu.start"), true);
+        var options = registry.Register(new FakeTarget("menu.options") { Label = "Options" }, true);
+        var probe = new SemanticUiStateProbe(registry);
+
+        var before = probe.Capture();
+        options.Dispose();
+        var after = probe.Capture();
+        var changes = probe.DiffProperties(before, after);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                changes.Select(change => change.Path),
+                Is.EquivalentTo(new[]
+                {
+                    "targets[menu.options].role",
+                    "targets[menu.options].label",
+                    "targets[menu.options].parentId",
+                    "targets[menu.options].visible",
+                    "targets[menu.options].enabled",
+                    "targets[menu.options].value",
+                }));
+            Assert.That(
+                changes.Select(change => change.Kind),
+                Has.All.EqualTo(StatePropertyChangeKind.Removed));
+            Assert.That(changes.Select(change => change.After), Has.All.Null);
+            var label = Single(changes, "targets[menu.options].label");
+            Assert.That(label.Before, Is.EqualTo(InteractionValue.FromString("Options")));
         });
     }
 
