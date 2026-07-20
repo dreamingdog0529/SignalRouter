@@ -254,7 +254,8 @@ namespace SignalRouter
                             command.TargetId,
                             commandName,
                             commandVersion,
-                            options.Origin);
+                            options.Origin,
+                            scope);
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -264,7 +265,8 @@ namespace SignalRouter
                         command.TargetId,
                         commandName,
                         commandVersion,
-                        options.Origin);
+                        options.Origin,
+                        scope);
                 }
                 catch (Exception exception)
                 {
@@ -274,7 +276,8 @@ namespace SignalRouter
                         commandName,
                         commandVersion,
                         options.Origin,
-                        exception);
+                        exception,
+                        scope);
                 }
                 finally
                 {
@@ -477,8 +480,13 @@ namespace SignalRouter
             string targetId,
             string commandName,
             int commandVersion,
-            InteractionOrigin origin)
+            InteractionOrigin origin,
+            InteractionExecutionScope? scope)
         {
+            var tracker = scope?.Context.Tracker;
+            var stages = tracker != null && tracker.RecordedAnything
+                ? tracker.BuildCompleted()
+                : SingleStage(InteractionStageStatus.Completed);
             return new InteractionResult(
                 request.Sequence,
                 request.RequestId,
@@ -489,7 +497,7 @@ namespace SignalRouter
                 InteractionStatus.Succeeded,
                 rejection: null,
                 fault: null,
-                SingleStage(InteractionStageStatus.Completed),
+                stages,
                 StateObservation.Empty,
                 StateObservation.Empty,
                 StateDiff.Empty);
@@ -501,8 +509,31 @@ namespace SignalRouter
             string commandName,
             int commandVersion,
             InteractionOrigin origin,
-            Exception exception)
+            Exception exception,
+            InteractionExecutionScope? scope)
         {
+            var tracker = scope?.Context.Tracker;
+            StageProgress stages;
+            FaultInfo fault;
+            if (tracker != null && tracker.HasPending)
+            {
+                // A stage was in flight when the exception surfaced: it is the terminal faulted
+                // stage, preceded by every stage that completed.
+                stages = tracker.BuildTerminal(InteractionStageStatus.Faulted);
+                fault = CreateFault(
+                    exception,
+                    tracker.PendingStageId,
+                    tracker.PendingStageIndex,
+                    tracker.CompletedStageIds());
+            }
+            else
+            {
+                // Opaque pipeline or a fault raised outside any stage: fall back to the synthetic
+                // single "execute" stage.
+                stages = SingleStage(InteractionStageStatus.Faulted);
+                fault = CreateFault(exception);
+            }
+
             return new InteractionResult(
                 request.Sequence,
                 request.RequestId,
@@ -512,8 +543,8 @@ namespace SignalRouter
                 origin,
                 InteractionStatus.Faulted,
                 rejection: null,
-                CreateFault(exception),
-                SingleStage(InteractionStageStatus.Faulted),
+                fault,
+                stages,
                 StateObservation.Empty,
                 StateObservation.Empty,
                 StateDiff.Empty);
@@ -524,8 +555,28 @@ namespace SignalRouter
             string targetId,
             string commandName,
             int commandVersion,
-            InteractionOrigin origin)
+            InteractionOrigin origin,
+            InteractionExecutionScope? scope)
         {
+            var tracker = scope?.Context.Tracker;
+            StageProgress stages;
+            if (tracker != null && tracker.HasPending)
+            {
+                stages = tracker.BuildTerminal(InteractionStageStatus.Cancelled);
+            }
+            else if (tracker != null && tracker.IsStageDriven)
+            {
+                // A stage pipeline cancelled before its first stage: no stage ran, so the result
+                // carries no stages and stays out of the idempotency cache (no side effects).
+                stages = StageProgress.Empty;
+            }
+            else
+            {
+                // Opaque pipeline that ran and observed cancellation: keep the synthetic single
+                // stage so the cancellation is retained as a possibly-side-effecting outcome.
+                stages = SingleStage(InteractionStageStatus.Cancelled);
+            }
+
             return new InteractionResult(
                 request.Sequence,
                 request.RequestId,
@@ -536,7 +587,7 @@ namespace SignalRouter
                 InteractionStatus.Cancelled,
                 rejection: null,
                 fault: null,
-                SingleStage(InteractionStageStatus.Cancelled),
+                stages,
                 StateObservation.Empty,
                 StateObservation.Empty,
                 StateDiff.Empty);
@@ -600,6 +651,15 @@ namespace SignalRouter
 
         private static FaultInfo CreateFault(Exception exception)
         {
+            return CreateFault(exception, ExecuteStageId, 0, Array.Empty<string>());
+        }
+
+        private static FaultInfo CreateFault(
+            Exception exception,
+            string failedStageId,
+            int failedStageIndex,
+            IEnumerable<string> completedStageIds)
+        {
             var message = string.IsNullOrEmpty(exception.Message)
                 ? "The interaction faulted without an exception message."
                 : exception.Message;
@@ -610,9 +670,9 @@ namespace SignalRouter
                 exception is InteractionInvariantViolationException
                     ? InvariantViolationCode
                     : null,
-                ExecuteStageId,
-                0,
-                Array.Empty<string>());
+                failedStageId,
+                failedStageIndex,
+                completedStageIds);
         }
 
         private static string FormatRejection(string format, string targetId)

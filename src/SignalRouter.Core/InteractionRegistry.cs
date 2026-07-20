@@ -56,6 +56,7 @@ namespace SignalRouter
             Sequence = sequence;
             RequestId = requestId;
             Options = options;
+            Tracker = new StageProgressTracker();
         }
 
         public long Sequence { get; }
@@ -63,6 +64,23 @@ namespace SignalRouter
         public string RequestId { get; }
 
         public InteractionDispatchOptions Options { get; }
+
+        internal StageProgressTracker Tracker { get; }
+
+        internal void MarkStageDriven()
+        {
+            Tracker.MarkStageDriven();
+        }
+
+        internal void BeginStage(string stageId, int index)
+        {
+            Tracker.BeginStage(stageId, index);
+        }
+
+        internal void CompleteStage()
+        {
+            Tracker.CompleteStage();
+        }
 
         public void EnqueueContinuation<TCommand>(
             TCommand command,
@@ -104,6 +122,19 @@ namespace SignalRouter
         where TCommand : struct, IInteractionCommand
     {
         InteractionValidation Validate(in TCommand command);
+
+        ValueTask ExecuteAsync(
+            TCommand command,
+            InteractionContext context,
+            CancellationToken cancellationToken);
+    }
+
+    public interface IInteractionStage<TCommand>
+        where TCommand : struct, IInteractionCommand
+    {
+        string Id { get; }
+
+        int Order { get; }
 
         ValueTask ExecuteAsync(
             TCommand command,
