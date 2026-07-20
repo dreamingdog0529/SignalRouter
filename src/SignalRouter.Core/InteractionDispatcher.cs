@@ -15,6 +15,7 @@ namespace SignalRouter
 
         private readonly InteractionCommandCatalog catalog;
         private readonly InteractionRegistry registry;
+        private readonly InteractionStateProbeRegistry? probes;
         private readonly Router router;
         private readonly AsyncLocal<InteractionExecutionScope?> currentScope =
             new AsyncLocal<InteractionExecutionScope?>();
@@ -30,9 +31,19 @@ namespace SignalRouter
             InteractionCommandCatalog catalog,
             InteractionRegistry registry,
             int idempotencyCacheCapacity = DefaultIdempotencyCacheCapacity)
+            : this(catalog, registry, null, idempotencyCacheCapacity)
+        {
+        }
+
+        public InteractionDispatcher(
+            InteractionCommandCatalog catalog,
+            InteractionRegistry registry,
+            InteractionStateProbeRegistry? probes,
+            int idempotencyCacheCapacity = DefaultIdempotencyCacheCapacity)
         {
             this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             this.registry = registry ?? throw new ArgumentNullException(nameof(registry));
+            this.probes = probes;
             if (idempotencyCacheCapacity < 1)
             {
                 throw new ArgumentOutOfRangeException(
@@ -190,6 +201,7 @@ namespace SignalRouter
             var request = AssignIdentity(chainQueue: true, out var queueSlot);
             InteractionResult result;
             InteractionExecutionScope? scope = null;
+            StateProbeReading? beforeReading = null;
             var predecessorObserved = false;
             try
             {
@@ -220,20 +232,22 @@ namespace SignalRouter
                     await SwitchTo(callerContext);
                 }
 
+                // Step 5 (design §7.1): capture the before-state observation before any side
+                // effect. This runs outside the result-normalizing catch below so that a probe
+                // invariant violation (a null or uncanonicalizable snapshot) fails fast per
+                // ADR 0001 instead of being reported as an application fault and cached as an
+                // idempotent outcome. Validation has no side effects (§13.2), so capturing here
+                // — before resolution — yields the same before-state as capturing at publish.
+                // A null probe registry keeps the pre-probe behavior (empty observations).
+                beforeReading = probes?.Read();
+
+                RejectionInfo? rejection = null;
+                Exception? fault = null;
+                var cancelledDuring = false;
                 try
                 {
-                    var rejection = ResolvePipeline<TCommand>(command, entry, out var pipeline);
-                    if (rejection != null)
-                    {
-                        result = Rejected(
-                            request,
-                            command.TargetId,
-                            commandName,
-                            commandVersion,
-                            options.Origin,
-                            rejection);
-                    }
-                    else
+                    rejection = ResolvePipeline<TCommand>(command, entry, out var pipeline);
+                    if (rejection == null)
                     {
                         var context = new InteractionContext(
                             request.Sequence,
@@ -249,26 +263,36 @@ namespace SignalRouter
                         currentScope.Value = scope;
                         activeScope = scope;
                         await router.PublishAsync(command, cancellationToken).ConfigureAwait(false);
-                        result = Succeeded(
-                            request,
-                            command.TargetId,
-                            commandName,
-                            commandVersion,
-                            options.Origin,
-                            scope);
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    result = CancelledDuringExecution(
+                    cancelledDuring = true;
+                }
+                catch (Exception exception)
+                {
+                    fault = exception;
+                }
+                finally
+                {
+                    activeScope = null;
+                    currentScope.Value = null;
+                }
+
+                // Step 8/9 (design §7.1): build the terminal result outside the normalizing
+                // catch. The after-state capture (CaptureAfter) therefore also fails fast on a
+                // probe invariant violation rather than being swallowed into a Faulted result.
+                if (rejection != null)
+                {
+                    result = Rejected(
                         request,
                         command.TargetId,
                         commandName,
                         commandVersion,
                         options.Origin,
-                        scope);
+                        rejection);
                 }
-                catch (Exception exception)
+                else if (fault != null)
                 {
                     result = Faulted(
                         request,
@@ -276,13 +300,31 @@ namespace SignalRouter
                         commandName,
                         commandVersion,
                         options.Origin,
-                        exception,
-                        scope);
+                        fault,
+                        scope,
+                        CaptureAfter(beforeReading));
                 }
-                finally
+                else if (cancelledDuring)
                 {
-                    activeScope = null;
-                    currentScope.Value = null;
+                    result = CancelledDuringExecution(
+                        request,
+                        command.TargetId,
+                        commandName,
+                        commandVersion,
+                        options.Origin,
+                        scope,
+                        CaptureAfter(beforeReading));
+                }
+                else
+                {
+                    result = Succeeded(
+                        request,
+                        command.TargetId,
+                        commandName,
+                        commandVersion,
+                        options.Origin,
+                        scope,
+                        CaptureAfter(beforeReading));
                 }
             }
             finally
@@ -481,7 +523,8 @@ namespace SignalRouter
             string commandName,
             int commandVersion,
             InteractionOrigin origin,
-            InteractionExecutionScope? scope)
+            InteractionExecutionScope? scope,
+            StateCapture state)
         {
             var tracker = scope?.Context.Tracker;
             var stages = tracker != null && tracker.RecordedAnything
@@ -498,9 +541,9 @@ namespace SignalRouter
                 rejection: null,
                 fault: null,
                 stages,
-                StateObservation.Empty,
-                StateObservation.Empty,
-                StateDiff.Empty);
+                state.Before,
+                state.After,
+                state.Diff);
         }
 
         private static InteractionResult Faulted(
@@ -510,7 +553,8 @@ namespace SignalRouter
             int commandVersion,
             InteractionOrigin origin,
             Exception exception,
-            InteractionExecutionScope? scope)
+            InteractionExecutionScope? scope,
+            StateCapture state)
         {
             var tracker = scope?.Context.Tracker;
             StageProgress stages;
@@ -545,9 +589,9 @@ namespace SignalRouter
                 rejection: null,
                 fault,
                 stages,
-                StateObservation.Empty,
-                StateObservation.Empty,
-                StateDiff.Empty);
+                state.Before,
+                state.After,
+                state.Diff);
         }
 
         private static InteractionResult CancelledDuringExecution(
@@ -556,10 +600,12 @@ namespace SignalRouter
             string commandName,
             int commandVersion,
             InteractionOrigin origin,
-            InteractionExecutionScope? scope)
+            InteractionExecutionScope? scope,
+            StateCapture state)
         {
             var tracker = scope?.Context.Tracker;
             StageProgress stages;
+            var effectiveState = state;
             if (tracker != null && tracker.HasPending)
             {
                 stages = tracker.BuildTerminal(InteractionStageStatus.Cancelled);
@@ -568,7 +614,10 @@ namespace SignalRouter
             {
                 // A stage pipeline cancelled before its first stage: no stage ran, so the result
                 // carries no stages and stays out of the idempotency cache (no side effects).
+                // Cancellation before the first stage must not change state (design §8.1), so it
+                // reports no observation regardless of the probe registry.
                 stages = StageProgress.Empty;
+                effectiveState = StateCapture.Empty;
             }
             else
             {
@@ -588,9 +637,9 @@ namespace SignalRouter
                 rejection: null,
                 fault: null,
                 stages,
-                StateObservation.Empty,
-                StateObservation.Empty,
-                StateDiff.Empty);
+                effectiveState.Before,
+                effectiveState.After,
+                effectiveState.Diff);
         }
 
         private static InteractionResult Rejected(
@@ -640,6 +689,24 @@ namespace SignalRouter
                 StateDiff.Empty);
         }
 
+        // Step 8 (design §7.1): capture the after-state observation by re-reading the same
+        // probes captured before publish, and derive the before/after/diff triple. A null
+        // before reading (no probe registry, or a path with no side effects) yields empty
+        // observations, matching pre-probe behavior.
+        private static StateCapture CaptureAfter(StateProbeReading? before)
+        {
+            if (before == null)
+            {
+                return StateCapture.Empty;
+            }
+
+            var after = before.ReadSame();
+            return new StateCapture(
+                before.ToObservation(),
+                after.ToObservation(),
+                StateProbeReading.Diff(before, after));
+        }
+
         private static StageProgress SingleStage(InteractionStageStatus status)
         {
             return new StageProgress(
@@ -681,6 +748,27 @@ namespace SignalRouter
                 System.Globalization.CultureInfo.InvariantCulture,
                 format,
                 targetId);
+        }
+
+        private readonly struct StateCapture
+        {
+            public static readonly StateCapture Empty = new StateCapture(
+                StateObservation.Empty,
+                StateObservation.Empty,
+                StateDiff.Empty);
+
+            public StateCapture(StateObservation before, StateObservation after, StateDiff diff)
+            {
+                Before = before;
+                After = after;
+                Diff = diff;
+            }
+
+            public StateObservation Before { get; }
+
+            public StateObservation After { get; }
+
+            public StateDiff Diff { get; }
         }
 
         private readonly struct RequestIdentity
