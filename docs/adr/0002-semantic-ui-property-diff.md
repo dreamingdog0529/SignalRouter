@@ -54,6 +54,11 @@ Adopt a **descriptor-aware property diff, provided by the probe itself**.
    `InteractionValue`) cannot express presence ("target added") or nested structure without a
    model extension; those are left to a follow-up. A probe may therefore report a hash change
    with an empty or partial `Changes` list — the hash stays authoritative.
+
+   > **Update (ADR 0003):** target additions/removals are now enumerated per field —
+   > [ADR 0003](0003-structural-property-diff.md) extends `StatePropertyChange` with a
+   > nullable absent side (`Added`/`Removed`). Only nested `availableInteractions`/
+   > argument-schema changes remain deferred to a future follow-up.
 5. **Failure model.** A diff provider that emits an invalid change (e.g. equal before/after,
    or a value it cannot parse from its own snapshot) is a runtime invariant violation
    (fail-fast, `InteractionInvariantViolationException`), not an application-stage fault —
