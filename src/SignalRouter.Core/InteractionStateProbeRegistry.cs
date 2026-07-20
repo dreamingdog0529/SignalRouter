@@ -177,47 +177,54 @@ namespace SignalRouter
                 {
                     // before.probes and after.probes share the same pinned instances
                     // (ReadSame recaptures them), so either reading names the same probe.
-                    var changes = ComputePropertyChanges(
-                        before.probes[index],
-                        beforeProbe.Snapshot,
-                        afterProbe.Snapshot);
-                    diffs.Add(
-                        new StateProbeDiff(
-                            beforeProbe.Id,
-                            beforeProbe.Hash,
-                            afterProbe.Hash,
-                            changes));
+                    diffs.Add(BuildChangedProbeDiff(before.probes[index], beforeProbe, afterProbe));
                 }
             }
 
             return diffs.Count == 0 ? StateDiff.Empty : new StateDiff(diffs);
         }
 
-        private static IReadOnlyList<StatePropertyChange> ComputePropertyChanges(
+        private static StateProbeDiff BuildChangedProbeDiff(
             IInteractionStateProbe probe,
-            StateProbeSnapshot before,
-            StateProbeSnapshot after)
+            in CapturedProbe before,
+            in CapturedProbe after)
         {
-            if (!(probe is IStatePropertyDiffProvider provider))
-            {
-                return Array.Empty<StatePropertyChange>();
-            }
-
             try
             {
-                return provider.DiffProperties(before, after)
-                    ?? throw new InteractionInvariantViolationException(
-                        string.Format(
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            "Probe '{0}' returned a null property-change list.",
-                            probe.Id));
+                IReadOnlyList<StatePropertyChange> changes;
+                if (probe is IStatePropertyDiffProvider provider)
+                {
+                    changes = provider.DiffProperties(before.Snapshot, after.Snapshot);
+                    if (changes == null)
+                    {
+                        throw new InteractionInvariantViolationException(
+                            string.Format(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                "Probe '{0}' returned a null property-change list.",
+                                probe.Id));
+                    }
+                }
+                else
+                {
+                    changes = Array.Empty<StatePropertyChange>();
+                }
+
+                // Build the diff inside the guard so an invalid change list — duplicate paths,
+                // a null element, or an equal-valued change — surfaces as an invariant
+                // violation too, rather than a raw ArgumentException escaping from
+                // StateProbeDiff's own validation after the guard.
+                return new StateProbeDiff(before.Id, before.Hash, after.Hash, changes);
             }
             catch (Exception exception)
-                when (exception is ArgumentException || exception is FormatException)
+                when (exception is ArgumentException
+                    || exception is FormatException
+                    || exception is InvalidOperationException
+                    || exception is OverflowException)
             {
-                // A diff provider that emits an invalid change (e.g. equal before/after, or a
-                // value it cannot parse from its own snapshot) is a runtime invariant
-                // violation, not an application-stage fault (ADR 0001 rule 5).
+                // A diff provider that emits an invalid change or cannot parse a value from its
+                // own snapshot is a runtime invariant violation, not an application-stage fault
+                // (ADR 0001 rule 5, ADR 0002). InteractionInvariantViolationException thrown
+                // above is intentionally not caught here and propagates unchanged.
                 throw new InteractionInvariantViolationException(
                     string.Format(
                         System.Globalization.CultureInfo.InvariantCulture,

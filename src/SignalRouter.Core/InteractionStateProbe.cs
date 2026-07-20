@@ -35,9 +35,11 @@ namespace SignalRouter
             this.utf8Json = utf8Json;
         }
 
-        // The probe's already-redacted payload as UTF-8 JSON bytes. The returned memory is
-        // a view over a private copy; callers must not assume ownership.
-        internal ReadOnlyMemory<byte> Utf8Json
+        // The probe's already-redacted payload as UTF-8 JSON bytes. Public so an
+        // out-of-assembly IStatePropertyDiffProvider can parse the before/after snapshots it
+        // is handed. The returned memory is a view over a private copy; callers must not
+        // mutate the underlying buffer or assume ownership.
+        public ReadOnlyMemory<byte> Utf8Json
         {
             get { return utf8Json; }
         }

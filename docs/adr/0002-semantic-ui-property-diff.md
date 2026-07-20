@@ -80,6 +80,10 @@ Adopt a **descriptor-aware property diff, provided by the probe itself**.
 ## Implementation
 
 - `IStatePropertyDiffProvider` — the optional capability contract.
+- `StateProbeSnapshot.Utf8Json` — exposed publicly so an out-of-assembly provider can parse
+  the before/after snapshots it is handed.
 - `SemanticUiStateProbe` — implements `DiffProperties` over its snapshot schema.
 - `InteractionStateProbeRegistry` / `StateProbeReading` — retain each probe's snapshot in the
-  reading and call the provider for a changed probe; fail fast on an invalid diff.
+  reading and build the changed probe's diff inside the guarded path, so an invalid change
+  list (duplicate paths, a null element, an equal-valued change) or a provider that throws
+  while diffing fails fast as an invariant violation.
