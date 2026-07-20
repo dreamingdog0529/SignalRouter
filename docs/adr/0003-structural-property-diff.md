@@ -49,6 +49,11 @@ Extend `StatePropertyChange` to express presence, and enumerate target add/remov
    remain hash-only. They need a nested path convention and an interaction/argument matching
    rule, which is out of scope here and left to a further follow-up (ADR 0002 item 4).
 
+   > **Update (ADR 0004):** resolved — [ADR 0004](0004-nested-interaction-property-diff.md)
+   > adds the nested path convention (interactions keyed by `(wireName, version)`, arguments
+   > by `name`) and enumerates interaction/argument additions, removals, field changes, and
+   > (membership-preserving) reordering. No semantic-UI change remains hash-only.
+
 ## Consequences
 
 - **Positive.** A target appearing or disappearing is now a typed, per-field delta with no

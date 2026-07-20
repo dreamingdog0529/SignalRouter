@@ -655,10 +655,14 @@ optional `IStatePropertyDiffProvider`. A target present in both snapshots yields
 change per differing field ([ADR 0002](adr/0002-semantic-ui-property-diff.md)); a target
 present on only one side yields an `Added` or `Removed` change per field, so a target
 addition or removal is enumerated per field via the nullable-side `StatePropertyChange` model
-([ADR 0003](adr/0003-structural-property-diff.md)). Nested `availableInteractions` changes
-still change the hash but are not yet enumerated as property changes; the hash remains
-authoritative for those. Generic JSON Patch output is deferred until a stable canonicalization
-and size policy has been proven.
+([ADR 0003](adr/0003-structural-property-diff.md)). Nested `availableInteractions`/argument-
+schema changes are enumerated too, under the path
+`targets[<id>].availableInteractions[<wireName>@<version>].arguments[<name>].<field>`:
+interactions are matched by `(wireName, version)` and arguments by `name`, with additions,
+removals, field changes, and membership-preserving reordering all reported
+([ADR 0004](adr/0004-nested-interaction-property-diff.md)). No semantic-UI change remains
+hash-only. Generic JSON Patch output is deferred until a stable canonicalization and size
+policy has been proven.
 
 ### 14.1 Planned direction: state history and inspection
 
@@ -982,7 +986,7 @@ The MVP is complete only when all of the following are demonstrated in automated
 | D13 | Duplicate target registration fails immediately under ordinal ID comparison and preserves the existing registration |
 | D14 | Core and Protocol are .NET-first packable libraries; Unity consumes them as NuGet packages via NuGetForUnity, superseding the earlier single-source UPM layout |
 | D15 | State snapshots use a constrained canonical JSON subset with SHA-256 lowercase-hex hashing, not RFC 8785; transient queue state is excluded from the hash (ADR 0001) |
-| D16 | Property-level state diffs are provided by the probe (`IStatePropertyDiffProvider`); the semantic-ui diff enumerates matched-target scalar fields (ADR 0002) and per-field `Added`/`Removed` changes for target additions/removals (ADR 0003), while nested interaction changes stay hash-level |
+| D16 | Property-level state diffs are provided by the probe (`IStatePropertyDiffProvider`); the semantic-ui diff enumerates matched-target scalar fields (ADR 0002), per-field `Added`/`Removed` changes for target additions/removals (ADR 0003), and nested `availableInteractions`/argument-schema changes — additions, removals, field changes, and membership-preserving reordering (ADR 0004) |
 
 ## 25. Remaining implementation-level decisions
 
