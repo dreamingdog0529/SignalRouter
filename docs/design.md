@@ -636,15 +636,23 @@ Applications may register probes for inventory, navigation, scene state, or othe
 data. Agent access to probe contents is opt-in.
 
 Snapshots use canonical JSON and SHA-256 hashes. Redaction occurs before canonicalization
-and hashing so that secret values do not enter recordings indirectly.
+and hashing so that secret values do not enter recordings indirectly. The canonicalization
+and hashing scheme is defined by [ADR 0001](adr/0001-canonical-state-hashing.md): a
+constrained JSON subset (object, array, string, boolean, integer, null) with ordinal key
+ordering and SHA-256 lowercase-hex output. Per that ADR, the `interaction-runtime` probe
+hashes session epoch and registry revision; transient queue state is deliberately excluded
+from the hash because it would break replay determinism.
 
 The MVP state diff contains:
 
 - before and after hashes for each probe;
 - property-level changes for semantic UI descriptors.
 
-Generic JSON Patch output is deferred until a stable canonicalization and size policy has
-been proven.
+Hash-level before/after observation and diff are implemented. Property-level
+`StatePropertyChange` output for semantic UI descriptors is deferred to a follow-up; a
+changed probe currently reports its before/after hashes with an empty change set. Generic
+JSON Patch output is deferred until a stable canonicalization and size policy has been
+proven.
 
 ## 15. Recording
 
@@ -934,13 +942,13 @@ The MVP is complete only when all of the following are demonstrated in automated
 | D12 | Command catalogs are immutable after build; wire identity and CLR command type are each unique |
 | D13 | Duplicate target registration fails immediately under ordinal ID comparison and preserves the existing registration |
 | D14 | Core and Protocol are .NET-first packable libraries; Unity consumes them as NuGet packages via NuGetForUnity, superseding the earlier single-source UPM layout |
+| D15 | State snapshots use a constrained canonical JSON subset with SHA-256 lowercase-hex hashing, not RFC 8785; transient queue state is excluded from the hash (ADR 0001) |
 
 ## 25. Remaining implementation-level decisions
 
 These items do not change the accepted architecture, but they must be resolved and tested
 before their respective components are considered stable:
 
-- canonical state JSON normalization and hashing;
 - the MCP host target .NET version;
 - text-input dispatch timing;
 - default artifact-root location;
