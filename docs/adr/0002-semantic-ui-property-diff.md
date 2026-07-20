@@ -59,6 +59,11 @@ Adopt a **descriptor-aware property diff, provided by the probe itself**.
    > [ADR 0003](0003-structural-property-diff.md) extends `StatePropertyChange` with a
    > nullable absent side (`Added`/`Removed`). Only nested `availableInteractions`/
    > argument-schema changes remain deferred to a future follow-up.
+   >
+   > **Update (ADR 0004):** nested `availableInteractions`/argument-schema changes are now
+   > enumerated too — [ADR 0004](0004-nested-interaction-property-diff.md) adds a nested path
+   > convention (interactions keyed by `(wireName, version)`, arguments by `name`). This item
+   > is fully resolved; nothing in the semantic-UI diff remains hash-only.
 5. **Failure model.** A diff provider that emits an invalid change (e.g. equal before/after,
    or a value it cannot parse from its own snapshot) is a runtime invariant violation
    (fail-fast, `InteractionInvariantViolationException`), not an application-stage fault —
