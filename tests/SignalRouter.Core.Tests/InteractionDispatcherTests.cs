@@ -368,6 +368,175 @@ public sealed class InteractionDispatcherTests
         });
     }
 
+    [Test]
+    public async Task ResolutionExceptionsAreNormalizedToFaultedResults()
+    {
+        using var harness = new Harness();
+        harness.Register(
+            "menu.start",
+            validateThrow: new InvalidOperationException("validate boom"));
+
+        var result = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options());
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(InteractionStatus.Faulted));
+            Assert.That(
+                result.Fault!.ExceptionType,
+                Is.EqualTo(typeof(InvalidOperationException).FullName));
+            Assert.That(result.Fault.Message, Is.EqualTo("validate boom"));
+            Assert.That(harness.Log, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task IdempotentRetriesExecuteOnceAndReturnTheSameResult()
+    {
+        using var harness = new Harness();
+        var executions = 0;
+        harness.Register("menu.start", onExecute: (_, _) =>
+        {
+            Interlocked.Increment(ref executions);
+            return default;
+        });
+        var options = new InteractionDispatchOptions(
+            InteractionOrigin.Agent,
+            idempotencyKey: "submit-1");
+
+        var first = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            options);
+        var second = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            options);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(executions, Is.EqualTo(1));
+            Assert.That(harness.Log, Is.EqualTo(new[] { "menu.start" }));
+            Assert.That(first.Status, Is.EqualTo(InteractionStatus.Succeeded));
+            Assert.That(second.Sequence, Is.EqualTo(first.Sequence));
+            Assert.That(second.RequestId, Is.EqualTo(first.RequestId));
+        });
+    }
+
+    [Test]
+    public async Task DistinctIdempotencyKeysExecuteIndependently()
+    {
+        using var harness = new Harness();
+        harness.Register("menu.start");
+
+        var first = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            new InteractionDispatchOptions(InteractionOrigin.Agent, idempotencyKey: "a"));
+        var second = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            new InteractionDispatchOptions(InteractionOrigin.Agent, idempotencyKey: "b"));
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(harness.Log, Is.EqualTo(new[] { "menu.start", "menu.start" }));
+            Assert.That(second.Sequence, Is.Not.EqualTo(first.Sequence));
+            Assert.That(second.RequestId, Is.Not.EqualTo(first.RequestId));
+        });
+    }
+
+    [Test]
+    public async Task RejectedIdempotentRequestIsNotCachedAndCanBeRetried()
+    {
+        using var harness = new Harness();
+        harness.Register("menu.start");
+        harness.TargetFor("menu.start").Enabled = false;
+        var options = new InteractionDispatchOptions(
+            InteractionOrigin.Agent,
+            idempotencyKey: "retry-key");
+
+        var rejected = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            options);
+        harness.TargetFor("menu.start").Enabled = true;
+        var succeeded = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            options);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(rejected.Status, Is.EqualTo(InteractionStatus.Rejected));
+            Assert.That(
+                rejected.Rejection!.Code,
+                Is.EqualTo(InteractionRejectionCode.Disabled));
+            Assert.That(succeeded.Status, Is.EqualTo(InteractionStatus.Succeeded));
+            Assert.That(harness.Log, Is.EqualTo(new[] { "menu.start" }));
+        });
+    }
+
+    [Test]
+    public async Task LongContinuationChainsDoNotOverflowTheStack()
+    {
+        using var harness = new Harness();
+        const int depth = 5000;
+        var executed = 0;
+        var done = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Register("menu.chain", onExecute: (context, _) =>
+        {
+            var count = Interlocked.Increment(ref executed);
+            if (count < depth)
+            {
+                context.EnqueueContinuation(new ClickCommand("menu.chain"), Options());
+            }
+            else
+            {
+                done.TrySetResult(true);
+            }
+
+            return default;
+        });
+
+        var first = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.chain"),
+            Options());
+        await done.Task;
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(first.Status, Is.EqualTo(InteractionStatus.Succeeded));
+            Assert.That(executed, Is.EqualTo(depth));
+        });
+    }
+
+    [Test]
+    public async Task ExecutionMarshalsBackToTheCallerSynchronizationContext()
+    {
+        using var harness = new Harness();
+        using var context = new SingleThreadSynchronizationContext();
+        var blocker = harness.Register("menu.first", gate: true);
+        var secondThread = 0;
+        harness.Register("menu.second", onExecute: (_, _) =>
+        {
+            secondThread = Environment.CurrentManagedThreadId;
+            return default;
+        });
+
+        await context.Run(async () =>
+        {
+            var first = harness.Dispatcher.DispatchAsync(
+                new ClickCommand("menu.first"),
+                Options()).AsTask();
+            await blocker.Started.Task;
+            var second = harness.Dispatcher.DispatchAsync(
+                new ClickCommand("menu.second"),
+                Options()).AsTask();
+            blocker.Release();
+            await first;
+            await second;
+        });
+
+        Assert.That(secondThread, Is.EqualTo(context.ThreadId));
+    }
+
     private static InteractionDispatchOptions Options(
         InteractionOrigin origin = InteractionOrigin.Test)
     {
@@ -388,6 +557,7 @@ public sealed class InteractionDispatcherTests
     {
         private readonly InteractionRegistry registry;
         private readonly List<IInteractionTargetRegistration> registrations = new();
+        private readonly Dictionary<string, HarnessTarget> targetsById = new(StringComparer.Ordinal);
         private readonly ConcurrentQueue<string> log = new();
 
         public Harness(InteractionCommandCatalog? catalog = null)
@@ -406,12 +576,18 @@ public sealed class InteractionDispatcherTests
 
         public Action<string, InteractionResult>? OnExecuted { get; set; }
 
+        public HarnessTarget TargetFor(string targetId)
+        {
+            return targetsById[targetId];
+        }
+
         public Blocker Register(
             string targetId,
             bool visible = true,
             bool enabled = true,
             bool gate = false,
             InteractionValidation? validation = null,
+            Exception? validateThrow = null,
             Exception? fault = null,
             CancellationTokenSource? observeCancellation = null,
             Func<InteractionContext, CancellationToken, ValueTask>? onExecute = null)
@@ -422,12 +598,14 @@ public sealed class InteractionDispatcherTests
                 log,
                 blocker,
                 validation ?? InteractionValidation.Valid,
+                validateThrow,
                 fault,
                 observeCancellation,
                 onExecute,
                 result => OnExecuted?.Invoke(targetId, result));
             var target = new HarnessTarget(targetId, visible, enabled, pipeline);
             registrations.Add(registry.Register(target, true));
+            targetsById[targetId] = target;
             return blocker;
         }
 
@@ -466,8 +644,6 @@ public sealed class InteractionDispatcherTests
 
     private sealed class HarnessTarget : IInteractionTarget
     {
-        private readonly bool visible;
-        private readonly bool enabled;
         private readonly object pipeline;
 
         public HarnessTarget(
@@ -477,12 +653,16 @@ public sealed class InteractionDispatcherTests
             object pipeline)
         {
             Id = id;
-            this.visible = visible;
-            this.enabled = enabled;
+            Visible = visible;
+            Enabled = enabled;
             this.pipeline = pipeline;
         }
 
         public string Id { get; }
+
+        public bool Visible { get; set; }
+
+        public bool Enabled { get; set; }
 
         public InteractionDescriptor Describe()
         {
@@ -492,8 +672,8 @@ public sealed class InteractionDispatcherTests
                 "button",
                 "Label",
                 null,
-                visible,
-                enabled,
+                Visible,
+                Enabled,
                 new[]
                 {
                     new AvailableInteraction("click", 1, ClickCommandSchema.Instance.Arguments),
@@ -521,6 +701,7 @@ public sealed class InteractionDispatcherTests
         private readonly ConcurrentQueue<string> log;
         private readonly Blocker blocker;
         private readonly InteractionValidation validation;
+        private readonly Exception? validateThrow;
         private readonly Exception? fault;
         private readonly CancellationTokenSource? observeCancellation;
         private readonly Func<InteractionContext, CancellationToken, ValueTask>? onExecute;
@@ -531,6 +712,7 @@ public sealed class InteractionDispatcherTests
             ConcurrentQueue<string> log,
             Blocker blocker,
             InteractionValidation validation,
+            Exception? validateThrow,
             Exception? fault,
             CancellationTokenSource? observeCancellation,
             Func<InteractionContext, CancellationToken, ValueTask>? onExecute,
@@ -540,6 +722,7 @@ public sealed class InteractionDispatcherTests
             this.log = log;
             this.blocker = blocker;
             this.validation = validation;
+            this.validateThrow = validateThrow;
             this.fault = fault;
             this.observeCancellation = observeCancellation;
             this.onExecute = onExecute;
@@ -548,6 +731,11 @@ public sealed class InteractionDispatcherTests
 
         public InteractionValidation Validate(in ClickCommand command)
         {
+            if (validateThrow != null)
+            {
+                throw validateThrow;
+            }
+
             return validation;
         }
 
@@ -601,6 +789,85 @@ public sealed class InteractionDispatcherTests
                 StateObservation.Empty,
                 StateObservation.Empty,
                 StateDiff.Empty);
+        }
+    }
+
+    private sealed class SingleThreadSynchronizationContext : SynchronizationContext, IDisposable
+    {
+        private readonly System.Collections.Concurrent.BlockingCollection<WorkItem> queue = new();
+        private readonly Thread thread;
+
+        public SingleThreadSynchronizationContext()
+        {
+            thread = new Thread(RunLoop)
+            {
+                IsBackground = true,
+                Name = "signalrouter-test-main",
+            };
+            thread.Start();
+        }
+
+        public int ThreadId
+        {
+            get { return thread.ManagedThreadId; }
+        }
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            queue.Add(new WorkItem(d, state));
+        }
+
+        public override void Send(SendOrPostCallback d, object? state)
+        {
+            throw new NotSupportedException("Synchronous send is not supported.");
+        }
+
+        public Task Run(Func<Task> asyncMethod)
+        {
+            var completion = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            Post(
+                async _ =>
+                {
+                    try
+                    {
+                        await asyncMethod();
+                        completion.SetResult(true);
+                    }
+                    catch (Exception exception)
+                    {
+                        completion.SetException(exception);
+                    }
+                },
+                null);
+            return completion.Task;
+        }
+
+        public void Dispose()
+        {
+            queue.CompleteAdding();
+        }
+
+        private void RunLoop()
+        {
+            SetSynchronizationContext(this);
+            foreach (var item in queue.GetConsumingEnumerable())
+            {
+                item.Callback(item.State);
+            }
+        }
+
+        private readonly struct WorkItem
+        {
+            public WorkItem(SendOrPostCallback callback, object? state)
+            {
+                Callback = callback;
+                State = state;
+            }
+
+            public SendOrPostCallback Callback { get; }
+
+            public object? State { get; }
         }
     }
 }
