@@ -119,7 +119,7 @@ namespace SignalRouter
                             exception.Message));
                 }
 
-                captured[index] = new CapturedProbe(probe.Id, hash);
+                captured[index] = new CapturedProbe(probe.Id, hash, snapshot);
             }
 
             return new StateProbeReading(probes, captured);
@@ -150,8 +150,10 @@ namespace SignalRouter
         }
 
         // Emits a StateProbeDiff for each probe whose hash changed between the two readings.
-        // Property-level changes are deferred (design §14), so Changes is empty for now; the
-        // per-probe before/after hashes are the diff's content.
+        // A probe that implements IStatePropertyDiffProvider explains its hash change as
+        // property-level changes over its own snapshot schema (design §14, ADR 0002); any
+        // other probe reports the hash change with an empty change set. The per-probe
+        // before/after hashes remain the diff's authority regardless.
         public static StateDiff Diff(StateProbeReading before, StateProbeReading after)
         {
             if (before.captured.Length != after.captured.Length)
@@ -173,29 +175,74 @@ namespace SignalRouter
 
                 if (!string.Equals(beforeProbe.Hash, afterProbe.Hash, StringComparison.Ordinal))
                 {
+                    // before.probes and after.probes share the same pinned instances
+                    // (ReadSame recaptures them), so either reading names the same probe.
+                    var changes = ComputePropertyChanges(
+                        before.probes[index],
+                        beforeProbe.Snapshot,
+                        afterProbe.Snapshot);
                     diffs.Add(
                         new StateProbeDiff(
                             beforeProbe.Id,
                             beforeProbe.Hash,
                             afterProbe.Hash,
-                            Array.Empty<StatePropertyChange>()));
+                            changes));
                 }
             }
 
             return diffs.Count == 0 ? StateDiff.Empty : new StateDiff(diffs);
         }
 
+        private static IReadOnlyList<StatePropertyChange> ComputePropertyChanges(
+            IInteractionStateProbe probe,
+            StateProbeSnapshot before,
+            StateProbeSnapshot after)
+        {
+            if (!(probe is IStatePropertyDiffProvider provider))
+            {
+                return Array.Empty<StatePropertyChange>();
+            }
+
+            try
+            {
+                return provider.DiffProperties(before, after)
+                    ?? throw new InteractionInvariantViolationException(
+                        string.Format(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            "Probe '{0}' returned a null property-change list.",
+                            probe.Id));
+            }
+            catch (Exception exception)
+                when (exception is ArgumentException || exception is FormatException)
+            {
+                // A diff provider that emits an invalid change (e.g. equal before/after, or a
+                // value it cannot parse from its own snapshot) is a runtime invariant
+                // violation, not an application-stage fault (ADR 0001 rule 5).
+                throw new InteractionInvariantViolationException(
+                    string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "Probe '{0}' produced an invalid property-level diff: {1}",
+                        probe.Id,
+                        exception.Message));
+            }
+        }
+
         private readonly struct CapturedProbe
         {
-            public CapturedProbe(string id, string hash)
+            public CapturedProbe(string id, string hash, StateProbeSnapshot snapshot)
             {
                 Id = id;
                 Hash = hash;
+                Snapshot = snapshot;
             }
 
             public string Id { get; }
 
             public string Hash { get; }
+
+            // The snapshot the hash was computed from, retained so a property-level diff can
+            // compare structure without recapturing (design §14, ADR 0002).
+            public StateProbeSnapshot Snapshot { get; }
         }
     }
 }

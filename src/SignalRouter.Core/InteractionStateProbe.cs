@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace SignalRouter
 {
@@ -59,5 +60,22 @@ namespace SignalRouter
         {
             return new StateProbeSnapshot(utf8Json.ToArray());
         }
+    }
+
+    // Optional capability: a probe that can explain a hash change between two of its own
+    // snapshots as concrete property-level changes (design §14, ADR 0002). A probe owns its
+    // snapshot schema, so it — not the registry infrastructure — is what knows how to compare
+    // two snapshots structurally. Probes that do not implement this report hash-level changes
+    // only; a changed probe then carries an empty change set, exactly as before.
+    //
+    // The two snapshots are the ones already captured for the before/after readings, so they
+    // are guaranteed to be canonicalizable (their hashes were computed successfully). A
+    // provider that throws while diffing is a runtime invariant violation, not an application
+    // fault (ADR 0001 rule 5): capturing and diffing state is dispatcher infrastructure.
+    public interface IStatePropertyDiffProvider
+    {
+        IReadOnlyList<StatePropertyChange> DiffProperties(
+            StateProbeSnapshot before,
+            StateProbeSnapshot after);
     }
 }

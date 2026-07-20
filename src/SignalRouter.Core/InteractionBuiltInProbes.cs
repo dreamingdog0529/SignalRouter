@@ -8,8 +8,9 @@ namespace SignalRouter
 {
     // The semantic-ui built-in probe (design §14): a canonical snapshot of the semantic UI
     // tree — session epoch, revision, and every registered descriptor's observable state.
-    // Property-level diffs over this snapshot are deferred; this PR observes it at hash level.
-    public sealed class SemanticUiStateProbe : IInteractionStateProbe
+    // It also explains a hash change as property-level changes over its own snapshot schema
+    // (IStatePropertyDiffProvider, design §14, ADR 0002).
+    public sealed class SemanticUiStateProbe : IInteractionStateProbe, IStatePropertyDiffProvider
     {
         public const string ProbeId = "semantic-ui";
 
@@ -56,6 +57,156 @@ namespace SignalRouter
             }
 
             return StateProbeSnapshot.FromUtf8Bytes(buffer.WrittenMemory);
+        }
+
+        // Explains a semantic-ui hash change as scalar field changes on targets present in
+        // BOTH snapshots (matched by ordinal id). Target additions/removals and nested
+        // availableInteractions changes still change the hash but are not enumerated here;
+        // the 3-field StatePropertyChange cannot express presence or nested structure, so they
+        // are deferred (ADR 0002). Emitting only scalar field deltas keeps every change a
+        // valid StatePropertyChange (differing before/after InteractionValue).
+        public IReadOnlyList<StatePropertyChange> DiffProperties(
+            StateProbeSnapshot before,
+            StateProbeSnapshot after)
+        {
+            if (before == null)
+            {
+                throw new ArgumentNullException(nameof(before));
+            }
+
+            if (after == null)
+            {
+                throw new ArgumentNullException(nameof(after));
+            }
+
+            using (var beforeDocument = JsonDocument.Parse(before.Utf8Json))
+            using (var afterDocument = JsonDocument.Parse(after.Utf8Json))
+            {
+                var afterTargets = IndexTargetsById(afterDocument.RootElement);
+                var changes = new List<StatePropertyChange>();
+                foreach (var beforeTarget in EnumerateTargets(beforeDocument.RootElement))
+                {
+                    var id = beforeTarget.GetProperty("id").GetString()!;
+                    if (afterTargets.TryGetValue(id, out var afterTarget))
+                    {
+                        AddScalarFieldChanges(changes, id, beforeTarget, afterTarget);
+                    }
+                }
+
+                return changes;
+            }
+        }
+
+        private static void AddScalarFieldChanges(
+            List<StatePropertyChange> changes,
+            string id,
+            JsonElement before,
+            JsonElement after)
+        {
+            AddIfChanged(changes, id, "role", ReadString(before, "role"), ReadString(after, "role"));
+            AddIfChanged(changes, id, "label", ReadString(before, "label"), ReadString(after, "label"));
+            AddIfChanged(
+                changes,
+                id,
+                "parentId",
+                ReadNullableString(before, "parentId"),
+                ReadNullableString(after, "parentId"));
+            AddIfChanged(
+                changes,
+                id,
+                "visible",
+                InteractionValue.FromBoolean(before.GetProperty("visible").GetBoolean()),
+                InteractionValue.FromBoolean(after.GetProperty("visible").GetBoolean()));
+            AddIfChanged(
+                changes,
+                id,
+                "enabled",
+                InteractionValue.FromBoolean(before.GetProperty("enabled").GetBoolean()),
+                InteractionValue.FromBoolean(after.GetProperty("enabled").GetBoolean()));
+            AddIfChanged(
+                changes,
+                id,
+                "value",
+                ReadDescriptorValue(before.GetProperty("value")),
+                ReadDescriptorValue(after.GetProperty("value")));
+        }
+
+        private static void AddIfChanged(
+            List<StatePropertyChange> changes,
+            string id,
+            string field,
+            InteractionValue before,
+            InteractionValue after)
+        {
+            // Skip equal values: this both honors StatePropertyChange's before != after
+            // invariant and absorbs the one ambiguity where a JSON-null value and an explicit
+            // Null-kind value both map to InteractionValue.Null. The hash stays authoritative.
+            if (before.Equals(after))
+            {
+                return;
+            }
+
+            var path = string.Concat("targets[", id, "].", field);
+            changes.Add(new StatePropertyChange(path, before, after));
+        }
+
+        private static InteractionValue ReadString(JsonElement target, string field)
+        {
+            return InteractionValue.FromString(target.GetProperty(field).GetString()!);
+        }
+
+        private static InteractionValue ReadNullableString(JsonElement target, string field)
+        {
+            var element = target.GetProperty(field);
+            return element.ValueKind == JsonValueKind.Null
+                ? InteractionValue.Null
+                : InteractionValue.FromString(element.GetString()!);
+        }
+
+        private static InteractionValue ReadDescriptorValue(JsonElement value)
+        {
+            // A descriptor with no value serializes as JSON null; a value serializes as
+            // {"kind":N,"value":...}. Numbers are encoded as normalized invariant strings
+            // (see WriteValue), so they round-trip back through decimal.Parse.
+            if (value.ValueKind == JsonValueKind.Null)
+            {
+                return InteractionValue.Null;
+            }
+
+            var kind = (InteractionValueKind)value.GetProperty("kind").GetInt32();
+            switch (kind)
+            {
+                case InteractionValueKind.Null:
+                    return InteractionValue.Null;
+                case InteractionValueKind.String:
+                    return InteractionValue.FromString(value.GetProperty("value").GetString()!);
+                case InteractionValueKind.Boolean:
+                    return InteractionValue.FromBoolean(value.GetProperty("value").GetBoolean());
+                case InteractionValueKind.Number:
+                    return InteractionValue.FromNumber(
+                        decimal.Parse(
+                            value.GetProperty("value").GetString()!,
+                            NumberStyles.Number,
+                            CultureInfo.InvariantCulture));
+                default:
+                    throw new InvalidOperationException("The interaction value kind is invalid.");
+            }
+        }
+
+        private static IEnumerable<JsonElement> EnumerateTargets(JsonElement root)
+        {
+            return root.GetProperty("targets").EnumerateArray();
+        }
+
+        private static Dictionary<string, JsonElement> IndexTargetsById(JsonElement root)
+        {
+            var byId = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (var target in EnumerateTargets(root))
+            {
+                byId[target.GetProperty("id").GetString()!] = target;
+            }
+
+            return byId;
         }
 
         private static void WriteDescriptor(Utf8JsonWriter writer, InteractionDescriptor descriptor)
