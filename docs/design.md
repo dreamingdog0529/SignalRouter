@@ -660,6 +660,35 @@ still change the hash but are not yet enumerated as property changes; the hash r
 authoritative for those. Generic JSON Patch output is deferred until a stable canonicalization
 and size policy has been proven.
 
+### 14.1 Planned direction: state history and inspection
+
+State observation today is scoped to a single interaction: the dispatcher captures a
+before/after snapshot pair per dispatch and discards them once the `InteractionResult` is
+built. A planned extension retains a queryable **state timeline** — the per-moment probe
+snapshots as state evolves across interactions and scene transitions ("その場面場面のステート")
+— so a developer can ask *what did probe X look like at moment N*, not only the delta of the
+last interaction.
+
+The goal is **debuggability**. The same probe snapshots that already feed hashing and diffing
+(§14, [ADR 0001](adr/0001-canonical-state-hashing.md)) would be retained in a bounded, redacted
+history and surfaced through a new **read-only MCP tool** (e.g. `get_state` / `inspect_state`,
+augmenting the tool set in §18.2), so an agent or human can query current and historical state
+out-of-band from the interaction flow rather than reconstructing it from a recording.
+
+This is post-MVP and not yet designed. Open questions to resolve before it earns an ADR:
+
+- **Retention and size bounds.** The timeline must be bounded, not unbounded growth; this ties
+  into the §25 open items for state-snapshot size limits and cache retention.
+- **Relationship to recording (§15/§16).** Recordings already persist an append-only
+  interaction log that replay can reconstruct state from. The history mechanism must justify
+  what it adds — live, indexed query of retained snapshots versus archival replay — rather than
+  duplicating the recording stream.
+- **Sampling granularity.** Whether snapshots are retained per interaction, per scene/session
+  epoch, or on an explicit sampling policy, and how a moment is identified for lookup.
+- **Redaction and access.** Redaction before canonicalization (§14) and opt-in agent access
+  (§19) apply unchanged — no secret value may enter the retained history or the inspection tool
+  response.
+
 ## 15. Recording
 
 Recordings use append-only JSON Lines. The first line is a session header. Each submitted
@@ -785,6 +814,10 @@ the MCP client process to restart.
 `execute_interaction` returns a terminal `InteractionResult`, not queue acceptance.
 If a client-side timeout occurs, the caller can query the request ID with
 `get_interaction_result`.
+
+A read-only state-inspection tool for the planned state history (§14.1) is a candidate
+addition beyond this initial set, for querying current and historical probe state during
+debugging.
 
 ### 18.3 Protocol envelope
 
