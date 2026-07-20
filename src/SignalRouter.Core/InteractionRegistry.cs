@@ -67,6 +67,11 @@ namespace SignalRouter
 
         internal StageProgressTracker Tracker { get; }
 
+        internal void MarkStageDriven()
+        {
+            Tracker.MarkStageDriven();
+        }
+
         internal void BeginStage(string stageId, int index)
         {
             Tracker.BeginStage(stageId, index);

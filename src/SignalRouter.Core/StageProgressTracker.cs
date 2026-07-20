@@ -26,6 +26,17 @@ namespace SignalRouter
             get { return hasPending; }
         }
 
+        // Set when a StagePipeline drives execution. It lets the dispatcher tell a stage pipeline
+        // that was cancelled before its first stage (no stage ran, so the result must carry no
+        // stages and stay out of the idempotency cache) apart from an opaque pipeline that ran and
+        // observed cancellation (represented by the synthetic single stage).
+        public bool IsStageDriven { get; private set; }
+
+        public void MarkStageDriven()
+        {
+            IsStageDriven = true;
+        }
+
         public string PendingStageId
         {
             get

@@ -559,9 +559,24 @@ namespace SignalRouter
             InteractionExecutionScope? scope)
         {
             var tracker = scope?.Context.Tracker;
-            var stages = tracker != null && tracker.HasPending
-                ? tracker.BuildTerminal(InteractionStageStatus.Cancelled)
-                : SingleStage(InteractionStageStatus.Cancelled);
+            StageProgress stages;
+            if (tracker != null && tracker.HasPending)
+            {
+                stages = tracker.BuildTerminal(InteractionStageStatus.Cancelled);
+            }
+            else if (tracker != null && tracker.IsStageDriven)
+            {
+                // A stage pipeline cancelled before its first stage: no stage ran, so the result
+                // carries no stages and stays out of the idempotency cache (no side effects).
+                stages = StageProgress.Empty;
+            }
+            else
+            {
+                // Opaque pipeline that ran and observed cancellation: keep the synthetic single
+                // stage so the cancellation is retained as a possibly-side-effecting outcome.
+                stages = SingleStage(InteractionStageStatus.Cancelled);
+            }
+
             return new InteractionResult(
                 request.Sequence,
                 request.RequestId,

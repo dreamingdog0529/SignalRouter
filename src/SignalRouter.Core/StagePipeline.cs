@@ -98,16 +98,36 @@ namespace SignalRouter
                 throw new ArgumentNullException(nameof(context));
             }
 
+            context.MarkStageDriven();
+
             // Stages run in ascending order; the first exception or observed cancellation stops
             // every later stage (design §10.1). The pending stage becomes the terminal faulted or
-            // cancelled stage. Cancellation is checked after BeginStage so a between-stage
-            // cancellation is attributed to the stage about to run rather than left unassigned.
+            // cancelled stage.
             for (var index = 0; index < stages.Length; index++)
             {
                 var stage = stages[index];
+
+                // Before the first stage, an observed cancellation is "cancelled before the first
+                // stage" (design §12): record nothing so the interaction carries no stages and is
+                // treated as a no-side-effect cancellation. From the second stage on, defer the
+                // check until after BeginStage so a between-stage cancellation is attributed to the
+                // stage about to run, which becomes the terminal cancelled stage.
+                if (index == 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
                 context.BeginStage(stage.Id, index);
-                cancellationToken.ThrowIfCancellationRequested();
-                await stage.ExecuteAsync(command, context, cancellationToken).ConfigureAwait(false);
+
+                if (index != 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
+                // Application stages run on the caller's context (the Unity main thread under the
+                // main-thread policy, design §17.2); do not opt out of it between stages with
+                // ConfigureAwait(false).
+                await stage.ExecuteAsync(command, context, cancellationToken);
                 context.CompleteStage();
             }
         }
