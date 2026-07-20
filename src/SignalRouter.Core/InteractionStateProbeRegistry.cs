@@ -104,7 +104,7 @@ namespace SignalRouter
                 string hash;
                 try
                 {
-                    hash = StateCanonicalizer.ComputeHash(snapshot);
+                    hash = StateCanonicalizer.ComputeHash(probe.Version, snapshot);
                 }
                 catch (ArgumentException exception)
                 {

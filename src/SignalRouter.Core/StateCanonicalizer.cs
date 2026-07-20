@@ -53,15 +53,56 @@ namespace SignalRouter
             }
         }
 
-        // Lowercase-hex SHA-256 of the canonical bytes. The result contains no whitespace or
+        // Lowercase-hex SHA-256 of the probe's canonical envelope. The schema version is bound
+        // into the hashed envelope (ADR 0001) so a breaking probe version bump changes the hash
+        // even when the payload is byte-identical; strict replay (design §16) then cannot
+        // silently interpret a hash under the wrong schema. The result contains no whitespace or
         // control characters, so it satisfies InteractionContract.RequireIdentifier when it
         // becomes a StateProbeObservation hash.
-        public static string ComputeHash(StateProbeSnapshot snapshot)
+        public static string ComputeHash(int version, StateProbeSnapshot snapshot)
         {
-            var canonical = Canonicalize(snapshot);
+            var envelope = CanonicalizeEnvelope(version, snapshot);
             using (var sha256 = SHA256.Create())
             {
-                return ToLowerHex(sha256.ComputeHash(canonical));
+                return ToLowerHex(sha256.ComputeHash(envelope));
+            }
+        }
+
+        // The canonical envelope {"snapshot":<canonical snapshot>,"version":N}. Keys are in
+        // ascending ordinal order ("snapshot" before "version"), matching object canonicalization.
+        private static byte[] CanonicalizeEnvelope(int version, StateProbeSnapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                throw new ArgumentNullException(nameof(snapshot));
+            }
+
+            JsonDocument document;
+            try
+            {
+                document = JsonDocument.Parse(snapshot.Utf8Json);
+            }
+            catch (JsonException exception)
+            {
+                throw new ArgumentException(
+                    "A probe snapshot must be well-formed JSON.",
+                    nameof(snapshot),
+                    exception);
+            }
+
+            using (document)
+            {
+                var buffer = new ArrayBufferWriter<byte>();
+                using (var writer = new Utf8JsonWriter(buffer))
+                {
+                    writer.WriteStartObject();
+                    writer.WritePropertyName("snapshot");
+                    WriteCanonical(writer, document.RootElement);
+                    writer.WriteNumber("version", version);
+                    writer.WriteEndObject();
+                }
+
+                return buffer.WrittenSpan.ToArray();
             }
         }
 

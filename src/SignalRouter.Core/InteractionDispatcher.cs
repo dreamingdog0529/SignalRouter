@@ -30,7 +30,15 @@ namespace SignalRouter
         public InteractionDispatcher(
             InteractionCommandCatalog catalog,
             InteractionRegistry registry,
-            InteractionStateProbeRegistry? probes = null,
+            int idempotencyCacheCapacity = DefaultIdempotencyCacheCapacity)
+            : this(catalog, registry, null, idempotencyCacheCapacity)
+        {
+        }
+
+        public InteractionDispatcher(
+            InteractionCommandCatalog catalog,
+            InteractionRegistry registry,
+            InteractionStateProbeRegistry? probes,
             int idempotencyCacheCapacity = DefaultIdempotencyCacheCapacity)
         {
             this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
@@ -224,20 +232,22 @@ namespace SignalRouter
                     await SwitchTo(callerContext);
                 }
 
+                // Step 5 (design §7.1): capture the before-state observation before any side
+                // effect. This runs outside the result-normalizing catch below so that a probe
+                // invariant violation (a null or uncanonicalizable snapshot) fails fast per
+                // ADR 0001 instead of being reported as an application fault and cached as an
+                // idempotent outcome. Validation has no side effects (§13.2), so capturing here
+                // — before resolution — yields the same before-state as capturing at publish.
+                // A null probe registry keeps the pre-probe behavior (empty observations).
+                beforeReading = probes?.Read();
+
+                RejectionInfo? rejection = null;
+                Exception? fault = null;
+                var cancelledDuring = false;
                 try
                 {
-                    var rejection = ResolvePipeline<TCommand>(command, entry, out var pipeline);
-                    if (rejection != null)
-                    {
-                        result = Rejected(
-                            request,
-                            command.TargetId,
-                            commandName,
-                            commandVersion,
-                            options.Origin,
-                            rejection);
-                    }
-                    else
+                    rejection = ResolvePipeline<TCommand>(command, entry, out var pipeline);
+                    if (rejection == null)
                     {
                         var context = new InteractionContext(
                             request.Sequence,
@@ -252,23 +262,49 @@ namespace SignalRouter
                         context.AttachScope(scope);
                         currentScope.Value = scope;
                         activeScope = scope;
-
-                        // Step 5 (design §7.1): capture the before-state observation
-                        // immediately before any side effect. Null probe registry keeps the
-                        // pre-probe behavior (empty observations) for existing callers.
-                        beforeReading = probes?.Read();
                         await router.PublishAsync(command, cancellationToken).ConfigureAwait(false);
-                        result = Succeeded(
-                            request,
-                            command.TargetId,
-                            commandName,
-                            commandVersion,
-                            options.Origin,
-                            scope,
-                            CaptureAfter(beforeReading));
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    cancelledDuring = true;
+                }
+                catch (Exception exception)
+                {
+                    fault = exception;
+                }
+                finally
+                {
+                    activeScope = null;
+                    currentScope.Value = null;
+                }
+
+                // Step 8/9 (design §7.1): build the terminal result outside the normalizing
+                // catch. The after-state capture (CaptureAfter) therefore also fails fast on a
+                // probe invariant violation rather than being swallowed into a Faulted result.
+                if (rejection != null)
+                {
+                    result = Rejected(
+                        request,
+                        command.TargetId,
+                        commandName,
+                        commandVersion,
+                        options.Origin,
+                        rejection);
+                }
+                else if (fault != null)
+                {
+                    result = Faulted(
+                        request,
+                        command.TargetId,
+                        commandName,
+                        commandVersion,
+                        options.Origin,
+                        fault,
+                        scope,
+                        CaptureAfter(beforeReading));
+                }
+                else if (cancelledDuring)
                 {
                     result = CancelledDuringExecution(
                         request,
@@ -279,22 +315,16 @@ namespace SignalRouter
                         scope,
                         CaptureAfter(beforeReading));
                 }
-                catch (Exception exception)
+                else
                 {
-                    result = Faulted(
+                    result = Succeeded(
                         request,
                         command.TargetId,
                         commandName,
                         commandVersion,
                         options.Origin,
-                        exception,
                         scope,
                         CaptureAfter(beforeReading));
-                }
-                finally
-                {
-                    activeScope = null;
-                    currentScope.Value = null;
                 }
             }
             finally

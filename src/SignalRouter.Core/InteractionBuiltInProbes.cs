@@ -100,6 +100,30 @@ namespace SignalRouter
                 writer.WriteStartObject();
                 writer.WriteString("wireName", interaction.WireName);
                 writer.WriteNumber("version", interaction.Version);
+                writer.WritePropertyName("arguments");
+                WriteArguments(writer, interaction.Arguments);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+        }
+
+        private static void WriteArguments(
+            Utf8JsonWriter writer,
+            InteractionArgumentSchema schema)
+        {
+            // Argument requiredness, type, and sensitivity are part of what an agent may send
+            // or record; a change in them must change the semantic-ui hash even when the wire
+            // name and version are unchanged. Order is preserved: schema argument order is
+            // itself observable state (it defines codec output property order, design §6.1).
+            writer.WriteStartArray();
+            foreach (var argument in schema.Arguments)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("name", argument.Name);
+                writer.WriteNumber("type", (int)argument.Type);
+                writer.WriteBoolean("required", argument.Required);
+                writer.WriteBoolean("sensitive", argument.Sensitive);
                 writer.WriteEndObject();
             }
 
