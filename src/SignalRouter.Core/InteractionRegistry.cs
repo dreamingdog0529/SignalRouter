@@ -37,6 +37,8 @@ namespace SignalRouter
 
     public sealed class InteractionContext
     {
+        private InteractionExecutionScope? scope;
+
         internal InteractionContext(
             long sequence,
             string requestId,
@@ -61,6 +63,41 @@ namespace SignalRouter
         public string RequestId { get; }
 
         public InteractionDispatchOptions Options { get; }
+
+        public void EnqueueContinuation<TCommand>(
+            TCommand command,
+            InteractionDispatchOptions options)
+            where TCommand : struct, IInteractionCommand
+        {
+            var currentScope = scope;
+            if (currentScope == null)
+            {
+                throw new InvalidOperationException(
+                    "Continuations require a dispatcher-created interaction context.");
+            }
+
+            currentScope.AddContinuation(
+                dispatcher => dispatcher.DispatchAsync(
+                    command,
+                    options,
+                    System.Threading.CancellationToken.None));
+        }
+
+        internal void AttachScope(InteractionExecutionScope executionScope)
+        {
+            if (executionScope == null)
+            {
+                throw new ArgumentNullException(nameof(executionScope));
+            }
+
+            if (scope != null)
+            {
+                throw new InvalidOperationException(
+                    "An execution scope is already attached to this context.");
+            }
+
+            scope = executionScope;
+        }
     }
 
     public interface IInteractionPipeline<TCommand>
