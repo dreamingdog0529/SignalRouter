@@ -14,8 +14,7 @@ namespace SignalRouter
         Number = 2,
     }
 
-    public sealed class InteractionArgumentDefinition :
-        IEquatable<InteractionArgumentDefinition>
+    public sealed record InteractionArgumentDefinition
     {
         public InteractionArgumentDefinition(
             string name,
@@ -36,59 +35,19 @@ namespace SignalRouter
         public bool Required { get; }
 
         public bool Sensitive { get; }
-
-        public bool Equals(InteractionArgumentDefinition? other)
-        {
-            return other != null
-                && string.Equals(Name, other.Name, StringComparison.Ordinal)
-                && Type == other.Type
-                && Required == other.Required
-                && Sensitive == other.Sensitive;
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as InteractionArgumentDefinition);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.CombineHashCodes(
-                Name == null ? 0 : StringComparer.Ordinal.GetHashCode(Name),
-                (int)Type,
-                InteractionContract.CombineHashCodes(
-                    Required.GetHashCode(),
-                    Sensitive.GetHashCode()));
-        }
     }
 
-    public sealed class InteractionArgumentSchema : IEquatable<InteractionArgumentSchema>
+    public sealed record InteractionArgumentSchema
     {
         private static readonly InteractionArgumentSchema EmptyInstance =
             new InteractionArgumentSchema(Array.Empty<InteractionArgumentDefinition>());
 
-        private readonly ReadOnlyCollection<InteractionArgumentDefinition> arguments;
-
         public InteractionArgumentSchema(IEnumerable<InteractionArgumentDefinition> arguments)
         {
-            if (arguments == null)
-            {
-                throw new ArgumentNullException(nameof(arguments));
-            }
-
-            var copy = new List<InteractionArgumentDefinition>();
-            foreach (var argument in arguments)
-            {
-                if (argument == null)
-                {
-                    throw new ArgumentException("Schema arguments must not contain null.", nameof(arguments));
-                }
-
-                copy.Add(argument);
-            }
-
-            this.arguments =
-                new ReadOnlyCollection<InteractionArgumentDefinition>(copy.ToArray());
+            Arguments = EquatableList<InteractionArgumentDefinition>.Create(
+                arguments,
+                nameof(arguments),
+                "Schema arguments must not contain null.");
         }
 
         public static InteractionArgumentSchema Empty
@@ -96,10 +55,7 @@ namespace SignalRouter
             get { return EmptyInstance; }
         }
 
-        public IReadOnlyList<InteractionArgumentDefinition> Arguments
-        {
-            get { return arguments; }
-        }
+        public EquatableList<InteractionArgumentDefinition> Arguments { get; }
 
         public bool IsCompatibleWith(InteractionArgumentSchema catalogSchema)
         {
@@ -127,22 +83,6 @@ namespace SignalRouter
             }
 
             return true;
-        }
-
-        public bool Equals(InteractionArgumentSchema? other)
-        {
-            return other != null
-                && InteractionContract.SequenceEqual(Arguments, other.Arguments);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as InteractionArgumentSchema);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.GetSequenceHashCode(Arguments);
         }
     }
 
@@ -205,7 +145,17 @@ namespace SignalRouter
                         property.Name));
             }
 
-            return InteractionJson.CreateCommand(() => new ClickCommand(targetId));
+            try
+            {
+                return new ClickCommand(targetId);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InteractionCommandException(
+                    InteractionRejectionCode.InvalidArguments,
+                    exception.Message,
+                    exception);
+            }
         }
 
         public void WriteArguments(Utf8JsonWriter writer, in ClickCommand command)
@@ -282,8 +232,17 @@ namespace SignalRouter
                     "The required set_value argument 'value' is missing.");
             }
 
-            return InteractionJson.CreateCommand(
-                () => new SetValueCommand(targetId, value!));
+            try
+            {
+                return new SetValueCommand(targetId, value!);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InteractionCommandException(
+                    InteractionRejectionCode.InvalidArguments,
+                    exception.Message,
+                    exception);
+            }
         }
 
         public void WriteArguments(Utf8JsonWriter writer, in SetValueCommand command)
@@ -476,7 +435,7 @@ namespace SignalRouter
             }
 
             this.entries =
-                new ReadOnlyCollection<InteractionCommandCatalogEntry>(copy.ToArray());
+                new ReadOnlyCollection<InteractionCommandCatalogEntry>(copy);
         }
 
         public IReadOnlyList<InteractionCommandCatalogEntry> Entries
@@ -792,22 +751,6 @@ namespace SignalRouter
             return new InteractionCommandException(
                 InteractionRejectionCode.InvalidArguments,
                 message);
-        }
-
-        public static TCommand CreateCommand<TCommand>(Func<TCommand> factory)
-            where TCommand : struct, IInteractionCommand
-        {
-            try
-            {
-                return factory();
-            }
-            catch (ArgumentException exception)
-            {
-                throw new InteractionCommandException(
-                    InteractionRejectionCode.InvalidArguments,
-                    exception.Message,
-                    exception);
-            }
         }
     }
 }

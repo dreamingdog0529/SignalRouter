@@ -1,15 +1,14 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace SignalRouter
 {
-    public sealed class InteractionValidation : IEquatable<InteractionValidation>
+    public sealed record InteractionValidation
     {
         private static readonly InteractionValidation ValidInstance =
-            new InteractionValidation(null);
+            new InteractionValidation((RejectionInfo?)null);
 
         private InteractionValidation(RejectionInfo? rejection)
         {
@@ -33,21 +32,6 @@ namespace SignalRouter
             string message)
         {
             return new InteractionValidation(new RejectionInfo(code, message));
-        }
-
-        public bool Equals(InteractionValidation? other)
-        {
-            return other != null && Equals(Rejection, other.Rejection);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as InteractionValidation);
-        }
-
-        public override int GetHashCode()
-        {
-            return Rejection == null ? 0 : Rejection.GetHashCode();
         }
     }
 
@@ -101,7 +85,7 @@ namespace SignalRouter
             where TCommand : struct, IInteractionCommand;
     }
 
-    public sealed class AvailableInteraction : IEquatable<AvailableInteraction>
+    public sealed record AvailableInteraction
     {
         public AvailableInteraction(
             string wireName,
@@ -118,33 +102,10 @@ namespace SignalRouter
         public int Version { get; }
 
         public InteractionArgumentSchema Arguments { get; }
-
-        public bool Equals(AvailableInteraction? other)
-        {
-            return other != null
-                && string.Equals(WireName, other.WireName, StringComparison.Ordinal)
-                && Version == other.Version
-                && Arguments.Equals(other.Arguments);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as AvailableInteraction);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.CombineHashCodes(
-                WireName == null ? 0 : StringComparer.Ordinal.GetHashCode(WireName),
-                Version,
-                Arguments.GetHashCode());
-        }
     }
 
-    public sealed class InteractionDescriptor : IEquatable<InteractionDescriptor>
+    public sealed record InteractionDescriptor
     {
-        private readonly ReadOnlyCollection<AvailableInteraction> availableInteractions;
-
         public InteractionDescriptor(
             string id,
             string? parentId,
@@ -155,24 +116,10 @@ namespace SignalRouter
             bool enabled,
             IEnumerable<AvailableInteraction> availableInteractions)
         {
-            if (availableInteractions == null)
-            {
-                throw new ArgumentNullException(nameof(availableInteractions));
-            }
-
-            var copy = new List<AvailableInteraction>();
-            foreach (var interaction in availableInteractions)
-            {
-                if (interaction == null)
-                {
-                    throw new ArgumentException(
-                        "Available interactions must not contain null.",
-                        nameof(availableInteractions));
-                }
-
-                copy.Add(interaction);
-            }
-
+            AvailableInteractions = EquatableList<AvailableInteraction>.Create(
+                availableInteractions,
+                nameof(availableInteractions),
+                "Available interactions must not contain null.");
             Id = id;
             ParentId = parentId;
             Role = role;
@@ -180,8 +127,6 @@ namespace SignalRouter
             Value = value;
             Visible = visible;
             Enabled = enabled;
-            this.availableInteractions =
-                new ReadOnlyCollection<AvailableInteraction>(copy.ToArray());
         }
 
         public string Id { get; }
@@ -198,49 +143,7 @@ namespace SignalRouter
 
         public bool Enabled { get; }
 
-        public IReadOnlyList<AvailableInteraction> AvailableInteractions
-        {
-            get { return availableInteractions; }
-        }
-
-        public bool Equals(InteractionDescriptor? other)
-        {
-            return other != null
-                && string.Equals(Id, other.Id, StringComparison.Ordinal)
-                && string.Equals(ParentId, other.ParentId, StringComparison.Ordinal)
-                && string.Equals(Role, other.Role, StringComparison.Ordinal)
-                && string.Equals(Label, other.Label, StringComparison.Ordinal)
-                && Equals(Value, other.Value)
-                && Visible == other.Visible
-                && Enabled == other.Enabled
-                && InteractionContract.SequenceEqual(
-                    AvailableInteractions,
-                    other.AvailableInteractions);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as InteractionDescriptor);
-        }
-
-        public override int GetHashCode()
-        {
-            var hash = InteractionContract.CombineHashCodes(
-                Id == null ? 0 : StringComparer.Ordinal.GetHashCode(Id),
-                ParentId == null ? 0 : StringComparer.Ordinal.GetHashCode(ParentId),
-                Role == null ? 0 : StringComparer.Ordinal.GetHashCode(Role));
-            hash = InteractionContract.CombineHashCodes(
-                hash,
-                Label == null ? 0 : StringComparer.Ordinal.GetHashCode(Label),
-                Value == null ? 0 : Value.GetHashCode());
-            hash = InteractionContract.CombineHashCodes(
-                hash,
-                Visible.GetHashCode(),
-                Enabled.GetHashCode());
-            return InteractionContract.CombineHashCodes(
-                hash,
-                InteractionContract.GetSequenceHashCode(AvailableInteractions));
-        }
+        public EquatableList<AvailableInteraction> AvailableInteractions { get; }
 
         internal InteractionDescriptor WithAvailableInteractions(
             IEnumerable<AvailableInteraction> interactions)
@@ -263,11 +166,8 @@ namespace SignalRouter
         Agent = 1,
     }
 
-    public sealed class InteractionRegistrySnapshot :
-        IEquatable<InteractionRegistrySnapshot>
+    public sealed record InteractionRegistrySnapshot
     {
-        private readonly ReadOnlyCollection<InteractionDescriptor> targets;
-
         internal InteractionRegistrySnapshot(
             string sessionEpoch,
             long revision,
@@ -275,39 +175,15 @@ namespace SignalRouter
         {
             SessionEpoch = sessionEpoch;
             Revision = revision;
-            this.targets = new ReadOnlyCollection<InteractionDescriptor>(
-                new List<InteractionDescriptor>(targets).ToArray());
+            Targets = EquatableList<InteractionDescriptor>.CreateOwned(
+                new List<InteractionDescriptor>(targets));
         }
 
         public string SessionEpoch { get; }
 
         public long Revision { get; }
 
-        public IReadOnlyList<InteractionDescriptor> Targets
-        {
-            get { return targets; }
-        }
-
-        public bool Equals(InteractionRegistrySnapshot? other)
-        {
-            return other != null
-                && string.Equals(SessionEpoch, other.SessionEpoch, StringComparison.Ordinal)
-                && Revision == other.Revision
-                && InteractionContract.SequenceEqual(Targets, other.Targets);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return Equals(obj as InteractionRegistrySnapshot);
-        }
-
-        public override int GetHashCode()
-        {
-            return InteractionContract.CombineHashCodes(
-                StringComparer.Ordinal.GetHashCode(SessionEpoch),
-                Revision.GetHashCode(),
-                InteractionContract.GetSequenceHashCode(Targets));
-        }
+        public EquatableList<InteractionDescriptor> Targets { get; }
     }
 
     public interface IInteractionTargetRegistration : IDisposable
