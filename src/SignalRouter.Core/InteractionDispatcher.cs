@@ -734,12 +734,22 @@ namespace SignalRouter
                 exception.GetType().FullName ?? exception.GetType().Name,
                 message,
                 exception.StackTrace,
-                exception is InteractionInvariantViolationException
-                    ? InvariantViolationCode
-                    : null,
+                ApplicationCodeFor(exception),
                 failedStageId,
                 failedStageIndex,
                 completedStageIds);
+        }
+
+        private static string? ApplicationCodeFor(Exception exception)
+        {
+            if (exception is InteractionInvariantViolationException)
+            {
+                return InvariantViolationCode;
+            }
+
+            return exception is InteractionFaultException fault
+                ? fault.ApplicationCode
+                : null;
         }
 
         private static string FormatRejection(string format, string targetId)

@@ -216,6 +216,29 @@ public sealed class InteractionResultTests
         });
     }
 
+    [Test]
+    public void AnInteractionFaultExceptionRequiresACodeAndMessage()
+    {
+        var inner = new InvalidOperationException("boom");
+        var fault = new InteractionFaultException(
+            "AudioDeviceUnavailable",
+            "The audio device is unavailable.",
+            inner);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(fault.ApplicationCode, Is.EqualTo("AudioDeviceUnavailable"));
+            Assert.That(fault.Message, Is.EqualTo("The audio device is unavailable."));
+            Assert.That(fault.InnerException, Is.SameAs(inner));
+            NUnitCompat.ThatThrows(
+                () => new InteractionFaultException(" padded ", "message"),
+                Throws.ArgumentException);
+            NUnitCompat.ThatThrows(
+                () => new InteractionFaultException("code", ""),
+                Throws.ArgumentException);
+        });
+    }
+
     private static InteractionResult Result(
         InteractionStatus status,
         StageProgress stages,
