@@ -73,8 +73,8 @@ and drives them directly). It is aimed at teams building Unity apps and games wh
 their UI to be observable and controllable as data.
 
 > **Status:** The command model, immutable command catalog and codecs, structured result
-> model, and semantic registry are implemented on top of the UPM/shared-source build and
-> test foundation. FIFO dispatch, stage execution and state probes, record/replay, Unity
+> model, and semantic registry are implemented on top of the .NET-first build and test
+> foundation. FIFO dispatch, stage execution and state probes, record/replay, Unity
 > UI, WebSocket, and MCP production features remain unimplemented. Their supported scope
 > and acceptance criteria are defined in the [architecture document](docs/design.md).
 
@@ -154,11 +154,11 @@ task test
 task check
 ```
 
-The shared Runtime sources compile as C# 9 and `netstandard2.1`; warnings fail the build.
-The Unity development project enables `-langversion:preview` for C# 11 language-feature
-tests, while consumers of the UPM package do not need preview enabled. See
-**[docs/development.md](docs/development.md)** for the exact toolchain and compatibility
-boundary.
+`SignalRouter.Core` and `SignalRouter.Protocol` build as C# 9 and `netstandard2.1`;
+warnings fail the build. The Unity development project enables `-langversion:preview` for
+C# 11 language-feature tests, while consumers of the shipped NuGet packages do not need
+preview enabled. See **[docs/development.md](docs/development.md)** for the exact toolchain
+and compatibility boundary.
 
 How to contribute: **[CONTRIBUTING.md](.github/CONTRIBUTING.md)**
 

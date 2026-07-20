@@ -30,10 +30,12 @@ task check
 
 `task build` performs these checks:
 
-1. Restore the pinned NuGetForUnity CLI tool and Unity NuGet dependencies.
-2. Build `SignalRouter.slnx`.
-3. Compile the Unity development project in batch mode.
-4. Confirm Unity emitted `SignalRouter.Core.dll` and `SignalRouter.Protocol.dll`.
+1. Restore the pinned NuGetForUnity CLI tool.
+2. Build and pack `SignalRouter.slnx`, publishing the `SignalRouter.Core` and
+   `SignalRouter.Protocol` packages to the shared local feed (`../.local-feed`).
+3. Restore those packages into the Unity project with NuGetForUnity.
+4. Compile the Unity development project in batch mode and confirm NuGetForUnity restored
+   `SignalRouter.Core.dll` and `SignalRouter.Protocol.dll`.
 
 `task test` runs the NUnit projects on `net10.0`, then runs Unity EditMode tests. The
 Unity result XML must exist, contain at least one test, and report no failures.
@@ -43,17 +45,20 @@ Build logs and Unity result XML are written below `.artifacts/`.
 
 ## Compatibility boundary
 
-The distributable Runtime sources live under:
+The distributable Core and Protocol sources live under:
 
-- `src/SignalRouter/Runtime/Core`
-- `src/SignalRouter/Runtime/Protocol`
+- `src/SignalRouter.Core`
+- `src/SignalRouter.Protocol`
 
-The SDK-style Core and Protocol projects compile those same files as `netstandard2.1`
-with `LangVersion` set to `9.0` and warnings treated as errors. This is the enforcement
-boundary for the UPM package: Runtime code must not use `record struct`, `required`, or
-PolySharp-generated types. Commands use ordinary `readonly struct` types with explicit
-value equality. Immutable result, schema, and descriptor classes use defensive copies and
-structural equality.
+These are standalone SDK-style projects that build as `netstandard2.1` with `LangVersion`
+set to `9.0` and warnings treated as errors, and pack to the shared local feed. The Unity
+project consumes the resulting `SignalRouter.Core` and `SignalRouter.Protocol` NuGet
+packages through NuGetForUnity; it does not recompile their source. Keeping the shipped
+assemblies at C# 9 means package consumers — Unity's Mono/IL2CPP toolchain among them — do
+not need preview language features. Core and Protocol code therefore must not use
+`record struct`, `required`, or PolySharp-generated types. Commands use ordinary
+`readonly struct` types with explicit value equality. Immutable result, schema, and
+descriptor classes use defensive copies and structural equality.
 
 The Unity development project separately sets the Standalone Player additional compiler
 argument to `-langversion:preview`. [Unity 6 officially supports C# 9][unity-csharp]; this
@@ -69,12 +74,12 @@ preserves the required-member and init-only polyfills without masking compilatio
 failures. Unity documents project-wide analyzer configuration through
 [`Default.globalconfig`][unity-globalconfig].
 
-NuGetForUnity also restores VitalRouter and System.Text.Json into the ignored package
-directory. Runtime asmdefs keep `overrideReferences: false`; Unity automatically
-references precompiled plug-ins in that mode. The EditMode test asmdef additionally names
-`VitalRouter.dll` because its test doubles directly implement public generic contracts
-whose constraints include `VitalRouter.ICommand`. See Unity's
-[assembly reference rules][unity-assembly-references].
+NuGetForUnity restores `SignalRouter.Core`, `SignalRouter.Protocol`, VitalRouter, and
+System.Text.Json into the ignored `Assets/Packages` directory. The EditMode test asmdef
+sets `overrideReferences: true` and names every assembly it needs as a precompiled
+reference — `SignalRouter.Core.dll`, `SignalRouter.Protocol.dll`, `System.Text.Json.dll`,
+`VitalRouter.dll`, and `nunit.framework.dll` — so it compiles against the restored
+packages. See Unity's [assembly reference rules][unity-assembly-references].
 
 `CompilerSettings.props` sets `LangVersion` to `11.0` in Unity-generated IDE projects.
 CsprojModifier imports it into every generated `.csproj`; this affects IDE analysis only.
