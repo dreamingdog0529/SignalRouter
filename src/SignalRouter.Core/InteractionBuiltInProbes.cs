@@ -59,13 +59,18 @@ namespace SignalRouter
             return StateProbeSnapshot.FromUtf8Bytes(buffer.WrittenMemory);
         }
 
-        // Explains a semantic-ui hash change as scalar field changes on its own snapshot schema.
+        // Explains a semantic-ui hash change as property changes on its own snapshot schema.
         // A target present in BOTH snapshots (matched by ordinal id) yields Modified changes for
         // each differing scalar field; a target present on only one side yields Added (before
         // absent) or Removed (after absent) changes for every scalar field, so presence is
-        // expressed per field via the nullable-side StatePropertyChange model (ADR 0003). Nested
-        // availableInteractions/argument-schema changes still change the hash but are not
-        // enumerated here — they need a nested path convention and remain deferred (ADR 0002).
+        // expressed per field via the nullable-side StatePropertyChange model (ADR 0003).
+        //
+        // Nested availableInteractions/argument-schema changes are also enumerated (ADR 0004):
+        // interactions are matched by (wireName, version) and arguments by name under the nested
+        // path targets[<id>].availableInteractions[<wireName>@<version>].arguments[<name>].<field>.
+        // An added/removed interaction or argument is expressed per field like an added/removed
+        // target; argument position is surfaced as a synthetic ordinal, but only when argument
+        // membership is unchanged, so add/remove-induced index shifts do not generate noise.
         public IReadOnlyList<StatePropertyChange> DiffProperties(
             StateProbeSnapshot before,
             StateProbeSnapshot after)
@@ -92,10 +97,12 @@ namespace SignalRouter
                     if (afterTargets.TryGetValue(id, out var afterTarget))
                     {
                         AddScalarFieldChanges(changes, id, beforeTarget, afterTarget);
+                        AddInteractionChanges(changes, id, beforeTarget, afterTarget);
                     }
                     else
                     {
                         AddPresenceChanges(changes, id, beforeTarget, StatePropertyChangeKind.Removed);
+                        AddPresenceInteractions(changes, id, beforeTarget, StatePropertyChangeKind.Removed);
                     }
                 }
 
@@ -105,6 +112,7 @@ namespace SignalRouter
                     if (!beforeTargets.ContainsKey(id))
                     {
                         AddPresenceChanges(changes, id, afterTarget, StatePropertyChangeKind.Added);
+                        AddPresenceInteractions(changes, id, afterTarget, StatePropertyChangeKind.Added);
                     }
                 }
 
@@ -152,7 +160,18 @@ namespace SignalRouter
             StatePropertyChangeKind kind,
             InteractionValue present)
         {
-            var path = string.Concat("targets[", id, "].", field);
+            AddSingleSided(changes, string.Concat("targets[", id, "].", field), kind, present);
+        }
+
+        // Emits a single-sided change at an explicit path: the present value on After for an
+        // Added change (Before absent) or on Before for a Removed change (After absent). Shared
+        // by target-level and nested (interaction/argument) presence enumeration.
+        private static void AddSingleSided(
+            List<StatePropertyChange> changes,
+            string path,
+            StatePropertyChangeKind kind,
+            InteractionValue present)
+        {
             changes.Add(kind == StatePropertyChangeKind.Added
                 ? new StatePropertyChange(path, null, present)
                 : new StatePropertyChange(path, present, null));
@@ -199,6 +218,15 @@ namespace SignalRouter
             InteractionValue before,
             InteractionValue after)
         {
+            AddIfChanged(changes, string.Concat("targets[", id, "].", field), before, after);
+        }
+
+        private static void AddIfChanged(
+            List<StatePropertyChange> changes,
+            string path,
+            InteractionValue before,
+            InteractionValue after)
+        {
             // Skip equal values: this both honors StatePropertyChange's before != after
             // invariant and absorbs the one ambiguity where a JSON-null value and an explicit
             // Null-kind value both map to InteractionValue.Null. The hash stays authoritative.
@@ -207,8 +235,273 @@ namespace SignalRouter
                 return;
             }
 
-            var path = string.Concat("targets[", id, "].", field);
             changes.Add(new StatePropertyChange(path, before, after));
+        }
+
+        // Enumerates availableInteractions changes on a matched target (present in both
+        // snapshots). Interactions are matched by (wireName, version); a matched interaction
+        // recurses into its arguments (its key fields are identical so they never emit), a
+        // single-sided interaction is enumerated per field (ADR 0004).
+        private static void AddInteractionChanges(
+            List<StatePropertyChange> changes,
+            string id,
+            JsonElement beforeTarget,
+            JsonElement afterTarget)
+        {
+            var beforeInteractions = IndexInteractions(beforeTarget);
+            var afterInteractions = IndexInteractions(afterTarget);
+            foreach (var beforeInteraction in EnumerateInteractions(beforeTarget))
+            {
+                var path = InteractionPath(id, beforeInteraction);
+                if (afterInteractions.TryGetValue(InteractionKey(beforeInteraction), out var afterInteraction))
+                {
+                    AddMatchedInteraction(changes, path, beforeInteraction, afterInteraction);
+                }
+                else
+                {
+                    AddInteractionPresence(changes, path, beforeInteraction, StatePropertyChangeKind.Removed);
+                }
+            }
+
+            foreach (var afterInteraction in EnumerateInteractions(afterTarget))
+            {
+                if (!beforeInteractions.ContainsKey(InteractionKey(afterInteraction)))
+                {
+                    AddInteractionPresence(
+                        changes,
+                        InteractionPath(id, afterInteraction),
+                        afterInteraction,
+                        StatePropertyChangeKind.Added);
+                }
+            }
+        }
+
+        // Emits Added/Removed per-field interaction changes for every interaction of a
+        // single-sided target (a target present in only one snapshot).
+        private static void AddPresenceInteractions(
+            List<StatePropertyChange> changes,
+            string id,
+            JsonElement target,
+            StatePropertyChangeKind kind)
+        {
+            foreach (var interaction in EnumerateInteractions(target))
+            {
+                AddInteractionPresence(changes, InteractionPath(id, interaction), interaction, kind);
+            }
+        }
+
+        private static void AddMatchedInteraction(
+            List<StatePropertyChange> changes,
+            string interactionPath,
+            JsonElement beforeInteraction,
+            JsonElement afterInteraction)
+        {
+            // wireName/version are the match key and identical on both sides, so they never emit.
+            var beforeArguments = IndexArguments(beforeInteraction);
+            var afterArguments = IndexArguments(afterInteraction);
+
+            // Argument position (ordinal) is only surfaced as a reorder signal when the argument
+            // membership is identical on both sides. When arguments are added or removed, the
+            // add/remove changes already explain the difference and every following argument's
+            // index shifts — emitting those shifts would be noise (ADR 0004, Option C).
+            var emitOrdinal = SameArgumentNames(beforeArguments, afterArguments);
+
+            var beforeIndex = 0;
+            foreach (var beforeArgument in EnumerateArguments(beforeInteraction))
+            {
+                var name = beforeArgument.GetProperty("name").GetString()!;
+                var argumentPath = ArgumentPath(interactionPath, name);
+                if (afterArguments.TryGetValue(name, out var afterArgument))
+                {
+                    AddMatchedArgument(
+                        changes,
+                        argumentPath,
+                        beforeArgument,
+                        beforeIndex,
+                        afterArgument.Element,
+                        afterArgument.Index,
+                        emitOrdinal);
+                }
+                else
+                {
+                    AddArgumentPresence(changes, argumentPath, beforeArgument, StatePropertyChangeKind.Removed);
+                }
+
+                beforeIndex++;
+            }
+
+            foreach (var afterArgument in EnumerateArguments(afterInteraction))
+            {
+                var name = afterArgument.GetProperty("name").GetString()!;
+                if (!beforeArguments.ContainsKey(name))
+                {
+                    AddArgumentPresence(
+                        changes,
+                        ArgumentPath(interactionPath, name),
+                        afterArgument,
+                        StatePropertyChangeKind.Added);
+                }
+            }
+        }
+
+        private static void AddMatchedArgument(
+            List<StatePropertyChange> changes,
+            string argumentPath,
+            JsonElement before,
+            int beforeIndex,
+            JsonElement after,
+            int afterIndex,
+            bool emitOrdinal)
+        {
+            AddIfChanged(
+                changes,
+                string.Concat(argumentPath, ".type"),
+                ReadArgumentType(before),
+                ReadArgumentType(after));
+            AddIfChanged(
+                changes,
+                string.Concat(argumentPath, ".required"),
+                InteractionValue.FromBoolean(before.GetProperty("required").GetBoolean()),
+                InteractionValue.FromBoolean(after.GetProperty("required").GetBoolean()));
+            AddIfChanged(
+                changes,
+                string.Concat(argumentPath, ".sensitive"),
+                InteractionValue.FromBoolean(before.GetProperty("sensitive").GetBoolean()),
+                InteractionValue.FromBoolean(after.GetProperty("sensitive").GetBoolean()));
+            if (emitOrdinal)
+            {
+                AddIfChanged(
+                    changes,
+                    string.Concat(argumentPath, ".ordinal"),
+                    InteractionValue.FromNumber(beforeIndex),
+                    InteractionValue.FromNumber(afterIndex));
+            }
+        }
+
+        // Emits Added/Removed changes for the key fields (wireName, version) of a single-sided
+        // interaction, then per-field presence for each of its arguments. Emitting the key
+        // fields keeps an added/removed interaction visible even when it has no arguments.
+        private static void AddInteractionPresence(
+            List<StatePropertyChange> changes,
+            string interactionPath,
+            JsonElement interaction,
+            StatePropertyChangeKind kind)
+        {
+            AddSingleSided(
+                changes,
+                string.Concat(interactionPath, ".wireName"),
+                kind,
+                InteractionValue.FromString(interaction.GetProperty("wireName").GetString()!));
+            AddSingleSided(
+                changes,
+                string.Concat(interactionPath, ".version"),
+                kind,
+                InteractionValue.FromNumber(interaction.GetProperty("version").GetInt32()));
+            foreach (var argument in EnumerateArguments(interaction))
+            {
+                var name = argument.GetProperty("name").GetString()!;
+                AddArgumentPresence(changes, ArgumentPath(interactionPath, name), argument, kind);
+            }
+        }
+
+        // Emits Added/Removed changes for the fields of a single-sided argument. Ordinal is not
+        // emitted: it only carries meaning as a before/after position delta, which a single-sided
+        // argument (or its enclosing interaction) does not have.
+        private static void AddArgumentPresence(
+            List<StatePropertyChange> changes,
+            string argumentPath,
+            JsonElement argument,
+            StatePropertyChangeKind kind)
+        {
+            AddSingleSided(changes, string.Concat(argumentPath, ".type"), kind, ReadArgumentType(argument));
+            AddSingleSided(
+                changes,
+                string.Concat(argumentPath, ".required"),
+                kind,
+                InteractionValue.FromBoolean(argument.GetProperty("required").GetBoolean()));
+            AddSingleSided(
+                changes,
+                string.Concat(argumentPath, ".sensitive"),
+                kind,
+                InteractionValue.FromBoolean(argument.GetProperty("sensitive").GetBoolean()));
+        }
+
+        private static bool SameArgumentNames(
+            Dictionary<string, (JsonElement Element, int Index)> before,
+            Dictionary<string, (JsonElement Element, int Index)> after)
+        {
+            if (before.Count != after.Count)
+            {
+                return false;
+            }
+
+            foreach (var name in before.Keys)
+            {
+                if (!after.ContainsKey(name))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static string InteractionKey(JsonElement interaction)
+        {
+            return string.Concat(
+                interaction.GetProperty("wireName").GetString(),
+                "@",
+                interaction.GetProperty("version").GetInt32().ToString(CultureInfo.InvariantCulture));
+        }
+
+        private static string InteractionPath(string id, JsonElement interaction)
+        {
+            return string.Concat("targets[", id, "].availableInteractions[", InteractionKey(interaction), "]");
+        }
+
+        private static string ArgumentPath(string interactionPath, string name)
+        {
+            return string.Concat(interactionPath, ".arguments[", name, "]");
+        }
+
+        private static InteractionValue ReadArgumentType(JsonElement argument)
+        {
+            return InteractionValue.FromNumber(argument.GetProperty("type").GetInt32());
+        }
+
+        private static IEnumerable<JsonElement> EnumerateInteractions(JsonElement target)
+        {
+            return target.GetProperty("availableInteractions").EnumerateArray();
+        }
+
+        private static IEnumerable<JsonElement> EnumerateArguments(JsonElement interaction)
+        {
+            return interaction.GetProperty("arguments").EnumerateArray();
+        }
+
+        private static Dictionary<string, JsonElement> IndexInteractions(JsonElement target)
+        {
+            var byKey = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (var interaction in EnumerateInteractions(target))
+            {
+                byKey[InteractionKey(interaction)] = interaction;
+            }
+
+            return byKey;
+        }
+
+        private static Dictionary<string, (JsonElement Element, int Index)> IndexArguments(
+            JsonElement interaction)
+        {
+            var byName = new Dictionary<string, (JsonElement Element, int Index)>(StringComparer.Ordinal);
+            var index = 0;
+            foreach (var argument in EnumerateArguments(interaction))
+            {
+                byName[argument.GetProperty("name").GetString()!] = (argument, index);
+                index++;
+            }
+
+            return byName;
         }
 
         private static InteractionValue ReadString(JsonElement target, string field)
