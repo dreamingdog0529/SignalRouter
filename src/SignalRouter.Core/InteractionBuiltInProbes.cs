@@ -59,12 +59,13 @@ namespace SignalRouter
             return StateProbeSnapshot.FromUtf8Bytes(buffer.WrittenMemory);
         }
 
-        // Explains a semantic-ui hash change as scalar field changes on targets present in
-        // BOTH snapshots (matched by ordinal id). Target additions/removals and nested
-        // availableInteractions changes still change the hash but are not enumerated here;
-        // the 3-field StatePropertyChange cannot express presence or nested structure, so they
-        // are deferred (ADR 0002). Emitting only scalar field deltas keeps every change a
-        // valid StatePropertyChange (differing before/after InteractionValue).
+        // Explains a semantic-ui hash change as scalar field changes on its own snapshot schema.
+        // A target present in BOTH snapshots (matched by ordinal id) yields Modified changes for
+        // each differing scalar field; a target present on only one side yields Added (before
+        // absent) or Removed (after absent) changes for every scalar field, so presence is
+        // expressed per field via the nullable-side StatePropertyChange model (ADR 0003). Nested
+        // availableInteractions/argument-schema changes still change the hash but are not
+        // enumerated here — they need a nested path convention and remain deferred (ADR 0002).
         public IReadOnlyList<StatePropertyChange> DiffProperties(
             StateProbeSnapshot before,
             StateProbeSnapshot after)
@@ -82,6 +83,7 @@ namespace SignalRouter
             using (var beforeDocument = JsonDocument.Parse(before.Utf8Json))
             using (var afterDocument = JsonDocument.Parse(after.Utf8Json))
             {
+                var beforeTargets = IndexTargetsById(beforeDocument.RootElement);
                 var afterTargets = IndexTargetsById(afterDocument.RootElement);
                 var changes = new List<StatePropertyChange>();
                 foreach (var beforeTarget in EnumerateTargets(beforeDocument.RootElement))
@@ -91,10 +93,69 @@ namespace SignalRouter
                     {
                         AddScalarFieldChanges(changes, id, beforeTarget, afterTarget);
                     }
+                    else
+                    {
+                        AddPresenceChanges(changes, id, beforeTarget, StatePropertyChangeKind.Removed);
+                    }
+                }
+
+                foreach (var afterTarget in EnumerateTargets(afterDocument.RootElement))
+                {
+                    var id = afterTarget.GetProperty("id").GetString()!;
+                    if (!beforeTargets.ContainsKey(id))
+                    {
+                        AddPresenceChanges(changes, id, afterTarget, StatePropertyChangeKind.Added);
+                    }
                 }
 
                 return changes;
             }
+        }
+
+        // Emits an Added (target present only in after) or Removed (present only in before) change
+        // for every scalar field of a single-sided target, reading the present side and leaving the
+        // absent side null. A field whose present value is InteractionValue.Null is still emitted:
+        // the field went from absent to present(null), which the nullable-side model distinguishes.
+        private static void AddPresenceChanges(
+            List<StatePropertyChange> changes,
+            string id,
+            JsonElement target,
+            StatePropertyChangeKind kind)
+        {
+            AddPresence(changes, id, "role", kind, ReadString(target, "role"));
+            AddPresence(changes, id, "label", kind, ReadString(target, "label"));
+            AddPresence(changes, id, "parentId", kind, ReadNullableString(target, "parentId"));
+            AddPresence(
+                changes,
+                id,
+                "visible",
+                kind,
+                InteractionValue.FromBoolean(target.GetProperty("visible").GetBoolean()));
+            AddPresence(
+                changes,
+                id,
+                "enabled",
+                kind,
+                InteractionValue.FromBoolean(target.GetProperty("enabled").GetBoolean()));
+            AddPresence(
+                changes,
+                id,
+                "value",
+                kind,
+                ReadDescriptorValue(target.GetProperty("value")));
+        }
+
+        private static void AddPresence(
+            List<StatePropertyChange> changes,
+            string id,
+            string field,
+            StatePropertyChangeKind kind,
+            InteractionValue present)
+        {
+            var path = string.Concat("targets[", id, "].", field);
+            changes.Add(kind == StatePropertyChangeKind.Added
+                ? new StatePropertyChange(path, null, present)
+                : new StatePropertyChange(path, present, null));
         }
 
         private static void AddScalarFieldChanges(

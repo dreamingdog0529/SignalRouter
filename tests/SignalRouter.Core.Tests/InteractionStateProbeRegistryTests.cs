@@ -125,6 +125,44 @@ public sealed class InteractionStateProbeRegistryTests
     }
 
     [Test]
+    public void AChangedDiffProviderProbeCarriesPresenceChanges()
+    {
+        var registry = new InteractionStateProbeRegistry();
+        // A provider may report a field going from absent to present (Added) or present to absent
+        // (Removed); the nullable-side change must survive the diff unchanged (ADR 0003).
+        var probe = new DiffProbe(
+            "semantic-ui",
+            "{\"a\":1}",
+            () => new[]
+            {
+                new StatePropertyChange(
+                    "targets[x].label",
+                    null,
+                    InteractionValue.FromString("added")),
+                new StatePropertyChange(
+                    "targets[y].label",
+                    InteractionValue.FromString("removed"),
+                    null),
+            });
+        registry.Register(probe);
+
+        var before = registry.Read();
+        probe.Payload = "{\"a\":2}";
+        var after = before.ReadSame();
+        var diff = StateProbeReading.Diff(before, after);
+
+        NUnitCompat.Multiple(() =>
+        {
+            var added = diff.Probes[0].Changes.Single(change => change.Path == "targets[x].label");
+            Assert.That(added.Kind, Is.EqualTo(StatePropertyChangeKind.Added));
+            Assert.That(added.Before, Is.Null);
+            var removed = diff.Probes[0].Changes.Single(change => change.Path == "targets[y].label");
+            Assert.That(removed.Kind, Is.EqualTo(StatePropertyChangeKind.Removed));
+            Assert.That(removed.After, Is.Null);
+        });
+    }
+
+    [Test]
     public void ADiffProviderThatEmitsAnInvalidChangeFailsFastAsAnInvariantViolation()
     {
         var registry = new InteractionStateProbeRegistry();
