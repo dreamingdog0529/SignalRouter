@@ -66,10 +66,22 @@ namespace SignalRouter
             }
 
             using var lease = dispatcher.AcquireReplayLease();
+
+            // Entry awaits resume with ConfigureAwait(false), so without an explicit
+            // switch every entry after the first would start on a thread-pool thread
+            // — off the caller's context (the Unity main thread under the §17.2
+            // policy) and with no ambient context left for the dispatcher to marshal
+            // back to. Re-enter the caller's context before each entry.
+            var callerContext = SynchronizationContext.Current;
             var interactions = recording.Interactions;
             var verified = 0;
             for (var index = 0; index < interactions.Count; index++)
             {
+                if (callerContext != null)
+                {
+                    await InteractionDispatcher.SwitchTo(callerContext);
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
                 var entry = interactions[index];
                 var expected = entry.Outcome;
@@ -144,6 +156,7 @@ namespace SignalRouter
             CancellationToken cancellationToken)
         {
             var reference = InteractionReplayEntryRef.From(entry);
+            var callerContext = SynchronizationContext.Current;
 
             // §16.1 step 1: the command name and version exist in the catalog.
             if (!dispatcher.Catalog.TryGet(
@@ -236,6 +249,14 @@ namespace SignalRouter
             }
 
             var result = await pending.ConfigureAwait(false);
+
+            // A yielding dispatch resumes this method on a thread-pool thread; the
+            // zero-side-effect bracket below re-reads probes (main-thread-only state
+            // under the §17.2 policy), so return to the caller's context first.
+            if (callerContext != null)
+            {
+                await InteractionDispatcher.SwitchTo(callerContext);
+            }
 
             // A stage may ignore cancellation and return any status; a cancelled
             // replay must throw rather than report that as a divergence.

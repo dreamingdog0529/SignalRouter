@@ -829,6 +829,10 @@ but it only places accepted requests into a thread-safe handoff queue.
 `InteractionRuntime.Update` transfers those requests to the dispatcher on the main
 thread.
 
+The dispatcher and the replayer preserve the caller's synchronization context across
+asynchronous stage boundaries: state captures, descriptor reads, and each replayed entry
+resume on the context the call started on, even when a stage yields.
+
 ## 18. MCP and runtime protocol
 
 ### 18.1 Process boundary

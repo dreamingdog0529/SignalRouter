@@ -517,6 +517,16 @@ namespace SignalRouter
                     currentScope.Value = null;
                 }
 
+                // The publish above resumed with ConfigureAwait(false), so a stage
+                // that genuinely yielded leaves this method on a thread-pool thread.
+                // The after-state capture below reads probes and target descriptors
+                // (main-thread-only state under the §17.2 policy), so marshal back
+                // onto the caller's context before touching them.
+                if (callerContext != null)
+                {
+                    await SwitchTo(callerContext);
+                }
+
                 // Step 8/9 (design §7.1): build the terminal result outside the normalizing
                 // catch. The after-state capture (CaptureAfter) therefore also fails fast on a
                 // probe invariant violation rather than being swallowed into a Faulted result.
@@ -852,7 +862,7 @@ namespace SignalRouter
             }
         }
 
-        private static SwitchToContextAwaitable SwitchTo(SynchronizationContext context)
+        internal static SwitchToContextAwaitable SwitchTo(SynchronizationContext context)
         {
             return new SwitchToContextAwaitable(context);
         }
@@ -1282,7 +1292,7 @@ namespace SignalRouter
             }
         }
 
-        private readonly struct SwitchToContextAwaitable
+        internal readonly struct SwitchToContextAwaitable
         {
             private readonly SynchronizationContext context;
 
