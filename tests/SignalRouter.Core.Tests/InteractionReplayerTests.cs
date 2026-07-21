@@ -513,6 +513,585 @@ public sealed class InteractionReplayerTests
             Is.EqualTo(InteractionReplayDivergenceKind.ArgumentsNotDecodable));
     }
 
+    // ------------------------------------------------------------- stops
+
+    [Test]
+    public async Task ReplayStopsBeforeAnOutcomeUnknownEntry()
+    {
+        using var recordSide = new ReplayRuntime(record: true);
+        var gate = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        recordSide.RegisterClick("menu.start");
+        recordSide.RegisterClick("menu.gated", onExecute: async (_, _, _) =>
+        {
+            started.TrySetResult(true);
+            await gate.Task;
+        });
+        await recordSide.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+        var gatedDispatch = recordSide.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.gated"),
+            Options()).AsTask();
+        await started.Task;
+        var recording = Load(recordSide.Sink!);
+        gate.TrySetResult(true);
+        await gatedDispatch;
+
+        using var replaySide = new ReplayRuntime();
+        replaySide.RegisterClick("menu.start");
+        replaySide.RegisterClick("menu.gated");
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(recording.Interactions[1].HasKnownOutcome, Is.False);
+            Assert.That(report.Outcome, Is.EqualTo(InteractionReplayOutcome.Stopped));
+            Assert.That(
+                report.StopReason,
+                Is.EqualTo(InteractionReplayStopReason.OutcomeUnknown));
+            Assert.That(report.VerifiedInteractions, Is.EqualTo(1));
+            Assert.That(report.StoppedBefore!.Sequence, Is.EqualTo(2));
+            Assert.That(replaySide.Log, Is.EqualTo(new[] { "menu.start:Replay" }));
+        });
+    }
+
+    [Test]
+    public async Task ARecordedPreStartCancellationReplaysDeterministically()
+    {
+        using var recordSide = new ReplayRuntime(record: true);
+        recordSide.RegisterClick("menu.start");
+        await recordSide.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options(),
+            new CancellationToken(canceled: true));
+        var recording = Load(recordSide.Sink!);
+
+        using var replaySide = new ReplayRuntime();
+        replaySide.RegisterClick("menu.start");
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                recording.Interactions[0].Outcome!.Status,
+                Is.EqualTo(InteractionStatus.Cancelled));
+            Assert.That(report.Outcome, Is.EqualTo(InteractionReplayOutcome.Completed));
+            Assert.That(replaySide.Log, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task AMidExecutionCancellationStopsReplayBeforeDispatch()
+    {
+        using var recordSide = new ReplayRuntime(record: true);
+        using var cancellation = new CancellationTokenSource();
+        recordSide.RegisterClick("menu.start", onExecute: (_, _, token) =>
+        {
+            cancellation.Cancel();
+            token.ThrowIfCancellationRequested();
+            return default;
+        });
+        await recordSide.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options(),
+            cancellation.Token);
+        var recording = Load(recordSide.Sink!);
+
+        using var replaySide = new ReplayRuntime();
+        replaySide.RegisterClick("menu.start");
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                recording.Interactions[0].Outcome!.Stages,
+                Has.Count.GreaterThan(0));
+            Assert.That(report.Outcome, Is.EqualTo(InteractionReplayOutcome.Stopped));
+            Assert.That(
+                report.StopReason,
+                Is.EqualTo(InteractionReplayStopReason.CancelledDuringExecution));
+            Assert.That(report.VerifiedInteractions, Is.EqualTo(0));
+            Assert.That(report.StoppedBefore!.Sequence, Is.EqualTo(1));
+            Assert.That(replaySide.Log, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task AReplayedContinuationIsSuppressedAndStopsTheReplay()
+    {
+        using var recordSide = new ReplayRuntime(record: true);
+        recordSide.RegisterClick("menu.follow");
+        recordSide.RegisterClick("menu.start", onExecute: (_, context, _) =>
+        {
+            context.EnqueueContinuation(new ClickCommand("menu.follow"), Options());
+            return default;
+        });
+        await recordSide.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+        await WaitForLines(recordSide.Sink!, 5);
+        var recording = Load(recordSide.Sink!);
+
+        using var replaySide = new ReplayRuntime();
+        replaySide.RegisterClick("menu.follow");
+        replaySide.RegisterClick("menu.start", onExecute: (_, context, _) =>
+        {
+            context.EnqueueContinuation(new ClickCommand("menu.follow"), Options());
+            return default;
+        });
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(recording.Interactions, Has.Count.EqualTo(2));
+            Assert.That(report.Outcome, Is.EqualTo(InteractionReplayOutcome.Stopped));
+            Assert.That(
+                report.StopReason,
+                Is.EqualTo(InteractionReplayStopReason.ContinuationRequested));
+            Assert.That(report.VerifiedInteractions, Is.EqualTo(1));
+            Assert.That(report.StoppedBefore!.TargetId, Is.EqualTo("menu.follow"));
+            Assert.That(replaySide.Log, Is.EqualTo(new[] { "menu.start:Replay" }));
+        });
+    }
+
+    [Test]
+    public async Task MultipleReplayedContinuationsAreAllSuppressed()
+    {
+        using var recordSide = new ReplayRuntime(record: true);
+        recordSide.RegisterClick("menu.follow");
+        recordSide.RegisterClick("menu.other");
+        recordSide.RegisterClick("menu.start", onExecute: (_, context, _) =>
+        {
+            context.EnqueueContinuation(new ClickCommand("menu.follow"), Options());
+            context.EnqueueContinuation(new ClickCommand("menu.other"), Options());
+            return default;
+        });
+        await recordSide.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+        await WaitForLines(recordSide.Sink!, 7);
+        var recording = Load(recordSide.Sink!);
+
+        using var replaySide = new ReplayRuntime();
+        replaySide.RegisterClick("menu.follow");
+        replaySide.RegisterClick("menu.other");
+        replaySide.RegisterClick("menu.start", onExecute: (_, context, _) =>
+        {
+            context.EnqueueContinuation(new ClickCommand("menu.follow"), Options());
+            context.EnqueueContinuation(new ClickCommand("menu.other"), Options());
+            return default;
+        });
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                report.StopReason,
+                Is.EqualTo(InteractionReplayStopReason.ContinuationRequested));
+            Assert.That(report.VerifiedInteractions, Is.EqualTo(1));
+            Assert.That(replaySide.Log, Is.EqualTo(new[] { "menu.start:Replay" }));
+        });
+    }
+
+    [Test]
+    public async Task AContinuationFromTheFinalEntryStopsWithNothingLeftToReplay()
+    {
+        var recording = LoadSynthetic("click", "menu.start", "{}");
+
+        using var replaySide = new ReplayRuntime(withProbes: false);
+        replaySide.RegisterClick("menu.start", onExecute: (_, context, _) =>
+        {
+            context.EnqueueContinuation(new ClickCommand("menu.start"), Options());
+            return default;
+        });
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                report.StopReason,
+                Is.EqualTo(InteractionReplayStopReason.ContinuationRequested));
+            Assert.That(report.StoppedBefore, Is.Null);
+            Assert.That(report.VerifiedInteractions, Is.EqualTo(1));
+            Assert.That(replaySide.Log, Is.EqualTo(new[] { "menu.start:Replay" }));
+        });
+    }
+
+    // ------------------------------------------- preconditions and the lease
+
+    [Test]
+    public void AMismatchedSessionEpochIsRejectedUpfront()
+    {
+        var recording = LoadSynthetic("click", "menu.start", "{}");
+
+        using var replaySide = new ReplayRuntime(sessionId: "session-2", withProbes: false);
+        replaySide.RegisterClick("menu.start");
+
+        var exception = NUnitCompat.ThrowsAsync<InteractionReplayException>(async () =>
+            await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher));
+
+        Assert.That(
+            exception!.Error,
+            Is.EqualTo(InteractionReplayError.SessionEpochMismatch));
+    }
+
+    [Test]
+    public void ARecorderAttachedToTheReplayDispatcherIsRejected()
+    {
+        var recording = LoadSynthetic("click", "menu.start", "{}");
+
+        using var replaySide = new ReplayRuntime(record: true, withProbes: false);
+        replaySide.RegisterClick("menu.start");
+
+        var exception = NUnitCompat.ThrowsAsync<InteractionReplayException>(async () =>
+            await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher));
+
+        Assert.That(exception!.Error, Is.EqualTo(InteractionReplayError.RecorderAttached));
+    }
+
+    [Test]
+    public async Task ABusyDispatcherIsRejectedUntilItsWorkDrains()
+    {
+        var recording = LoadSynthetic("click", "menu.start", "{}");
+
+        using var replaySide = new ReplayRuntime(withProbes: false);
+        var gate = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        replaySide.RegisterClick("menu.start", onExecute: async (_, _, _) =>
+        {
+            started.TrySetResult(true);
+            await gate.Task;
+        });
+        var inFlight = replaySide.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options()).AsTask();
+        await started.Task;
+
+        var exception = NUnitCompat.ThrowsAsync<InteractionReplayException>(async () =>
+            await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher));
+
+        gate.TrySetResult(true);
+        await inFlight;
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(exception!.Error, Is.EqualTo(InteractionReplayError.DispatcherBusy));
+            Assert.That(report.Outcome, Is.EqualTo(InteractionReplayOutcome.Completed));
+        });
+    }
+
+    [Test]
+    public async Task AStageOriginatedReplayIsReportedAsReentrancyNotBusyness()
+    {
+        var recording = LoadSynthetic("click", "menu.start", "{}");
+
+        using var replaySide = new ReplayRuntime(withProbes: false);
+        InteractionReplayException? captured = null;
+        replaySide.RegisterClick("menu.reenter", onExecute: async (_, _, _) =>
+        {
+            try
+            {
+                await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+            }
+            catch (InteractionReplayException exception)
+            {
+                captured = exception;
+            }
+        });
+
+        await replaySide.Dispatcher.DispatchAsync(new ClickCommand("menu.reenter"), Options());
+
+        Assert.That(
+            captured!.Error,
+            Is.EqualTo(InteractionReplayError.ReplayReentrancy));
+    }
+
+    [Test]
+    public async Task TheReplayLeaseExcludesExternalDispatchAndConcurrentReplay()
+    {
+        var recording = LoadSynthetic("click", "menu.start", "{}");
+
+        using var replaySide = new ReplayRuntime(withProbes: false);
+        var gate = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        replaySide.RegisterClick("menu.start", onExecute: async (_, _, _) =>
+        {
+            started.TrySetResult(true);
+            await gate.Task;
+        });
+
+        var replay = InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher).AsTask();
+        await started.Task;
+
+        var external = NUnitCompat.Throws<InvalidOperationException>(() =>
+            replaySide.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options())
+                .AsTask().GetAwaiter().GetResult());
+        var concurrent = NUnitCompat.ThrowsAsync<InteractionReplayException>(async () =>
+            await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher));
+
+        gate.TrySetResult(true);
+        var report = await replay;
+        var afterwards = await replaySide.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options());
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(external, Is.Not.Null);
+            Assert.That(concurrent!.Error, Is.EqualTo(InteractionReplayError.DispatcherBusy));
+            Assert.That(report.Outcome, Is.EqualTo(InteractionReplayOutcome.Completed));
+            Assert.That(afterwards.Status, Is.EqualTo(InteractionStatus.Succeeded));
+        });
+    }
+
+    [Test]
+    public async Task TheLeaseIsReleasedWhenReplayThrows()
+    {
+        var recording = RecordSecretDispatch(new SecretSchema(sensitive: true));
+
+        using var replaySide = new ReplayRuntime(SecretCatalog(new SecretSchema(sensitive: true)));
+        replaySide.RegisterSecret("vault.value", new SecretSchema(sensitive: true));
+
+        var exception = NUnitCompat.ThrowsAsync<InteractionReplayException>(async () =>
+            await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher));
+        var afterwards = await replaySide.Dispatcher.DispatchAsync(
+            new SecretCommand("vault.value", "hunter2"),
+            Options());
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                exception!.Error,
+                Is.EqualTo(InteractionReplayError.SecretResolverMissing));
+            Assert.That(afterwards.Status, Is.EqualTo(InteractionStatus.Succeeded));
+        });
+    }
+
+    // ------------------------------------------------------ replay cancellation
+
+    [Test]
+    public async Task ACancelledReplayThrowsInsteadOfReportingADivergence()
+    {
+        using var recordSide = new ReplayRuntime(record: true);
+        recordSide.RegisterClick("menu.start");
+        await recordSide.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+        await recordSide.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+        var recording = Load(recordSide.Sink!);
+
+        using var replaySide = new ReplayRuntime();
+        using var cancellation = new CancellationTokenSource();
+        replaySide.RegisterClick("menu.start", onExecute: (_, _, _) =>
+        {
+            // The pipeline ignores the token and completes, so the dispatch
+            // returns Succeeded; the replayer must still observe the caller's
+            // cancellation instead of comparing statuses.
+            cancellation.Cancel();
+            return default;
+        });
+
+        NUnitCompat.ThrowsAsync<OperationCanceledException>(async () =>
+            await InteractionReplayer.ReplayAsync(
+                recording,
+                replaySide.Dispatcher,
+                secretResolver: null,
+                cancellation.Token));
+        var logAtCancellation = replaySide.Log;
+        var afterwards = await replaySide.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options());
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(logAtCancellation, Has.Count.EqualTo(1));
+            Assert.That(afterwards.Status, Is.EqualTo(InteractionStatus.Succeeded));
+        });
+    }
+
+    // ---------------------------------------------- fault-code null sensitivity
+
+    [Test]
+    public async Task FaultCodesAreComparedNullSensitivelyInBothDirections()
+    {
+        var nullCodeRecording = RecordStagedFault(new InvalidOperationException("boom"));
+        var codedRecording = RecordStagedFault(AudioFault());
+
+        using var nullCodeSide = new ReplayRuntime();
+        nullCodeSide.RegisterStagedClick(
+            "menu.start",
+            new FakeStage("click.apply", 0),
+            new FakeStage("click.transition", 1, fault: new InvalidOperationException("other")));
+
+        using var codedSide = new ReplayRuntime();
+        codedSide.RegisterStagedClick(
+            "menu.start",
+            new FakeStage("click.apply", 0),
+            new FakeStage("click.transition", 1, fault: AudioFault()));
+
+        var nullReplaysNull = await InteractionReplayer.ReplayAsync(
+            nullCodeRecording,
+            nullCodeSide.Dispatcher);
+        var codedReplaysNull = await InteractionReplayer.ReplayAsync(
+            codedRecording,
+            nullCodeSide.Dispatcher);
+        var nullReplaysCoded = await InteractionReplayer.ReplayAsync(
+            nullCodeRecording,
+            codedSide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                nullReplaysNull.Outcome,
+                Is.EqualTo(InteractionReplayOutcome.Completed));
+            Assert.That(
+                codedReplaysNull.Divergence!.Kind,
+                Is.EqualTo(InteractionReplayDivergenceKind.FaultCodeMismatch));
+            Assert.That(
+                nullReplaysCoded.Divergence!.Kind,
+                Is.EqualTo(InteractionReplayDivergenceKind.FaultCodeMismatch));
+        });
+    }
+
+    // ------------------------------------------------ probe set differences
+
+    [Test]
+    public async Task AProbeMissingAtReplayTimeReportsANullActualHash()
+    {
+        using var recordSide = new ReplayRuntime(record: true);
+        recordSide.RegisterClick("menu.start");
+        await recordSide.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+        var recording = Load(recordSide.Sink!);
+
+        using var replaySide = new ReplayRuntime(withCounter: false);
+        replaySide.RegisterClick("menu.start");
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                report.Divergence!.Kind,
+                Is.EqualTo(InteractionReplayDivergenceKind.BeforeStateMismatch));
+            Assert.That(report.Divergence.StateDifferences, Has.Count.EqualTo(1));
+            Assert.That(report.Divergence.StateDifferences[0].ProbeId, Is.EqualTo("counter"));
+            Assert.That(report.Divergence.StateDifferences[0].ExpectedHash, Is.Not.Null);
+            Assert.That(report.Divergence.StateDifferences[0].ActualHash, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task AProbeUnknownToTheRecordingReportsANullExpectedHash()
+    {
+        using var recordSide = new ReplayRuntime(record: true, withCounter: false);
+        recordSide.RegisterClick("menu.start");
+        await recordSide.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+        var recording = Load(recordSide.Sink!);
+
+        using var replaySide = new ReplayRuntime();
+        replaySide.RegisterClick("menu.start");
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                report.Divergence!.Kind,
+                Is.EqualTo(InteractionReplayDivergenceKind.BeforeStateMismatch));
+            Assert.That(report.Divergence.StateDifferences, Has.Count.EqualTo(1));
+            Assert.That(report.Divergence.StateDifferences[0].ProbeId, Is.EqualTo("counter"));
+            Assert.That(report.Divergence.StateDifferences[0].ExpectedHash, Is.Null);
+            Assert.That(report.Divergence.StateDifferences[0].ActualHash, Is.Not.Null);
+        });
+    }
+
+    // ------------------------------------------------ recorded-argument audit
+
+    [Test]
+    public async Task AnArgumentUnknownToTheCurrentSchemaDiverges()
+    {
+        var recording = LoadSynthetic("click", "menu.start", "{\"extra\":true}");
+
+        using var replaySide = new ReplayRuntime(withProbes: false);
+        replaySide.RegisterClick("menu.start");
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                report.Divergence!.Kind,
+                Is.EqualTo(InteractionReplayDivergenceKind.ArgumentSchemaMismatch));
+            Assert.That(report.Divergence.ArgumentName, Is.EqualTo("extra"));
+            Assert.That(replaySide.Log, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task AMissingRequiredArgumentDiverges()
+    {
+        var recording = LoadSynthetic("set_secret", "vault.value", "{}");
+
+        using var replaySide = new ReplayRuntime(
+            SecretCatalog(new SecretSchema(sensitive: false)),
+            withProbes: false);
+        replaySide.RegisterSecret("vault.value", new SecretSchema(sensitive: false));
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                report.Divergence!.Kind,
+                Is.EqualTo(InteractionReplayDivergenceKind.ArgumentSchemaMismatch));
+            Assert.That(report.Divergence.ArgumentName, Is.EqualTo("value"));
+        });
+    }
+
+    [Test]
+    public async Task AWrongKindPlaintextArgumentDiverges()
+    {
+        var recording = LoadSynthetic("set_secret", "vault.value", "{\"value\":42}");
+
+        using var replaySide = new ReplayRuntime(
+            SecretCatalog(new SecretSchema(sensitive: false)),
+            withProbes: false);
+        replaySide.RegisterSecret("vault.value", new SecretSchema(sensitive: false));
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                report.Divergence!.Kind,
+                Is.EqualTo(InteractionReplayDivergenceKind.ArgumentSchemaMismatch));
+            Assert.That(report.Divergence.ArgumentName, Is.EqualTo("value"));
+        });
+    }
+
+    [Test]
+    public async Task ARecordedNumberPassesThroughToTheCodecVerbatim()
+    {
+        var recording = LoadSynthetic("set_amount", "vault.amount", "{\"amount\":1e100}");
+
+        using var replaySide = new ReplayRuntime(AmountCatalog(), withProbes: false);
+        replaySide.RegisterAmount("vault.amount");
+
+        var report = await InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher);
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(report.Outcome, Is.EqualTo(InteractionReplayOutcome.Completed));
+            Assert.That(replaySide.Log, Is.EqualTo(new[] { "vault.amount:1e100" }));
+        });
+    }
+
     // ----------------------------------------------------------- report models
 
     [Test]
@@ -959,6 +1538,71 @@ public sealed class InteractionReplayerTests
         return Load(recordSide.Sink!);
     }
 
+    private static InteractionRecording RecordStagedFault(Exception fault)
+    {
+        using var recordSide = new ReplayRuntime(record: true);
+        recordSide.RegisterStagedClick(
+            "menu.start",
+            new FakeStage("click.apply", 0),
+            new FakeStage("click.transition", 1, fault: fault));
+        recordSide.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options())
+            .AsTask().GetAwaiter().GetResult();
+        return Load(recordSide.Sink!);
+    }
+
+    private static InteractionCommandCatalog AmountCatalog()
+    {
+        return new InteractionCommandCatalogBuilder()
+            .Register("set_amount", 1, AmountSchema.Instance, true)
+            .Build();
+    }
+
+    // Hand-built schema-v1 lines drive the audit paths a real recorder can never
+    // produce against the current catalog (unknown, missing, or wrong-kind
+    // arguments), mirroring the reader tests' raw-line technique.
+    private static InteractionRecording LoadSynthetic(
+        string commandName,
+        string targetId,
+        string arguments)
+    {
+        var content =
+            "{\"kind\":\"session\",\"schemaVersion\":1,\"sessionId\":\"session-1\""
+            + ",\"appBuild\":\"build-1\",\"startedAt\":\"2026-07-21T03:04:05.1230000Z\"}\n"
+            + "{\"kind\":\"interaction_requested\",\"sequence\":1,\"requestId\":\"request-1\""
+            + ",\"origin\":\"Test\",\"command\":{\"name\":\"" + commandName
+            + "\",\"version\":1,\"targetId\":\"" + targetId
+            + "\",\"arguments\":" + arguments + "}}\n"
+            + "{\"kind\":\"interaction_completed\",\"sequence\":1,\"requestId\":\"request-1\""
+            + ",\"result\":{\"status\":\"Succeeded\",\"stages\":"
+            + "[{\"id\":\"execute\",\"status\":\"Completed\"}]}"
+            + ",\"state\":{\"before\":{},\"after\":{}}}\n";
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+        return InteractionRecordingReader.Load(stream);
+    }
+
+    // Continuations run fire-and-forget after their parent dispatch returns; the
+    // recording is complete once every expected line has been flushed.
+    private static async Task WaitForLines(MemoryStream sink, int count)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (true)
+        {
+            var text = System.Text.Encoding.UTF8.GetString(sink.ToArray());
+            if (text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length >= count)
+            {
+                return;
+            }
+
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException(
+                    "The recording did not reach " + count + " lines in time.");
+            }
+
+            await Task.Delay(10);
+        }
+    }
+
     // A record-phase / replay-phase pair share this runtime shape: the replay
     // side reconstructs a registry with the recorded session ID and re-registers
     // equivalent targets in the same order so the built-in probe hashes line up
@@ -973,15 +1617,23 @@ public sealed class InteractionReplayerTests
             InteractionCommandCatalog? catalog = null,
             bool record = false,
             int counterStart = 0,
-            string sessionId = "session-1")
+            string sessionId = "session-1",
+            bool withProbes = true,
+            bool withCounter = true)
         {
             Catalog = catalog ?? InteractionCommandCatalog.CreateMvp();
             Registry = new InteractionRegistry(Catalog, sessionId);
             Counter = new CounterProbe(counterStart);
             Probes = new InteractionStateProbeRegistry();
-            Probes.Register(new SemanticUiStateProbe(Registry));
-            Probes.Register(new InteractionRuntimeStateProbe(Registry));
-            Probes.Register(Counter);
+            if (withProbes)
+            {
+                Probes.Register(new SemanticUiStateProbe(Registry));
+                Probes.Register(new InteractionRuntimeStateProbe(Registry));
+                if (withCounter)
+                {
+                    Probes.Register(Counter);
+                }
+            }
             if (record)
             {
                 Sink = new MemoryStream();
@@ -1063,6 +1715,22 @@ public sealed class InteractionReplayerTests
                 return default;
             });
             Register(targetId, "set_secret", 1, schema.Arguments, pipeline, enabled: true);
+        }
+
+        public void RegisterAmount(string targetId)
+        {
+            var pipeline = new FakePipeline<AmountCommand>(null, (command, _, _) =>
+            {
+                LogEntry(command.TargetId + ":" + command.Raw);
+                return default;
+            });
+            Register(
+                targetId,
+                "set_amount",
+                1,
+                AmountSchema.Instance.Arguments,
+                pipeline,
+                enabled: true);
         }
 
         public void Dispose()
@@ -1229,6 +1897,55 @@ public sealed class InteractionReplayerTests
             }
 
             return default;
+        }
+    }
+
+    private readonly struct AmountCommand : IInteractionCommand
+    {
+        public AmountCommand(string targetId, string raw)
+        {
+            TargetId = targetId;
+            Raw = raw;
+        }
+
+        public string TargetId { get; }
+
+        // The number argument's raw JSON text, so the tests can prove the
+        // replayer's plaintext pass-through is byte-faithful for values a
+        // decimal cannot represent.
+        public string Raw { get; }
+    }
+
+    private sealed class AmountSchema : IInteractionCommandSchema<AmountCommand>
+    {
+        private AmountSchema()
+        {
+        }
+
+        public static AmountSchema Instance { get; } = new();
+
+        public InteractionArgumentSchema Arguments { get; } = new(new[]
+        {
+            new InteractionArgumentDefinition(
+                "amount",
+                InteractionArgumentType.Number,
+                required: true,
+                sensitive: false),
+        });
+
+        public AmountCommand Decode(string targetId, JsonElement arguments)
+        {
+            return new AmountCommand(
+                targetId,
+                arguments.GetProperty("amount").GetRawText());
+        }
+
+        public void WriteArguments(Utf8JsonWriter writer, in AmountCommand command)
+        {
+            writer.WriteStartObject();
+            writer.WritePropertyName("amount");
+            writer.WriteRawValue(command.Raw);
+            writer.WriteEndObject();
         }
     }
 
