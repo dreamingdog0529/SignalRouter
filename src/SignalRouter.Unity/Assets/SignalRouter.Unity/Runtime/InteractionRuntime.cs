@@ -29,6 +29,7 @@ public sealed class InteractionRuntime : MonoBehaviour
     private int suppressionDepth;
     private int inFlightDispatches;
     private volatile bool shutdownRequested;
+    private bool disposed;
 
     public bool IsInitialized => dispatcher != null;
 
@@ -50,9 +51,28 @@ public sealed class InteractionRuntime : MonoBehaviour
     public string SessionEpoch => Registry.SessionEpoch;
 
     // Cancelled when Shutdown begins; adapters pass this token to their
-    // dispatches so in-flight work stops cooperatively during teardown.
-    public CancellationToken LifetimeToken =>
-        lifetime?.Token ?? throw NotInitialized();
+    // dispatches so in-flight work stops cooperatively during teardown. After
+    // shutdown the token is refused outright: the backing source may already
+    // be disposed, and new dispatches must fail with the shutdown message,
+    // not an ObjectDisposedException from the source.
+    public CancellationToken LifetimeToken
+    {
+        get
+        {
+            if (lifetime == null)
+            {
+                throw NotInitialized();
+            }
+
+            if (shutdownRequested)
+            {
+                throw new InvalidOperationException(
+                    "The interaction runtime is shut down and no longer accepts dispatches.");
+            }
+
+            return lifetime.Token;
+        }
+    }
 
     // True while any InteractionScope suppression is open: adapters treat UI
     // notifications as agent/replay echoes rather than human input.
@@ -160,9 +180,11 @@ public sealed class InteractionRuntime : MonoBehaviour
         return idleCompletion.Task;
     }
 
-    // Rejects new work, cancels the lifetime token, and disposes the
-    // dispatcher. Idempotent; OnDestroy calls it, and fixtures that initialize
-    // an inactive runtime (whose OnDestroy never runs) must call it directly.
+    // Rejects new work and cancels the lifetime token. The dispatcher is
+    // disposed once the last in-flight dispatch has been observed — disposing
+    // it mid-dispatch would race the cancelled work still unwinding through
+    // it. Idempotent; OnDestroy calls it, and fixtures that initialize an
+    // inactive runtime (whose OnDestroy never runs) must call it directly.
     public void Shutdown()
     {
         if (shutdownRequested)
@@ -178,8 +200,10 @@ public sealed class InteractionRuntime : MonoBehaviour
 
         RequireMainThread();
         lifetime!.Cancel();
-        dispatcher.Dispose();
-        lifetime.Dispose();
+        if (inFlightDispatches == 0)
+        {
+            DisposeCore();
+        }
     }
 
     internal void BeginSuppression()
@@ -240,8 +264,19 @@ public sealed class InteractionRuntime : MonoBehaviour
                 var completion = idleCompletion;
                 idleCompletion = null;
                 completion?.TrySetResult(true);
+                if (shutdownRequested && !disposed)
+                {
+                    DisposeCore();
+                }
             }
         }
+    }
+
+    private void DisposeCore()
+    {
+        disposed = true;
+        dispatcher!.Dispose();
+        lifetime!.Dispose();
     }
 
     private void Awake()
