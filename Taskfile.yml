@@ -36,7 +36,7 @@ tasks:
       - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode Compile
 
   test:
-    desc: Run .NET and Unity EditMode tests
+    desc: Run .NET and Unity EditMode/PlayMode tests
     cmds:
       - dotnet tool restore
       # Build/pack first so the local feed holds the SignalRouter.Core/Protocol
@@ -47,6 +47,7 @@ tasks:
       - dotnet nugetforunity restore ./src/SignalRouter.Unity
       - dotnet test ./SignalRouter.slnx --no-build
       - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode Test
+      - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode PlayTest
 
   setup:
     desc: Install tools and git hooks
