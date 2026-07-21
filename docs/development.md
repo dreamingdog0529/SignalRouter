@@ -3,9 +3,10 @@
 > **Current status:** The command model, immutable command catalog and codecs, structured
 > result model, semantic registry, FIFO dispatch, deterministic stage execution, hash-level
 > state probes, semantic-UI property-level diffs (matched-target scalar fields, per-field
-> target add/remove, and nested interaction/argument changes), and the JSON Lines recorder
-> with its recovery-capable reader are implemented and verified. Strict replay, Unity UI,
-> WebSocket, and MCP behavior remain unimplemented.
+> target add/remove, and nested interaction/argument changes), the JSON Lines recorder
+> with its recovery-capable reader, and the strict replayer with its structured divergence
+> reports are implemented and verified. Unity UI, WebSocket, and MCP behavior remain
+> unimplemented.
 
 ## Prerequisites
 

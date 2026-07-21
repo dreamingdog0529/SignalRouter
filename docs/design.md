@@ -742,7 +742,8 @@ so an unterminated final line is discarded even when it parses.
 If the process terminates while an interaction is queued or running, the recording
 contains a request event without a terminal event. Readers mark that request
 `OutcomeUnknown`; they do not convert it to `Faulted`. Strict replay stops before an
-outcome-unknown entry unless the caller supplies an explicit recovery policy.
+outcome-unknown entry unless the caller supplies an explicit recovery policy; no such
+policy is defined in v1, so the MVP replayer always stops there ([ADR 0006](adr/0006-strict-replay-semantics.md)).
 
 ## 16. Replay
 
@@ -766,6 +767,20 @@ recorded expectation, actual outcome, and state differences.
 `Rejected` entries are dispatched again so the same rejection code and zero-side-effect
 guarantee can be verified. `Faulted` entries run through the same stages and must fail at
 the recorded stage with the recorded partial state.
+
+The semantics are specified by [ADR 0006](adr/0006-strict-replay-semantics.md) and
+implemented by `InteractionReplayer`, which holds an exclusive lease on a recorder-free
+dispatcher and returns an `InteractionReplayReport`. Stage progress is compared for
+faulted results only; for successes the state hashes are the behavioral guard. The
+zero-side-effect guarantee is verified as zero *probe-observable* state change, and
+state differences are reported at hash level until snapshots are retained (§14.1).
+Entries whose behavior cannot be reproduced stop the replay instead of diverging:
+outcome-unknown entries (§15.1), mid-execution cancellations (timing and partial
+effects are unrecorded), and entries whose replayed stages request continuations
+(schema v1 has no parent linkage; the continuation is suppressed, never executed).
+Pre-start cancellations are replayed deterministically with a synthetic
+already-cancelled token. Divergence reports identify entries and arguments by name and
+carry only recording-safe fields — never exception details or argument values.
 
 ### 16.2 Adaptive replay
 
@@ -1004,6 +1019,7 @@ The MVP is complete only when all of the following are demonstrated in automated
 | D15 | State snapshots use a constrained canonical JSON subset with SHA-256 lowercase-hex hashing, not RFC 8785; transient queue state is excluded from the hash (ADR 0001) |
 | D16 | Property-level state diffs are provided by the probe (`IStatePropertyDiffProvider`); the semantic-ui diff enumerates matched-target scalar fields (ADR 0002), per-field `Added`/`Removed` changes for target additions/removals (ADR 0003), and nested `availableInteractions`/argument-schema changes — additions, removals, field changes, and membership-preserving reordering (ADR 0004) |
 | D17 | Recording schema v1 is strict JSON Lines with per-probe state hash maps, full stage arrays, application-code-only fault codes, deterministic catalog-floor secret keys, newline write-commit truncation recovery, and fail-fast recorder poisoning (ADR 0005) |
+| D18 | Strict replay runs under an exclusive dispatcher lease with sanitized hash-level divergence reports; stage progress is compared for faulted results only, pre-start cancellations replay via a synthetic cancelled token, and outcome-unknown entries, mid-execution cancellations, and requested continuations stop the replay (ADR 0006) |
 
 ## 25. Remaining implementation-level decisions
 
