@@ -483,7 +483,25 @@ namespace SignalRouter
                     + "' but no secret resolver was supplied.");
             }
 
-            if (!secretResolver.TryResolve(entry.RequestId, key, out var value))
+            bool resolved;
+            InteractionValue? value;
+            try
+            {
+                resolved = secretResolver.TryResolve(entry.RequestId, key, out value);
+            }
+            catch (Exception exception)
+            {
+                // A throwing resolver (a failed vault lookup, for example) is a
+                // broken resolver contract, not evidence about the recording;
+                // surface it through the stable replay failure channel with the
+                // original cause attached.
+                throw new InteractionReplayException(
+                    InteractionReplayError.SecretResolverContract,
+                    "The secret resolver threw while resolving '" + key + "'.",
+                    exception);
+            }
+
+            if (!resolved)
             {
                 return new InteractionReplayDivergence(
                     reference,

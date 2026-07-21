@@ -38,6 +38,7 @@ namespace SignalRouter
         private int pendingContinuations;
         private InteractionReplayLease? replayLease;
         private bool replayDispatchArmed;
+        private int replayArmedThreadId;
         private int suppressedReplayContinuations;
 
         public InteractionDispatcher(
@@ -146,6 +147,19 @@ namespace SignalRouter
                     commandName,
                     commandVersion,
                     cancellationToken).ConfigureAwait(false);
+            }
+
+            // The cache-hit path never reaches AssignIdentity, so it needs its own
+            // lease check: a cached result served mid-replay would contradict the
+            // exclusive-lease contract even though it runs no side effects. The
+            // replayer's own dispatches never carry an idempotency key, so this
+            // rejects external callers only.
+            lock (gate)
+            {
+                if (replayLease != null)
+                {
+                    throw ReplayLeaseRejection();
+                }
             }
 
             Task<InteractionResult>? existing;
@@ -293,7 +307,14 @@ namespace SignalRouter
             lock (gate)
             {
                 RequireCurrentLease(lease);
+
+                // Admission is bound to the arming thread: the armed dispatch
+                // enqueues during the synchronous prefix of DispatchAsync on this
+                // same thread, so a concurrent caller racing into the armed window
+                // from another thread can never be mistaken for the replay's own
+                // dispatch.
                 replayDispatchArmed = true;
+                replayArmedThreadId = Environment.CurrentManagedThreadId;
             }
         }
 
@@ -337,6 +358,13 @@ namespace SignalRouter
                 throw new InvalidOperationException(
                     "The replay lease is no longer held by this dispatcher.");
             }
+        }
+
+        private static InvalidOperationException ReplayLeaseRejection()
+        {
+            return new InvalidOperationException(
+                "The dispatcher is exclusively leased for replay; dispatch is "
+                + "rejected until the replay completes.");
         }
 
         private async ValueTask<InteractionResult> DispatchCoreAsync<TCommand>(
@@ -648,13 +676,14 @@ namespace SignalRouter
                 }
 
                 // While a replay lease is held only the replayer's own armed
-                // dispatches may enter the queue; anything else would interleave
-                // with replay probe readings and sequence order (design §16.1).
-                if (replayLease != null && !replayDispatchArmed)
+                // dispatch — identified by the arming thread — may enter the
+                // queue; anything else would interleave with replay probe
+                // readings and sequence order (design §16.1).
+                if (replayLease != null
+                    && !(replayDispatchArmed
+                        && replayArmedThreadId == Environment.CurrentManagedThreadId))
                 {
-                    throw new InvalidOperationException(
-                        "The dispatcher is exclusively leased for replay; dispatch is "
-                        + "rejected until the replay completes.");
+                    throw ReplayLeaseRejection();
                 }
 
                 sequence = checked(++nextSequence);

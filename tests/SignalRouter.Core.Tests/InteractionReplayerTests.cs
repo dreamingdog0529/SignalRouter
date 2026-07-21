@@ -853,6 +853,109 @@ public sealed class InteractionReplayerTests
     }
 
     [Test]
+    public async Task AnArmedReplayDispatchAdmitsOnlyTheArmingThread()
+    {
+        using var runtime = new ReplayRuntime(withProbes: false);
+        runtime.RegisterClick("menu.start");
+
+        using (var lease = runtime.Dispatcher.AcquireReplayLease())
+        {
+            lease.ArmDispatch();
+            try
+            {
+                // The arming thread's dispatch is the replay's own and is admitted.
+                var owned = await runtime.Dispatcher.DispatchAsync(
+                    new ClickCommand("menu.start"),
+                    Options());
+                Assert.That(owned.Status, Is.EqualTo(InteractionStatus.Succeeded));
+
+                // A concurrent caller racing into the armed window from another
+                // thread must still be rejected.
+                var raced = NUnitCompat.ThrowsAsync<InvalidOperationException>(async () =>
+                    await Task.Run(() => runtime.Dispatcher.DispatchAsync(
+                        new ClickCommand("menu.start"),
+                        Options()).AsTask()));
+                Assert.That(raced, Is.Not.Null);
+            }
+            finally
+            {
+                lease.DisarmDispatch();
+            }
+        }
+    }
+
+    [Test]
+    public async Task ACachedIdempotentResultIsNotServedDuringReplay()
+    {
+        var recording = LoadSynthetic("click", "menu.start", "{}");
+
+        using var replaySide = new ReplayRuntime(withProbes: false);
+        var gate = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var gated = false;
+        replaySide.RegisterClick("menu.start", onExecute: async (_, _, _) =>
+        {
+            if (gated)
+            {
+                started.TrySetResult(true);
+                await gate.Task;
+            }
+        });
+        var cached = await replaySide.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            new InteractionDispatchOptions(InteractionOrigin.Test, idempotencyKey: "op-1"));
+
+        gated = true;
+        var replay = InteractionReplayer.ReplayAsync(recording, replaySide.Dispatcher).AsTask();
+        await started.Task;
+
+        var duringReplay = NUnitCompat.Throws<InvalidOperationException>(() =>
+            replaySide.Dispatcher.DispatchAsync(
+                new ClickCommand("menu.start"),
+                new InteractionDispatchOptions(InteractionOrigin.Test, idempotencyKey: "op-1"))
+                .AsTask().GetAwaiter().GetResult());
+
+        gate.TrySetResult(true);
+        var report = await replay;
+        var afterwards = await replaySide.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            new InteractionDispatchOptions(InteractionOrigin.Test, idempotencyKey: "op-1"));
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(duringReplay, Is.Not.Null);
+            Assert.That(report.Outcome, Is.EqualTo(InteractionReplayOutcome.Completed));
+            Assert.That(afterwards.Sequence, Is.EqualTo(cached.Sequence));
+        });
+    }
+
+    [Test]
+    public void AThrowingSecretResolverSurfacesAsAContractFailure()
+    {
+        var recording = RecordSecretDispatch(new SecretSchema(sensitive: true));
+
+        using var replaySide = new ReplayRuntime(SecretCatalog(new SecretSchema(sensitive: true)));
+        replaySide.RegisterSecret("vault.value", new SecretSchema(sensitive: true));
+        var cause = new InvalidOperationException("The vault is unreachable.");
+
+        var exception = NUnitCompat.ThrowsAsync<InteractionReplayException>(async () =>
+            await InteractionReplayer.ReplayAsync(
+                recording,
+                replaySide.Dispatcher,
+                new ThrowingResolver(cause)));
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(
+                exception!.Error,
+                Is.EqualTo(InteractionReplayError.SecretResolverContract));
+            Assert.That(exception.InnerException, Is.SameAs(cause));
+        });
+    }
+
+    [Test]
     public async Task TheLeaseIsReleasedWhenReplayThrows()
     {
         var recording = RecordSecretDispatch(new SecretSchema(sensitive: true));
@@ -2018,6 +2121,21 @@ public sealed class InteractionReplayerTests
             writer.WriteStartObject();
             writer.WriteString("value", command.Value);
             writer.WriteEndObject();
+        }
+    }
+
+    private sealed class ThrowingResolver : IInteractionSecretResolver
+    {
+        private readonly Exception cause;
+
+        public ThrowingResolver(Exception cause)
+        {
+            this.cause = cause;
+        }
+
+        public bool TryResolve(string requestId, string key, out InteractionValue? value)
+        {
+            throw cause;
         }
     }
 
