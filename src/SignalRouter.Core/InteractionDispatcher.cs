@@ -28,6 +28,19 @@ namespace SignalRouter
         private InteractionExecutionScope? activeScope;
         private bool disposed;
 
+        // Replay exclusivity (design §16.1): queueTail alone cannot prove idleness
+        // because it is released before StartContinuations runs, and a posted
+        // continuation has not yet re-entered the queue. activeDispatches spans a
+        // dispatch through its continuation drain, and pendingContinuations covers
+        // the posted-but-not-yet-enqueued window, so their sum is zero exactly when
+        // no work can still touch probes or the FIFO.
+        private int activeDispatches;
+        private int pendingContinuations;
+        private InteractionReplayLease? replayLease;
+        private bool replayDispatchArmed;
+        private int replayArmedThreadId;
+        private int suppressedReplayContinuations;
+
         public InteractionDispatcher(
             InteractionCommandCatalog catalog,
             InteractionRegistry registry,
@@ -136,6 +149,19 @@ namespace SignalRouter
                     cancellationToken).ConfigureAwait(false);
             }
 
+            // The cache-hit path never reaches AssignIdentity, so it needs its own
+            // lease check: a cached result served mid-replay would contradict the
+            // exclusive-lease contract even though it runs no side effects. The
+            // replayer's own dispatches never carry an idempotency key, so this
+            // rejects external callers only.
+            lock (gate)
+            {
+                if (replayLease != null)
+                {
+                    throw ReplayLeaseRejection();
+                }
+            }
+
             Task<InteractionResult>? existing;
             TaskCompletionSource<InteractionResult> pending;
             lock (idempotencyGate)
@@ -218,7 +244,166 @@ namespace SignalRouter
             router.Dispose();
         }
 
+        internal InteractionCommandCatalog Catalog
+        {
+            get { return catalog; }
+        }
+
+        internal InteractionRegistry Registry
+        {
+            get { return registry; }
+        }
+
+        internal InteractionStateProbeRegistry? Probes
+        {
+            get { return probes; }
+        }
+
+        internal InteractionRecorder? Recorder
+        {
+            get { return recorder; }
+        }
+
+        // Grants the replayer exclusive use of this dispatcher (design §16.1).
+        // Reentrancy is checked before idleness because a stage-originated call
+        // also leaves the queue tail incomplete and would otherwise be reported
+        // as merely busy.
+        internal InteractionReplayLease AcquireReplayLease()
+        {
+            if (currentScope.Value != null)
+            {
+                throw new InteractionReplayException(
+                    InteractionReplayError.ReplayReentrancy,
+                    "Replay must not be started from an executing interaction.");
+            }
+
+            lock (gate)
+            {
+                if (disposed)
+                {
+                    throw new ObjectDisposedException(nameof(InteractionDispatcher));
+                }
+
+                if (replayLease != null
+                    || activeDispatches > 0
+                    || pendingContinuations > 0
+                    || !queueTail.IsCompleted)
+                {
+                    throw new InteractionReplayException(
+                        InteractionReplayError.DispatcherBusy,
+                        "Replay requires an exclusive idle dispatcher; dispatches or "
+                        + "continuations are still in flight, or another replay holds "
+                        + "the lease.");
+                }
+
+                var lease = new InteractionReplayLease(this);
+                replayLease = lease;
+                return lease;
+            }
+        }
+
+        internal void ArmReplayDispatch(InteractionReplayLease lease)
+        {
+            lock (gate)
+            {
+                RequireCurrentLease(lease);
+
+                // Admission is bound to the arming thread: the armed dispatch
+                // enqueues during the synchronous prefix of DispatchAsync on this
+                // same thread, so a concurrent caller racing into the armed window
+                // from another thread can never be mistaken for the replay's own
+                // dispatch.
+                replayDispatchArmed = true;
+                replayArmedThreadId = Environment.CurrentManagedThreadId;
+            }
+        }
+
+        internal void DisarmReplayDispatch(InteractionReplayLease lease)
+        {
+            lock (gate)
+            {
+                RequireCurrentLease(lease);
+                replayDispatchArmed = false;
+            }
+        }
+
+        internal int TakeSuppressedReplayContinuations(InteractionReplayLease lease)
+        {
+            lock (gate)
+            {
+                RequireCurrentLease(lease);
+                var count = suppressedReplayContinuations;
+                suppressedReplayContinuations = 0;
+                return count;
+            }
+        }
+
+        internal void ReleaseReplayLease(InteractionReplayLease lease)
+        {
+            lock (gate)
+            {
+                if (ReferenceEquals(replayLease, lease))
+                {
+                    replayLease = null;
+                    replayDispatchArmed = false;
+                    suppressedReplayContinuations = 0;
+                }
+            }
+        }
+
+        private void RequireCurrentLease(InteractionReplayLease lease)
+        {
+            if (!ReferenceEquals(replayLease, lease))
+            {
+                throw new InvalidOperationException(
+                    "The replay lease is no longer held by this dispatcher.");
+            }
+        }
+
+        private static InvalidOperationException ReplayLeaseRejection()
+        {
+            return new InvalidOperationException(
+                "The dispatcher is exclusively leased for replay; dispatch is "
+                + "rejected until the replay completes.");
+        }
+
         private async ValueTask<InteractionResult> DispatchCoreAsync<TCommand>(
+            TCommand command,
+            InteractionDispatchOptions options,
+            InteractionCommandCatalogEntry entry,
+            string commandName,
+            int commandVersion,
+            CancellationToken cancellationToken)
+            where TCommand : struct, IInteractionCommand
+        {
+            // The active-dispatch count brackets the whole dispatch including its
+            // continuation drain, so a replay lease cannot be acquired in the window
+            // after the queue tail is released but before continuations are posted.
+            lock (gate)
+            {
+                activeDispatches++;
+            }
+
+            try
+            {
+                return await ExecuteDispatchAsync(
+                    command,
+                    options,
+                    entry,
+                    commandName,
+                    commandVersion,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (gate)
+                {
+                    activeDispatches--;
+                }
+            }
+        }
+
+        private async ValueTask<InteractionResult> ExecuteDispatchAsync<TCommand>(
             TCommand command,
             InteractionDispatchOptions options,
             InteractionCommandCatalogEntry entry,
@@ -490,6 +675,17 @@ namespace SignalRouter
                     throw new ObjectDisposedException(nameof(InteractionDispatcher));
                 }
 
+                // While a replay lease is held only the replayer's own armed
+                // dispatch — identified by the arming thread — may enter the
+                // queue; anything else would interleave with replay probe
+                // readings and sequence order (design §16.1).
+                if (replayLease != null
+                    && !(replayDispatchArmed
+                        && replayArmedThreadId == Environment.CurrentManagedThreadId))
+                {
+                    throw ReplayLeaseRejection();
+                }
+
                 sequence = checked(++nextSequence);
                 requestId = Guid.NewGuid().ToString("N");
 
@@ -596,6 +792,27 @@ namespace SignalRouter
             }
 
             var continuations = scope.CompleteAndDrain();
+            if (continuations.Count == 0)
+            {
+                return;
+            }
+
+            lock (gate)
+            {
+                if (replayLease != null)
+                {
+                    // The lease guarantees this scope belongs to a replayed dispatch.
+                    // Schema v1 recordings carry no parent linkage, so a live
+                    // continuation cannot be matched against recorded entries; it is
+                    // suppressed and counted, and the replayer stops with
+                    // ContinuationRequested instead of double-executing side effects.
+                    suppressedReplayContinuations += continuations.Count;
+                    return;
+                }
+
+                pendingContinuations += continuations.Count;
+            }
+
             for (var index = 0; index < continuations.Count; index++)
             {
                 // Schedule across an asynchronous boundary so a synchronously completing
@@ -1001,8 +1218,25 @@ namespace SignalRouter
                 // The continuation re-enters the FIFO queue and normalizes its own
                 // outcome into a result; its terminal status is observed through the
                 // recorder's interaction_completed event, so there is no caller to
-                // propagate to here.
-                _ = continuation(dispatcher);
+                // propagate to here. The pending count is released only after the
+                // synchronous part of the dispatch has chained the queue tail, so the
+                // idleness predicate never has a gap between "posted" and "enqueued".
+                try
+                {
+                    _ = continuation(dispatcher);
+                }
+                finally
+                {
+                    dispatcher.OnContinuationDispatched();
+                }
+            }
+        }
+
+        private void OnContinuationDispatched()
+        {
+            lock (gate)
+            {
+                pendingContinuations--;
             }
         }
 
@@ -1130,6 +1364,46 @@ namespace SignalRouter
         public InteractionInvariantViolationException(string message)
             : base(message)
         {
+        }
+    }
+
+    // Exclusive replay ownership of a dispatcher (design §16.1). While held, only
+    // dispatches the replayer arms may enter the queue, and continuations drained
+    // from replayed stages are counted instead of scheduled. Disposal releases the
+    // lease and clears all suppression state, so an aborted replay cannot leave
+    // the dispatcher rejecting normal work.
+    internal sealed class InteractionReplayLease : IDisposable
+    {
+        private readonly InteractionDispatcher dispatcher;
+
+        internal InteractionReplayLease(InteractionDispatcher dispatcher)
+        {
+            this.dispatcher = dispatcher;
+        }
+
+        // Marks the immediately following dispatch as replay-owned. Arming is
+        // synchronous by design: the dispatch enqueues (and is admission-checked)
+        // during the synchronous prefix of DispatchAsync, before Disarm runs.
+        public void ArmDispatch()
+        {
+            dispatcher.ArmReplayDispatch(this);
+        }
+
+        public void DisarmDispatch()
+        {
+            dispatcher.DisarmReplayDispatch(this);
+        }
+
+        // Returns and resets the number of continuations suppressed since the last
+        // call; the replayer reads it after every dispatch.
+        public int TakeSuppressedContinuationCount()
+        {
+            return dispatcher.TakeSuppressedReplayContinuations(this);
+        }
+
+        public void Dispose()
+        {
+            dispatcher.ReleaseReplayLease(this);
         }
     }
 }

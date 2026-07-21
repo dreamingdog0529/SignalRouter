@@ -89,6 +89,21 @@ namespace SignalRouter
 
         public StateObservation After { get; }
 
+        // Projects a dispatcher-produced result onto the fields a recording is
+        // allowed to persist. The replayer reports actual outcomes through this
+        // projection so exception types, messages, and stack traces carried by
+        // FaultInfo can never reach a replay report (§12.2, §19).
+        internal static RecordedOutcome FromResult(InteractionResult result)
+        {
+            return new RecordedOutcome(
+                result.Status,
+                result.Stages.Stages,
+                result.Rejection?.Code,
+                result.Fault?.ApplicationCode,
+                result.Before,
+                result.After);
+        }
+
         // Mirrors InteractionResult's cross-field rules (design §12) for the subset
         // a recording persists, so a structurally impossible outcome is rejected at
         // construction instead of surfacing during replay.
