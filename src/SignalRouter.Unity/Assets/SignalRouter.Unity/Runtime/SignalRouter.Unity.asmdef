@@ -1,0 +1,22 @@
+{
+  "name": "SignalRouter.Unity",
+  "rootNamespace": "SignalRouter.Unity",
+  "references": [
+    "UnityEngine.UI",
+    "Unity.TextMeshPro"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "SignalRouter.Core.dll",
+    "SignalRouter.Protocol.dll",
+    "System.Text.Json.dll",
+    "VitalRouter.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

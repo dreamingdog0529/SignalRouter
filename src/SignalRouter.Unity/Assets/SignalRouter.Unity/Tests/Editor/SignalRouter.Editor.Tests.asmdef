@@ -3,7 +3,10 @@
   "rootNamespace": "SignalRouter.Tests",
   "references": [
     "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner"
+    "UnityEditor.TestRunner",
+    "SignalRouter.Unity",
+    "UnityEngine.UI",
+    "Unity.TextMeshPro"
   ],
   "includePlatforms": [
     "Editor"
