@@ -919,9 +919,11 @@ src/
     Assets/
       SignalRouter.Unity/               # exportable UPM package (Unity integration)
         package.json
-        Runtime/                        # uGUI adapters (planned)
-        Editor/                         # editor tooling (planned)
+        Runtime/                        # uGUI adapters and the interaction runtime
+        Editor/                         # editor tooling (scene validator)
+        Samples/BasicUi/                # sample scene (moves to Samples~ on export)
         Tests/Editor/                   # EditMode tests over the restored packages
+        Tests/Runtime/                  # PlayMode tests over the adapter path
 tests/
   SignalRouter.Core.Tests/
   SignalRouter.Protocol.Tests/

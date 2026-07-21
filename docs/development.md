@@ -4,9 +4,10 @@
 > result model, semantic registry, FIFO dispatch, deterministic stage execution, hash-level
 > state probes, semantic-UI property-level diffs (matched-target scalar fields, per-field
 > target add/remove, and nested interaction/argument changes), the JSON Lines recorder
-> with its recovery-capable reader, and the strict replayer with its structured divergence
-> reports are implemented and verified. Unity UI, WebSocket, and MCP behavior remain
-> unimplemented.
+> with its recovery-capable reader, the strict replayer with its structured divergence
+> reports, and the uGUI integration (interaction runtime, button/text-input adapters,
+> editor scene validator, BasicUi sample scene, and the PlayMode suite) are implemented
+> and verified. WebSocket and MCP behavior remain unimplemented.
 
 ## Prerequisites
 
@@ -36,12 +37,15 @@ task check
 1. Restore the pinned NuGetForUnity CLI tool.
 2. Build and pack `SignalRouter.slnx`, publishing the `SignalRouter.Core` and
    `SignalRouter.Protocol` packages to the shared local feed (`../.local-feed`).
-3. Restore those packages into the Unity project with NuGetForUnity.
-4. Compile the Unity development project in batch mode and confirm NuGetForUnity restored
+3. Evict cached copies of the SignalRouter packages (the feed repacks a fixed
+   version, so a cached package would silently pin Unity to a stale SDK build).
+4. Restore the packages into the Unity project with NuGetForUnity.
+5. Compile the Unity development project in batch mode and confirm NuGetForUnity restored
    `SignalRouter.Core.dll` and `SignalRouter.Protocol.dll`.
 
-`task test` runs the NUnit projects on `net10.0`, then runs Unity EditMode tests. The
-Unity result XML must exist, contain at least one test, and report no failures.
+`task test` runs the NUnit projects on `net10.0`, then runs the Unity EditMode and
+PlayMode suites in separate batch launches. Each Unity result XML must exist, discover at
+least one test, pass every test, and report no skipped or inconclusive cases.
 
 `task check` adds spelling, Conventional Commit, and DCO checks before build and test.
 Build logs and Unity result XML are written below `.artifacts/`.
@@ -70,6 +74,14 @@ the Editor's bundled compiler, not an exact C# 11 ceiling. The EditMode test com
 runs `record struct` and `required` constructs to verify the C# 11 features this project
 uses.
 
+One hard limit of that override: types Unity itself must associate with their `.cs`
+assets — MonoBehaviours and other Unity-serialized types — MUST be declared in braced
+namespaces. Unity's script-to-asset association does not understand file-scoped
+namespaces even though Roslyn compiles them; an affected component saves into scenes as
+an embedded transient MonoScript stub and loads back as a missing script. The sample
+scene generator fails fast if any component it saves resolves to a transient MonoScript.
+Test-only classes that never serialize into assets may use file-scoped namespaces.
+
 [PolySharp 1.16.0][polysharp] is restored into the ignored `Assets/Packages` directory
 before Unity starts. `Assets/Default.globalconfig` disables PolySharp's embedded marker
 because that marker name is reserved by the compiler used with preview mode. This
@@ -96,7 +108,7 @@ Unity's actual compilation language is controlled by Player Settings.
 | [NUnit][nunit] | 4.6.1 | Pure C# tests |
 | [NUnit3TestAdapter][nunit-adapter] | 6.2.0 | Test discovery |
 | [Microsoft.NET.Test.Sdk][test-sdk] | 18.8.1 | `dotnet test` host |
-| [System.Text.Json][system-text-json] | 10.0.10 | Explicit command schemas and codecs |
+| [System.Text.Json][system-text-json] | 8.0.6 | Explicit command schemas and codecs (pinned to the line Unity 6000.5 bundles) |
 | [VitalRouter][vitalrouter] | 2.8.0 | Public command marker contract |
 | [NuGetForUnity / CLI][nuget-for-unity] | 4.5.0 | Restore NuGet assets before Unity compilation |
 | [PolySharp][polysharp] | 1.16.0 | Unity development-project language polyfills |
@@ -135,7 +147,7 @@ manifest files.
 [nunit]: https://www.nuget.org/packages/NUnit/4.6.1
 [polysharp]: https://www.nuget.org/packages/PolySharp/1.16.0
 [test-sdk]: https://www.nuget.org/packages/Microsoft.NET.Test.Sdk/18.8.1
-[system-text-json]: https://www.nuget.org/packages/System.Text.Json/10.0.10
+[system-text-json]: https://www.nuget.org/packages/System.Text.Json/8.0.6
 [unity-assembly-references]: https://docs.unity3d.com/6000.0/Documentation/Manual/assembly-definitions-referencing.html
 [unity-csharp]: https://docs.unity3d.com/6000.0/Documentation/Manual/csharp-compiler.html
 [unity-globalconfig]: https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Compilation.ScriptCompilerOptions.AnalyzerConfigPath.html
