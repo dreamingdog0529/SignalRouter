@@ -26,6 +26,13 @@ internal sealed class EditModeUi : System.IDisposable
         return adapter;
     }
 
+    public InteractionRuntime CreateRuntime()
+    {
+        var go = Track(new GameObject("runtime"));
+        go.SetActive(false);
+        return go.AddComponent<InteractionRuntime>();
+    }
+
     public InteractionTextInput CreateTextInput(string targetId, string label = "")
     {
         var go = Track(new GameObject("input:" + targetId));
