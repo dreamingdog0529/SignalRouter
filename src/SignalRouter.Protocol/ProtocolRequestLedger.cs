@@ -128,6 +128,15 @@ namespace SignalRouter.Protocol
         private readonly TimeSpan retention;
         private readonly IInteractionClock clock;
 
+        public ProtocolRequestLedger(string sessionEpoch, IInteractionClock clock)
+            : this(
+                sessionEpoch,
+                ProtocolLimits.DefaultLedgerCapacity,
+                ProtocolLimits.DefaultLedgerRetention,
+                clock)
+        {
+        }
+
         public ProtocolRequestLedger(
             string sessionEpoch,
             int capacity,
@@ -255,6 +264,30 @@ namespace SignalRouter.Protocol
             entry.State = ProtocolRequestState.Terminal;
             entry.Outcome = outcome;
             entry.RetainUntil = clock.UtcNow + retention;
+        }
+
+        // Discards a reservation that never reached Core admission — the one
+        // case where forgetting is correct: the submitter got no acceptance,
+        // Core queued nothing, and keeping the entry would make its honest
+        // resend a false Duplicate forever (a Received entry is never evicted
+        // by retention). Any later state means work was admitted and must run
+        // to a terminal state instead of being forgotten (ADR 0007).
+        public void Abandon(string requestId)
+        {
+            ProtocolContract.RequireIdentifier(requestId, nameof(requestId));
+            if (!entries.TryGetValue(requestId, out var entry))
+            {
+                throw new InvalidOperationException(
+                    "The request is not tracked by this ledger.");
+            }
+
+            if (entry.State != ProtocolRequestState.Received)
+            {
+                throw new InvalidOperationException(
+                    "Only reservations that never reached admission may be abandoned.");
+            }
+
+            entries.Remove(requestId);
         }
 
         // Answers get_interaction_result: a null return means the request is
