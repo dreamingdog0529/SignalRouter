@@ -103,6 +103,15 @@ namespace SignalRouter.Protocol
 
         public const int MaxCapabilityChars = 64;
 
+        // Request-ledger defaults (§25, resolved in ADR 0007): capacity covers
+        // pathological retry bursts of near-serial agent traffic at ~1-4 KB per
+        // entry, and retention must exceed a client timeout plus reconnect
+        // backoff plus a human-in-the-loop retry window with generous margin.
+        public const int DefaultLedgerCapacity = 256;
+
+        public static readonly System.TimeSpan DefaultLedgerRetention =
+            System.TimeSpan.FromMinutes(10);
+
         // Command arguments sit under envelope → payload → command, three
         // containers deep, so their own nesting may use the remaining budget.
         internal const int ArgumentsMaxDepth = MaxJsonDepth - 3;

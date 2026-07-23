@@ -214,6 +214,54 @@ public sealed class ProtocolRequestLedgerTests
     }
 
     [Test]
+    public void TheConvenienceConstructorHonorsTheResolvedDefaults()
+    {
+        var clock = new FakeClock();
+        var ledger = new ProtocolRequestLedger(Epoch, clock);
+
+        for (var index = 0; index < ProtocolLimits.DefaultLedgerCapacity; index++)
+        {
+            var admitted = ledger.Submit(CreateExecute("r-" + index));
+            Assert.That(admitted.Status, Is.EqualTo(ProtocolLedgerSubmissionStatus.Admitted));
+        }
+
+        Assert.That(
+            ledger.Submit(CreateExecute("r-overflow")).Status,
+            Is.EqualTo(ProtocolLedgerSubmissionStatus.CapacityExhausted));
+
+        ledger.MarkQueued("r-0", 1);
+        ledger.MarkRunning("r-0");
+        ledger.MarkTerminal(
+            "r-0",
+            ProtocolInteractionOutcomeTests.CreateSucceededOutcome("r-0"));
+        clock.Advance(ProtocolLimits.DefaultLedgerRetention - TimeSpan.FromSeconds(1));
+        Assert.That(ledger.TryGet("r-0"), Is.Not.Null);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.That(ledger.TryGet("r-0"), Is.Null);
+    }
+
+    [Test]
+    public void AbandonDiscardsOnlyUnadmittedReservations()
+    {
+        var ledger = CreateLedger();
+        ledger.Submit(CreateExecute("r-1"));
+
+        ledger.Abandon("r-1");
+
+        Assert.That(ledger.TryGet("r-1"), Is.Null);
+        Assert.That(ledger.Count, Is.EqualTo(0));
+
+        // The identity is honestly reusable after abandonment.
+        Assert.That(
+            ledger.Submit(CreateExecute("r-1")).Status,
+            Is.EqualTo(ProtocolLedgerSubmissionStatus.Admitted));
+
+        ledger.MarkQueued("r-1", 1);
+        NUnitCompat.Throws<InvalidOperationException>(() => ledger.Abandon("r-1"));
+        NUnitCompat.Throws<InvalidOperationException>(() => ledger.Abandon("r-unknown"));
+    }
+
+    [Test]
     public void ConstructionValidatesItsBounds()
     {
         NUnitCompat.Throws<ArgumentOutOfRangeException>(
