@@ -9,10 +9,13 @@
 > editor scene validator, BasicUi sample scene, and the PlayMode suite), and the
 > versioned runtime protocol contract (envelope model and codecs, handshake negotiation,
 > connection phase enforcement, and the bounded request ledger — ADR 0007), the Core
-> split-phase submission API with cancellation by external request ID, and the
-> WebSocket transport with the Unity runtime bridge (channel framing, reconnect loop,
-> and query-first result recovery, verified end-to-end over a live loopback socket in
-> PlayMode) are implemented and verified. The MCP host process and its tool surface
+> split-phase submission API with cancellation by external request ID, the WebSocket
+> transport with the Unity runtime bridge (channel framing, reconnect loop, and
+> query-first result recovery, verified end-to-end over a live loopback socket in
+> PlayMode), and the MCP host process (`SignalRouter.McpHost`: stdio MCP tools over a
+> Kestrel loopback WebSocket endpoint — execute_interaction, get_interaction_result,
+> get_ui_tree, list_interactions, wait_for) are implemented and verified. The
+> recording and replay tools (start_recording, stop_recording, replay_recording)
 > remain unimplemented.
 
 ## Prerequisites
@@ -55,6 +58,19 @@ least one test, pass every test, and report no skipped or inconclusive cases.
 
 `task check` adds spelling, Conventional Commit, and DCO checks before build and test.
 Build logs and Unity result XML are written below `.artifacts/`.
+
+## Running the MCP host
+
+```bash
+dotnet run --project src/SignalRouter.McpHost
+```
+
+The host speaks MCP over stdio (register the command above in an MCP client) and
+listens for the Unity runtime on `ws://127.0.0.1:8017/` (loopback only; override the
+port with `SIGNALROUTER_PORT`). On the Unity side, add an `InteractionRuntimeBridge`
+component next to the `InteractionRuntime` and point its endpoint at the same port;
+the bridge reconnects automatically across domain reloads. All host logging goes to
+stderr because stdout carries the MCP transport.
 
 ## Compatibility boundary
 
