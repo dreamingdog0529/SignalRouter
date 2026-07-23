@@ -811,8 +811,13 @@ targets.
 suppression scope prevents agent or replay updates from recursively generating new human
 commands.
 
-Whether text changes dispatch per edit or on edit completion remains an implementation
-choice that MUST be settled before the text-input acceptance tests are written.
+Text input dispatches on edit completion only (`onEndEdit`, which covers submit and
+focus loss); per-keystroke dispatch is not performed. A commit emits a command only when
+the committed text differs ordinally from the last committed value; focus loss without a
+change, a cancelled edit (Escape), and commits while the suppression scope is active emit
+nothing. The last committed value — not the in-progress edit buffer — is the target's
+semantic value, so the before-state observation of a human commit still records the
+transition caused by the command itself.
 
 ### 17.2 Main-thread policy
 
@@ -823,6 +828,10 @@ The WebSocket receiver may parse and validate transport envelopes on a backgroun
 but it only places accepted requests into a thread-safe handoff queue.
 `InteractionRuntime.Update` transfers those requests to the dispatcher on the main
 thread.
+
+The dispatcher and the replayer preserve the caller's synchronization context across
+asynchronous stage boundaries: state captures, descriptor reads, and each replayed entry
+resume on the context the call started on, even when a stage yields.
 
 ## 18. MCP and runtime protocol
 
@@ -910,9 +919,11 @@ src/
     Assets/
       SignalRouter.Unity/               # exportable UPM package (Unity integration)
         package.json
-        Runtime/                        # uGUI adapters (planned)
-        Editor/                         # editor tooling (planned)
+        Runtime/                        # uGUI adapters and the interaction runtime
+        Editor/                         # editor tooling (scene validator)
+        Samples/BasicUi/                # sample scene (moves to Samples~ on export)
         Tests/Editor/                   # EditMode tests over the restored packages
+        Tests/Runtime/                  # PlayMode tests over the adapter path
 tests/
   SignalRouter.Core.Tests/
   SignalRouter.Protocol.Tests/
@@ -1027,7 +1038,6 @@ These items do not change the accepted architecture, but they must be resolved a
 before their respective components are considered stable:
 
 - the MCP host target .NET version;
-- text-input dispatch timing;
 - default artifact-root location;
 - state-snapshot size limits;
 - retention limits for idempotency and completed-result caches.

@@ -28,20 +28,26 @@ tasks:
       - dotnet tool restore
       # Build/pack the SDK projects first so the local feed holds the
       # SignalRouter.Core/Protocol packages that NuGetForUnity restores next.
+      # The refresh step evicts cached copies: the feed repacks a fixed version,
+      # so a cached package would silently pin Unity to a stale SDK build.
       - dotnet build ./SignalRouter.slnx
+      - pwsh -NoProfile -File ./scripts/refresh-local-packages.ps1
       - dotnet nugetforunity restore ./src/SignalRouter.Unity
       - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode Compile
 
   test:
-    desc: Run .NET and Unity EditMode tests
+    desc: Run .NET and Unity EditMode/PlayMode tests
     cmds:
       - dotnet tool restore
       # Build/pack first so the local feed holds the SignalRouter.Core/Protocol
-      # packages that NuGetForUnity restores for the Unity EditMode tests.
+      # packages that NuGetForUnity restores for the Unity EditMode tests; the
+      # refresh step evicts cached copies of the fixed-version local packages.
       - dotnet build ./SignalRouter.slnx
+      - pwsh -NoProfile -File ./scripts/refresh-local-packages.ps1
       - dotnet nugetforunity restore ./src/SignalRouter.Unity
       - dotnet test ./SignalRouter.slnx --no-build
       - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode Test
+      - pwsh -NoProfile -File ./scripts/run-unity.ps1 -Mode PlayTest
 
   setup:
     desc: Install tools and git hooks

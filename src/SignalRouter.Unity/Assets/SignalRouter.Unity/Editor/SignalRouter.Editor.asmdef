@@ -1,12 +1,8 @@
 {
-  "name": "SignalRouter.Editor.Tests",
-  "rootNamespace": "SignalRouter.Tests",
+  "name": "SignalRouter.Editor",
+  "rootNamespace": "SignalRouter.Unity.Editor",
   "references": [
-    "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner",
     "SignalRouter.Unity",
-    "SignalRouter.Editor",
-    "SignalRouter.Unity.Samples.BasicUi",
     "UnityEngine.UI",
     "Unity.TextMeshPro"
   ],
@@ -20,13 +16,10 @@
     "SignalRouter.Core.dll",
     "SignalRouter.Protocol.dll",
     "System.Text.Json.dll",
-    "VitalRouter.dll",
-    "nunit.framework.dll"
+    "VitalRouter.dll"
   ],
-  "autoReferenced": false,
-  "defineConstraints": [
-    "UNITY_INCLUDE_TESTS"
-  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
   "versionDefines": [],
   "noEngineReferences": false
 }

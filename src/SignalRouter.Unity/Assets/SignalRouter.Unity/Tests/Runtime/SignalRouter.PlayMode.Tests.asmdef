@@ -1,18 +1,13 @@
 {
-  "name": "SignalRouter.Editor.Tests",
+  "name": "SignalRouter.PlayMode.Tests",
   "rootNamespace": "SignalRouter.Tests",
   "references": [
     "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner",
     "SignalRouter.Unity",
-    "SignalRouter.Editor",
-    "SignalRouter.Unity.Samples.BasicUi",
     "UnityEngine.UI",
     "Unity.TextMeshPro"
   ],
-  "includePlatforms": [
-    "Editor"
-  ],
+  "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
   "overrideReferences": true,
