@@ -647,6 +647,259 @@ namespace SignalRouter.Protocol
         }
     }
 
+    // Host → runtime. Begins recording a fresh session. Recording needs a new
+    // dispatcher (the recorder is a constructor argument) and therefore a new
+    // session epoch, so this recreates the runtime; the reply arrives on the
+    // reconnected session under the new epoch and is correlated by the
+    // host-assigned operationId, which survives the epoch change (ADR 0007,
+    // item 8d). The optional label is agent bookkeeping, never a filename.
+    public sealed class StartRecordingMessage : ProtocolMessage
+    {
+        public StartRecordingMessage(
+            string messageId,
+            string sessionEpoch,
+            string operationId,
+            string? label = null,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                null)
+        {
+            ProtocolContract.RequireIdentifier(operationId, nameof(operationId));
+            if (label != null)
+            {
+                ProtocolContract.RequireText(label, ProtocolLimits.MaxLabelChars, nameof(label));
+            }
+
+            OperationId = operationId;
+            Label = label;
+        }
+
+        public string OperationId { get; }
+
+        public string? Label { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.StartRecording; }
+        }
+    }
+
+    // Runtime → host. Acknowledges that recording began under a new session
+    // epoch. Carries the runtime-generated recording handle (a filename stem,
+    // never a path — design §19) and the new epoch the host must now speak.
+    public sealed class RecordingStartedMessage : ProtocolMessage
+    {
+        public RecordingStartedMessage(
+            string messageId,
+            string sessionEpoch,
+            string operationId,
+            string recordingHandle,
+            string newSessionEpoch,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                null)
+        {
+            ProtocolContract.RequireIdentifier(operationId, nameof(operationId));
+            RecordingHandles.Require(recordingHandle, nameof(recordingHandle));
+            ProtocolContract.RequireIdentifier(newSessionEpoch, nameof(newSessionEpoch));
+            OperationId = operationId;
+            RecordingHandle = recordingHandle;
+            NewSessionEpoch = newSessionEpoch;
+        }
+
+        public string OperationId { get; }
+
+        public string RecordingHandle { get; }
+
+        public string NewSessionEpoch { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.RecordingStarted; }
+        }
+    }
+
+    // Host → runtime. Ends the active recording, recreating the runtime into a
+    // fresh non-recording session.
+    public sealed class StopRecordingMessage : ProtocolMessage
+    {
+        public StopRecordingMessage(
+            string messageId,
+            string sessionEpoch,
+            string operationId,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                null)
+        {
+            ProtocolContract.RequireIdentifier(operationId, nameof(operationId));
+            OperationId = operationId;
+        }
+
+        public string OperationId { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.StopRecording; }
+        }
+    }
+
+    // Runtime → host. Confirms the finalized recording: its handle, the number
+    // of interactions it captured, and the new (non-recording) session epoch.
+    public sealed class RecordingStoppedMessage : ProtocolMessage
+    {
+        public RecordingStoppedMessage(
+            string messageId,
+            string sessionEpoch,
+            string operationId,
+            string recordingHandle,
+            long entryCount,
+            string newSessionEpoch,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                null)
+        {
+            ProtocolContract.RequireIdentifier(operationId, nameof(operationId));
+            RecordingHandles.Require(recordingHandle, nameof(recordingHandle));
+            if (entryCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(entryCount),
+                    entryCount,
+                    "The entry count must be non-negative.");
+            }
+
+            ProtocolContract.RequireIdentifier(newSessionEpoch, nameof(newSessionEpoch));
+            OperationId = operationId;
+            RecordingHandle = recordingHandle;
+            EntryCount = entryCount;
+            NewSessionEpoch = newSessionEpoch;
+        }
+
+        public string OperationId { get; }
+
+        public string RecordingHandle { get; }
+
+        public long EntryCount { get; }
+
+        public string NewSessionEpoch { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.RecordingStopped; }
+        }
+    }
+
+    // Host → runtime. Replays a stored recording by handle. The runtime
+    // reconstructs a session at the recorded epoch, runs the strict replayer
+    // against a private (transport-invisible) runtime, then returns to a fresh
+    // live session (item 8d, ADR 0006).
+    public sealed class ReplayRecordingMessage : ProtocolMessage
+    {
+        public ReplayRecordingMessage(
+            string messageId,
+            string sessionEpoch,
+            string operationId,
+            string recordingHandle,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                null)
+        {
+            ProtocolContract.RequireIdentifier(operationId, nameof(operationId));
+            RecordingHandles.Require(recordingHandle, nameof(recordingHandle));
+            OperationId = operationId;
+            RecordingHandle = recordingHandle;
+        }
+
+        public string OperationId { get; }
+
+        public string RecordingHandle { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.ReplayRecording; }
+        }
+    }
+
+    // Runtime → host. The sanitized strict-replay outcome (design §16.1: the
+    // report never carries exception text or argument payloads) plus the new
+    // live session epoch the replay left the runtime in. Detail is a bounded,
+    // non-secret summary of the first divergence or stop reason.
+    public sealed class ReplayReportMessage : ProtocolMessage
+    {
+        public ReplayReportMessage(
+            string messageId,
+            string sessionEpoch,
+            string operationId,
+            string outcomeKind,
+            string newSessionEpoch,
+            string? detail = null,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                null)
+        {
+            ProtocolContract.RequireIdentifier(operationId, nameof(operationId));
+            if (!string.Equals(outcomeKind, ProtocolReplayOutcomes.Completed, StringComparison.Ordinal)
+                && !string.Equals(outcomeKind, ProtocolReplayOutcomes.Diverged, StringComparison.Ordinal)
+                && !string.Equals(outcomeKind, ProtocolReplayOutcomes.Stopped, StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "The replay outcome kind is not part of protocol v1.",
+                    nameof(outcomeKind));
+            }
+
+            ProtocolContract.RequireIdentifier(newSessionEpoch, nameof(newSessionEpoch));
+            if (detail != null)
+            {
+                ProtocolContract.RequireText(
+                    detail,
+                    ProtocolLimits.MaxErrorMessageChars,
+                    nameof(detail));
+            }
+
+            OperationId = operationId;
+            OutcomeKind = outcomeKind;
+            NewSessionEpoch = newSessionEpoch;
+            Detail = detail;
+        }
+
+        public string OperationId { get; }
+
+        public string OutcomeKind { get; }
+
+        public string NewSessionEpoch { get; }
+
+        public string? Detail { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.ReplayReport; }
+        }
+    }
+
     // Runtime → host. Carries the canonical semantic-ui snapshot document
     // (agent view) verbatim, plus the probe schema version that governs its
     // shape (design §13, §16).

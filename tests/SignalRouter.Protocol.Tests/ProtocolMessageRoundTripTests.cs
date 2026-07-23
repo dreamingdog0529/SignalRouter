@@ -292,6 +292,45 @@ public sealed class ProtocolMessageRoundTripTests
     }
 
     [Test]
+    public void RecordingControlMessagesRoundTrip()
+    {
+        var handle = "rec-20260724t0100-1a2b3c4d";
+        var start = (StartRecordingMessage)RoundTrip(
+            new StartRecordingMessage("m-1", Epoch, "op-1", "smoke run"));
+        var started = (RecordingStartedMessage)RoundTrip(
+            new RecordingStartedMessage("m-2", Epoch, "op-1", handle, "epoch-2"));
+        var stop = (StopRecordingMessage)RoundTrip(
+            new StopRecordingMessage("m-3", Epoch, "op-2"));
+        var stopped = (RecordingStoppedMessage)RoundTrip(
+            new RecordingStoppedMessage("m-4", Epoch, "op-2", handle, 3, "epoch-3"));
+        var replay = (ReplayRecordingMessage)RoundTrip(
+            new ReplayRecordingMessage("m-5", Epoch, "op-3", handle));
+
+        Assert.That(start.OperationId, Is.EqualTo("op-1"));
+        Assert.That(start.Label, Is.EqualTo("smoke run"));
+        Assert.That(started.RecordingHandle, Is.EqualTo(handle));
+        Assert.That(started.NewSessionEpoch, Is.EqualTo("epoch-2"));
+        Assert.That(stop.OperationId, Is.EqualTo("op-2"));
+        Assert.That(stopped.EntryCount, Is.EqualTo(3));
+        Assert.That(stopped.NewSessionEpoch, Is.EqualTo("epoch-3"));
+        Assert.That(replay.RecordingHandle, Is.EqualTo(handle));
+    }
+
+    [TestCase(ProtocolReplayOutcomes.Completed, null)]
+    [TestCase(ProtocolReplayOutcomes.Diverged, "status mismatch at sequence 2")]
+    [TestCase(ProtocolReplayOutcomes.Stopped, "outcome unknown at sequence 4")]
+    public void ReplayReportRoundTripsEveryOutcome(string kind, string? detail)
+    {
+        var report = new ReplayReportMessage("m-6", Epoch, "op-1", kind, "epoch-2", detail);
+
+        var decoded = (ReplayReportMessage)RoundTrip(report);
+
+        Assert.That(decoded.OutcomeKind, Is.EqualTo(kind));
+        Assert.That(decoded.Detail, Is.EqualTo(detail));
+        Assert.That(decoded.NewSessionEpoch, Is.EqualTo("epoch-2"));
+    }
+
+    [Test]
     public void RegistrySnapshotRoundTripsWithByteExactSnapshot()
     {
         var snapshotJson = "{\"sessionEpoch\":\"epoch-1\",\"revision\":7,\"targets\":[{\"id\":\"a\"}]}";

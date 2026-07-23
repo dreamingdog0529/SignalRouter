@@ -390,6 +390,64 @@ namespace SignalRouter.Protocol
                         RequireBoolean(payload, ProtocolSchema.SatisfiedProperty),
                         RequireLong(payload, ProtocolSchema.ElapsedMsProperty),
                         protocol);
+                case ProtocolMessageTypes.StartRecording:
+                    RequireAbsentEnvelopeField(requestId);
+                    RequireAbsentEnvelopeField(inReplyTo);
+                    return new StartRecordingMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequireString(payload, ProtocolSchema.OperationIdProperty),
+                        OptionalString(payload, ProtocolSchema.LabelProperty),
+                        protocol);
+                case ProtocolMessageTypes.RecordingStarted:
+                    RequireAbsentEnvelopeField(requestId);
+                    RequireAbsentEnvelopeField(inReplyTo);
+                    return new RecordingStartedMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequireString(payload, ProtocolSchema.OperationIdProperty),
+                        RequireString(payload, ProtocolSchema.RecordingHandleProperty),
+                        RequireString(payload, ProtocolSchema.NewSessionEpochProperty),
+                        protocol);
+                case ProtocolMessageTypes.StopRecording:
+                    RequireAbsentEnvelopeField(requestId);
+                    RequireAbsentEnvelopeField(inReplyTo);
+                    return new StopRecordingMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequireString(payload, ProtocolSchema.OperationIdProperty),
+                        protocol);
+                case ProtocolMessageTypes.RecordingStopped:
+                    RequireAbsentEnvelopeField(requestId);
+                    RequireAbsentEnvelopeField(inReplyTo);
+                    return new RecordingStoppedMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequireString(payload, ProtocolSchema.OperationIdProperty),
+                        RequireString(payload, ProtocolSchema.RecordingHandleProperty),
+                        RequireLong(payload, ProtocolSchema.EntryCountProperty),
+                        RequireString(payload, ProtocolSchema.NewSessionEpochProperty),
+                        protocol);
+                case ProtocolMessageTypes.ReplayRecording:
+                    RequireAbsentEnvelopeField(requestId);
+                    RequireAbsentEnvelopeField(inReplyTo);
+                    return new ReplayRecordingMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequireString(payload, ProtocolSchema.OperationIdProperty),
+                        RequireString(payload, ProtocolSchema.RecordingHandleProperty),
+                        protocol);
+                case ProtocolMessageTypes.ReplayReport:
+                    RequireAbsentEnvelopeField(requestId);
+                    RequireAbsentEnvelopeField(inReplyTo);
+                    return new ReplayReportMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequireString(payload, ProtocolSchema.OperationIdProperty),
+                        RequireString(payload, ProtocolSchema.OutcomeKindProperty),
+                        RequireString(payload, ProtocolSchema.NewSessionEpochProperty),
+                        OptionalString(payload, ProtocolSchema.DetailProperty),
+                        protocol);
                 default:
                     return null;
             }

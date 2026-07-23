@@ -250,12 +250,18 @@ namespace SignalRouter.Protocol
                 case CancelInteractionMessage _:
                 case GetRegistrySnapshotMessage _:
                 case WaitForMessage _:
+                case StartRecordingMessage _:
+                case StopRecordingMessage _:
+                case ReplayRecordingMessage _:
                     return Role == ProtocolConnectionRole.Runtime;
                 case InteractionAcceptedMessage _:
                 case InteractionResultMessage _:
                 case InteractionStatusMessage _:
                 case RegistrySnapshotMessage _:
                 case WaitResultMessage _:
+                case RecordingStartedMessage _:
+                case RecordingStoppedMessage _:
+                case ReplayReportMessage _:
                     return Role == ProtocolConnectionRole.Host;
                 default:
                     return false;
