@@ -158,6 +158,53 @@ public sealed class InteractionSubmissionTests
     }
 
     [Test]
+    public async Task ImmediateCompletionsCannotAliasALiveRequestId()
+    {
+        using var runtime = new SubmissionRuntime();
+        runtime.RegisterBlockingClick("menu.start");
+
+        var pending = runtime.Dispatcher.Submit(
+            new ClickCommand("menu.start"),
+            new InteractionSubmissionOptions("req-1", InteractionOrigin.Agent));
+
+        // An unregistered command completes immediately, but it may not reuse a
+        // live externally owned identity either.
+        NUnitCompat.Throws<InvalidOperationException>(() => runtime.Dispatcher.Submit(
+            new UnregisteredCommand("menu.start"),
+            new InteractionSubmissionOptions("req-1", InteractionOrigin.Agent)));
+
+        runtime.ReleaseBlockedStage();
+        await pending.Completion;
+    }
+
+    [Test]
+    public void DefaultedOptionsAreRejectedAtTheSubmitBoundary()
+    {
+        using var runtime = new SubmissionRuntime();
+        runtime.RegisterClick("menu.start");
+
+        NUnitCompat.Throws<ArgumentNullException>(() => runtime.Dispatcher.Submit(
+            new ClickCommand("menu.start"),
+            default(InteractionSubmissionOptions)));
+    }
+
+    [Test]
+    public async Task AProbeInvariantViolationStillReportsNeverRan()
+    {
+        using var runtime = new SubmissionRuntime(faultyProbe: true);
+        runtime.RegisterClick("menu.start");
+
+        var submission = runtime.Dispatcher.Submit(
+            new ClickCommand("menu.start"),
+            new InteractionSubmissionOptions("req-1", InteractionOrigin.Agent));
+
+        NUnitCompat.ThrowsAsync<InvalidOperationException>(
+            async () => await submission.Completion);
+        Assert.That(await submission.Started, Is.False);
+        Assert.That(runtime.ExecutedRequestIds, Is.Empty);
+    }
+
+    [Test]
     public async Task SubmitFromAnExecutingInteractionIsRejected()
     {
         using var runtime = new SubmissionRuntime();
@@ -336,6 +383,16 @@ public sealed class InteractionSubmissionTests
         Assert.That(recording.Interactions[0].Origin, Is.EqualTo(InteractionOrigin.Agent));
     }
 
+    private readonly struct UnregisteredCommand : IInteractionCommand
+    {
+        public UnregisteredCommand(string targetId)
+        {
+            TargetId = targetId;
+        }
+
+        public string TargetId { get; }
+    }
+
     // A minimal dispatcher fixture with an optionally blocking click pipeline so
     // tests can hold the FIFO open and observe admission-versus-start timing.
     private sealed class SubmissionRuntime : IDisposable
@@ -343,7 +400,10 @@ public sealed class InteractionSubmissionTests
         private readonly List<IInteractionTargetRegistration> registrations = new();
         private readonly ConcurrentQueue<TaskCompletionSource<bool>> blockedStages = new();
 
-        public SubmissionRuntime(bool record = false, bool registerClickCommand = true)
+        public SubmissionRuntime(
+            bool record = false,
+            bool registerClickCommand = true,
+            bool faultyProbe = false)
         {
             Catalog = registerClickCommand
                 ? InteractionCommandCatalog.CreateMvp()
@@ -358,7 +418,14 @@ public sealed class InteractionSubmissionTests
                     leaveOpen: true);
             }
 
-            Dispatcher = new InteractionDispatcher(Catalog, Registry, null, Recorder);
+            InteractionStateProbeRegistry? probes = null;
+            if (faultyProbe)
+            {
+                probes = new InteractionStateProbeRegistry();
+                probes.Register(new FaultyProbe());
+            }
+
+            Dispatcher = new InteractionDispatcher(Catalog, Registry, probes, Recorder);
         }
 
         public InteractionCommandCatalog Catalog { get; }
@@ -483,6 +550,18 @@ public sealed class InteractionSubmissionTests
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
+            }
+        }
+
+        private sealed class FaultyProbe : IInteractionStateProbe
+        {
+            public string Id => "faulty-probe";
+
+            public int Version => 1;
+
+            public StateProbeSnapshot Capture()
+            {
+                throw new InvalidOperationException("The probe cannot capture.");
             }
         }
 

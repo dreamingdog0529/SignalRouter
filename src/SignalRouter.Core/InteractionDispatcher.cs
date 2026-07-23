@@ -251,6 +251,11 @@ namespace SignalRouter
         {
             InteractionContract.RequireTargetId(command.TargetId, nameof(command));
 
+            // A defaulted options struct bypasses the validating constructor, so
+            // the caller-owned identity is re-checked at the API boundary; every
+            // path below relies on it being a real identifier.
+            InteractionContract.RequireIdentifier(options.RequestId, nameof(options));
+
             InteractionCommandCatalogEntry entry;
             string commandName;
             int commandVersion;
@@ -702,7 +707,6 @@ namespace SignalRouter
                 // guarantee (§15.1), so this dispatch fails before any side effect.
                 recorder?.ThrowIfFaulted();
 
-                started?.TrySetResult(true);
                 if (callerContext != null)
                 {
                     await SwitchTo(callerContext);
@@ -716,6 +720,12 @@ namespace SignalRouter
                 // — before resolution — yields the same before-state as capturing at publish.
                 // A null probe registry keeps the pre-probe behavior (empty observations).
                 beforeReading = probes?.Read();
+
+                // Started resolves true only after every pre-start step — the
+                // predecessor drain, cancellation and recorder checks, and the
+                // before-state capture — has succeeded, so a probe invariant
+                // violation still reports "never ran" to submission consumers.
+                started?.TrySetResult(true);
 
                 RejectionInfo? rejection = null;
                 Exception? fault = null;
@@ -942,13 +952,14 @@ namespace SignalRouter
                     throw ReplayLeaseRejection();
                 }
 
-                // Two live submissions under one external ID would alias their
-                // cancellation sources and produce two results for one identity;
-                // Core trusts submitter uniqueness, so a collision is a
-                // programming error, not a request to deduplicate (ADR 0007 —
-                // deduplication lives in the protocol ledger).
-                if (submissionCancellation != null
-                    && activeSubmissions.ContainsKey(externalRequestId!))
+                // Two results under one live external ID would alias an
+                // externally owned identity — whether the second submission
+                // queues or completes immediately. Core trusts submitter
+                // uniqueness, so a collision is a programming error, not a
+                // request to deduplicate (ADR 0007 — deduplication lives in
+                // the protocol ledger).
+                if (externalRequestId != null
+                    && activeSubmissions.ContainsKey(externalRequestId))
                 {
                     throw new InvalidOperationException(
                         "A submission with the same request ID is already in flight.");
