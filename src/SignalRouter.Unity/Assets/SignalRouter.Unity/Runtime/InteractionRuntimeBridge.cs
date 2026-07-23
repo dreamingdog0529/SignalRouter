@@ -188,9 +188,11 @@ namespace SignalRouter.Unity
                 case ProtocolWaitConditions.Idle:
                     return runtime!.InFlightDispatches == 0;
                 case ProtocolWaitConditions.TargetPresent:
-                    return runtime!.Registry.TryResolve(request.TargetId!, out _);
+                    // Waits see the agent view only (design §19): a hidden
+                    // target must not be probeable into disclosure.
+                    return runtime!.Registry.IsAgentVisible(request.TargetId!);
                 default:
-                    return !runtime!.Registry.TryResolve(request.TargetId!, out _);
+                    return !runtime!.Registry.IsAgentVisible(request.TargetId!);
             }
         }
 
@@ -306,6 +308,40 @@ namespace SignalRouter.Unity
                 message.RequestId!,
                 InteractionOrigin.Agent,
                 message.CorrelationId);
+
+            // Agent visibility is enforced before dispatch (design §19): a
+            // hidden command or target answers exactly like an absent one, so
+            // the wire can neither execute nor disclose what agents were not
+            // shown.
+            if (!runtime!.Catalog.TryGet(
+                    message.CommandName,
+                    message.CommandVersion,
+                    out var catalogEntry)
+                || !catalogEntry!.AgentVisible)
+            {
+                return runtime.Dispatcher.SubmitRejection(
+                    options,
+                    message.TargetId,
+                    message.CommandName,
+                    message.CommandVersion,
+                    new RejectionInfo(
+                        InteractionRejectionCode.CommandNotRegistered,
+                        "Command '" + message.CommandName + "@" + message.CommandVersion
+                        + "' is not registered."));
+            }
+
+            if (!runtime.Registry.IsAgentVisible(message.TargetId))
+            {
+                return runtime.Dispatcher.SubmitRejection(
+                    options,
+                    message.TargetId,
+                    message.CommandName,
+                    message.CommandVersion,
+                    new RejectionInfo(
+                        InteractionRejectionCode.TargetNotFound,
+                        "Target '" + message.TargetId + "' is not registered."));
+            }
+
             DecodedInteractionCommand decoded;
             try
             {

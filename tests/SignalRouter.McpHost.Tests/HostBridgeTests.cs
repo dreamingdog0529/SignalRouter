@@ -16,6 +16,10 @@ public sealed class HostBridgeTests
         using var harness = new HostHarness();
         using var peer = await harness.ConnectRuntimeAsync();
 
+        // A half-open connection occupies the admission slot but is never
+        // visible to tools.
+        Assert.That(harness.Bridge.IsConnected, Is.False);
+
         var welcome = await peer.PerformHandshakeAsync();
 
         Assert.That(welcome.SessionEpoch, Is.EqualTo(Epoch));
@@ -173,6 +177,56 @@ public sealed class HostBridgeTests
     }
 
     [Test]
+    public async Task AStalledHandshakeReleasesTheRuntimeSlot()
+    {
+        using var harness = new HostHarness(replyTimeout: TimeSpan.FromMilliseconds(150));
+        using var stalled = await harness.ConnectRuntimeAsync();
+        var stalledConnection = harness.LastConnectionTask;
+
+        // The client never says hello; the bounded handshake must give the
+        // slot back instead of locking every real runtime out forever.
+        await stalledConnection.WaitAsync(TimeSpan.FromSeconds(10));
+
+        using var real = await harness.ConnectRuntimeAsync();
+        var welcome = await real.PerformHandshakeAsync();
+        Assert.That(welcome.SessionEpoch, Is.EqualTo(Epoch));
+    }
+
+    [Test]
+    public async Task NeverTransmittedExecutesResendRegardlessOfElapsedTime()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromMilliseconds(100));
+        var firstPeer = await harness.ConnectRuntimeAsync();
+        await firstPeer.PerformHandshakeAsync();
+        firstPeer.Drop();
+        await harness.WaitForDisconnectAsync();
+
+        // Accepted while offline: the request is queued locally, never sent.
+        var report = await harness.Bridge.ExecuteInteractionAsync(
+            "r-1", "target-1", "click", 1, "{}", null, CancellationToken.None);
+        Assert.That(report.Status, Is.EqualTo("pending"));
+
+        // Far beyond the advertised recovery window — which must not matter,
+        // because the window anchors at first transmission, not submission.
+        harness.Now += TimeSpan.FromHours(1);
+
+        using var secondPeer = await harness.ConnectRuntimeAsync();
+        await secondPeer.PerformHandshakeAsync();
+        var recoveryQuery = (GetInteractionResultMessage)await secondPeer.ReceiveAsync();
+        await secondPeer.SendAsync(new ErrorMessage(
+            secondPeer.NextId(),
+            ProtocolErrorCodes.ResultUnavailable,
+            "No result is retained for this request.",
+            Epoch,
+            "r-1",
+            recoveryQuery.MessageId));
+
+        var sent = (ExecuteInteractionMessage)await secondPeer.ReceiveAsync();
+        Assert.That(sent.RequestId, Is.EqualTo("r-1"));
+        firstPeer.Dispose();
+    }
+
+    [Test]
     public async Task ExecuteBeforeAnyRuntimeConnectionAnswersDisconnected()
     {
         using var harness = new HostHarness();
@@ -236,18 +290,23 @@ public sealed class HostBridgeTests
     {
         private readonly List<Task> connectionTasks = new();
 
-        public HostHarness(TimeSpan? toolTimeout = null)
+        public HostHarness(TimeSpan? toolTimeout = null, TimeSpan? replyTimeout = null)
         {
             var counter = 0;
             Bridge = new HostBridge(new HostBridgeOptions(
                 "SignalRouter.McpHost test",
                 toolTimeout ?? TimeSpan.FromSeconds(10),
-                TimeSpan.FromSeconds(10),
+                replyTimeout ?? TimeSpan.FromSeconds(10),
                 () => "h-" + (++counter),
-                () => new DateTimeOffset(2026, 7, 24, 0, 0, 0, TimeSpan.Zero)));
+                () => Now));
         }
 
         public HostBridge Bridge { get; }
+
+        public DateTimeOffset Now { get; set; } =
+            new(2026, 7, 24, 0, 0, 0, TimeSpan.Zero);
+
+        public Task LastConnectionTask => connectionTasks[^1];
 
         public async Task<RuntimePeer> ConnectRuntimeAsync(string epoch = Epoch)
         {

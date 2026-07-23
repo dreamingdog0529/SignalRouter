@@ -116,7 +116,12 @@ public sealed class HostBridge : IDisposable
     private readonly Dictionary<string, TaskCompletionSource<ProtocolMessage>> pendingReplies =
         new(StringComparer.Ordinal);
 
+    // `active` claims the single-runtime slot at accept time; `ready` is the
+    // same connection once its handshake completed. Tool calls only ever see
+    // `ready`, so a half-open connection can neither receive protocol traffic
+    // nor masquerade as a live session.
     private ActiveConnection? active;
+    private ActiveConnection? ready;
     private string? sessionEpoch;
     private bool disposed;
 
@@ -135,7 +140,7 @@ public sealed class HostBridge : IDisposable
         {
             lock (gate)
             {
-                return active != null;
+                return ready != null;
             }
         }
     }
@@ -191,6 +196,11 @@ public sealed class HostBridge : IDisposable
         {
             if (await PerformHandshakeAsync(connection, cancellationToken).ConfigureAwait(false))
             {
+                lock (gate)
+                {
+                    ready = connection;
+                }
+
                 await BeginRecoveryAsync(connection, cancellationToken).ConfigureAwait(false);
                 await ReceiveLoopAsync(connection, cancellationToken).ConfigureAwait(false);
             }
@@ -208,9 +218,14 @@ public sealed class HostBridge : IDisposable
                 {
                     active = null;
                 }
+
+                if (ReferenceEquals(ready, connection))
+                {
+                    ready = null;
+                }
             }
 
-            connection.Machine.Close();
+            connection.Machine?.Close();
             await CloseQuietlyAsync(channel).ConfigureAwait(false);
         }
     }
@@ -259,14 +274,14 @@ public sealed class HostBridge : IDisposable
                 idempotencyKey);
             pending = new PendingExecute(
                 requestId,
-                ProtocolMessageWriter.Encode(execute, ProtocolLimits.DefaultMaxReceiveMessageBytes),
-                options.Clock());
+                ProtocolMessageWriter.Encode(execute, ProtocolLimits.DefaultMaxReceiveMessageBytes));
             pendingExecutes.Add(requestId, pending);
-            connection = active;
+            connection = ready;
         }
 
         if (connection != null)
         {
+            pending.MarkSendAttempted(options.Clock());
             await TrySendEncodedAsync(connection, pending.EncodedExecute, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -293,7 +308,7 @@ public sealed class HostBridge : IDisposable
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            connection = active;
+            connection = ready;
             epoch = sessionEpoch;
         }
 
@@ -318,7 +333,7 @@ public sealed class HostBridge : IDisposable
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            connection = active;
+            connection = ready;
             epoch = sessionEpoch;
         }
 
@@ -344,7 +359,7 @@ public sealed class HostBridge : IDisposable
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            connection = active;
+            connection = ready;
             epoch = sessionEpoch;
         }
 
@@ -382,7 +397,7 @@ public sealed class HostBridge : IDisposable
             }
 
             pending.CancelRequested = true;
-            connection = active;
+            connection = ready;
             epoch = sessionEpoch;
         }
 
@@ -414,9 +429,16 @@ public sealed class HostBridge : IDisposable
         ActiveConnection connection,
         CancellationToken cancellationToken)
     {
+        // Bounded: a client that connects but never says hello occupies the
+        // host's only runtime slot, locking every legitimate reconnect out
+        // with runtime_busy until it goes away. The timeout releases the slot.
+        using var handshakeBudget = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        handshakeBudget.CancelAfter(options.ReplyTimeout);
+
         var frame = await connection.Channel.ReceiveAsync(
             ProtocolLimits.BootstrapMaxMessageBytes,
-            cancellationToken).ConfigureAwait(false);
+            handshakeBudget.Token).ConfigureAwait(false);
         if (frame.Kind != ProtocolChannelFrameKind.Message)
         {
             return false;
@@ -444,7 +466,7 @@ public sealed class HostBridge : IDisposable
         connection.Machine = new ProtocolConnectionStateMachine(
             ProtocolConnectionRole.Host,
             peerOptions);
-        var decision = connection.Machine.OnMessageReceived(read.Message!);
+        var decision = connection.Machine!.OnMessageReceived(read.Message!);
         if (decision.Verdict != ProtocolConnectionVerdict.Accept
             || connection.Machine.Session == null)
         {
@@ -586,7 +608,7 @@ public sealed class HostBridge : IDisposable
                 continue;
             }
 
-            var decision = connection.Machine.OnMessageReceived(read.Message!);
+            var decision = connection.Machine!.OnMessageReceived(read.Message!);
             switch (decision.Verdict)
             {
                 case ProtocolConnectionVerdict.Accept:
@@ -725,12 +747,18 @@ public sealed class HostBridge : IDisposable
         switch (error.Code)
         {
             case ProtocolErrorCodes.ResultUnavailable:
-                // Within the runtime-advertised recovery window an unavailable
-                // answer proves the request never arrived, so the byte-exact
-                // resend is safe — the ledger deduplicates if it somehow did.
+                // The recovery window anchors at the FIRST transmission
+                // attempt — the moment uncertainty began. A request that was
+                // never transmitted has nothing to be uncertain about, so it
+                // is always (re)sent; within the window an unavailable answer
+                // proves the request never arrived, making the byte-exact
+                // resend safe (the ledger deduplicates if it somehow did);
+                // beyond it the honest answer is OutcomeUnknown.
                 var window = connection.Session!.RecoveryWindow;
-                if (options.Clock() - pending.FirstSubmitted < window)
+                var firstSent = pending.FirstSentAt;
+                if (firstSent == null || options.Clock() - firstSent.Value < window)
                 {
+                    pending.MarkSendAttempted(options.Clock());
                     await TrySendEncodedAsync(connection, pending.EncodedExecute, cancellationToken)
                         .ConfigureAwait(false);
                 }
@@ -915,11 +943,10 @@ public sealed class HostBridge : IDisposable
 
     private sealed class PendingExecute
     {
-        public PendingExecute(string requestId, byte[] encodedExecute, DateTimeOffset firstSubmitted)
+        public PendingExecute(string requestId, byte[] encodedExecute)
         {
             RequestId = requestId;
             EncodedExecute = encodedExecute;
-            FirstSubmitted = firstSubmitted;
             Completion = new TaskCompletionSource<HostExecuteReport>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
         }
@@ -928,13 +955,21 @@ public sealed class HostBridge : IDisposable
 
         public byte[] EncodedExecute { get; }
 
-        public DateTimeOffset FirstSubmitted { get; }
+        // The first moment the execute may have reached the runtime; null
+        // while the request has only ever been queued locally. The recovery
+        // window anchors here, never at local submission time.
+        public DateTimeOffset? FirstSentAt { get; private set; }
 
         public TaskCompletionSource<HostExecuteReport> Completion { get; }
 
         public bool CancelRequested { get; set; }
 
         public bool Accepted { get; set; }
+
+        public void MarkSendAttempted(DateTimeOffset time)
+        {
+            FirstSentAt ??= time;
+        }
     }
 
     private sealed class ActiveConnection
@@ -942,14 +977,14 @@ public sealed class HostBridge : IDisposable
         public ActiveConnection(IProtocolChannel channel)
         {
             Channel = channel;
-            Machine = null!;
         }
 
         public IProtocolChannel Channel { get; }
 
         public SemaphoreSlim SendGate { get; } = new(1, 1);
 
-        public ProtocolConnectionStateMachine Machine { get; set; }
+        // Null until the hello arrived; the receive loop only runs afterwards.
+        public ProtocolConnectionStateMachine? Machine { get; set; }
 
         public ProtocolSession? Session { get; set; }
     }
