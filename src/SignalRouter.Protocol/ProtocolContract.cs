@@ -66,6 +66,33 @@ namespace SignalRouter.Protocol
             }
         }
 
+        // Non-throwing identifier check for untrusted wire input: a failure result
+        // may only carry back envelope values that already passed this gate.
+        public static bool IsIdentifier(string? value)
+        {
+            if (value == null
+                || value.Length == 0
+                || value.Length > ProtocolLimits.MaxIdentifierChars)
+            {
+                return false;
+            }
+
+            if (char.IsWhiteSpace(value[0]) || char.IsWhiteSpace(value[value.Length - 1]))
+            {
+                return false;
+            }
+
+            for (var index = 0; index < value.Length; index++)
+            {
+                if (char.IsControl(value[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         // Single-line human-readable text (peer versions, error messages): bounded,
         // trimmed, and free of control characters so it is always safe to log.
         public static void RequireText(string value, int maxChars, string parameterName)
