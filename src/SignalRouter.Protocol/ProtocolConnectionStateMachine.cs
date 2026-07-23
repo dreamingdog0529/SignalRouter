@@ -210,6 +210,17 @@ namespace SignalRouter.Protocol
                     "The handshake already completed on this connection.");
             }
 
+            // The handshake selected the session version; a peer that keeps
+            // speaking a higher minor afterwards is using schema it agreed not
+            // to, so lower-minor negotiation would be meaningless without this.
+            if (!message.Protocol.IsMajorCompatibleWith(Session!.Version)
+                || message.Protocol.Minor > Session.Version.Minor)
+            {
+                return ProtocolConnectionDecision.Reject(
+                    ProtocolErrorCodes.ProtocolVersionIncompatible,
+                    "The message uses a version beyond the negotiated session version.");
+            }
+
             if (message.SessionEpoch != null
                 && !string.Equals(message.SessionEpoch, Session!.SessionEpoch, StringComparison.Ordinal))
             {

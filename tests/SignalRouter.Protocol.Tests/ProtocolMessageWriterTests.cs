@@ -52,6 +52,23 @@ public sealed class ProtocolMessageWriterTests
     }
 
     [Test]
+    public void OversizedOpaquePayloadsFailWithoutGrowingTowardsTheirSize()
+    {
+        var hugeArguments = "{\"value\":\"" + new string('x', 512 * 1024) + "\"}";
+        var message = new ExecuteInteractionMessage(
+            "m-1",
+            Epoch,
+            "r-1",
+            "set_value",
+            1,
+            "target-1",
+            hugeArguments);
+
+        NUnitCompat.Throws<InvalidOperationException>(
+            () => _ = ProtocolMessageWriter.Encode(message, 1024));
+    }
+
+    [Test]
     public void EncodeValidatesItsArguments()
     {
         NUnitCompat.Throws<ArgumentNullException>(

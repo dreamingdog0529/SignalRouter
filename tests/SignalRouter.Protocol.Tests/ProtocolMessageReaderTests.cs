@@ -238,6 +238,23 @@ public sealed class ProtocolMessageReaderTests
         Assert.That(result.Status, Is.EqualTo(ProtocolReadStatus.Malformed));
     }
 
+    [TestCase("\"rejectionCode\":\"Disabled\"")]
+    [TestCase("\"faultCode\":\"app-code\"")]
+    public void StatusIncompatibleResultCodeFieldsAreMalformed(string extraField)
+    {
+        var result = Read(
+            "{\"protocol\":\"1.0\",\"messageId\":\"m-1\",\"type\":\"interaction_result\","
+            + "\"sessionEpoch\":\"epoch-1\",\"requestId\":\"r-1\","
+            + "\"payload\":{\"result\":{\"sequence\":1,\"targetId\":\"target-1\","
+            + "\"command\":{\"name\":\"click\",\"version\":1},"
+            + "\"origin\":\"Agent\",\"status\":\"Succeeded\","
+            + "\"stages\":[{\"id\":\"apply\",\"status\":\"Completed\"}],"
+            + extraField + ","
+            + "\"state\":{\"before\":{},\"after\":{}}}}}");
+
+        Assert.That(result.Status, Is.EqualTo(ProtocolReadStatus.Malformed));
+    }
+
     [Test]
     public void WellFormedResultPayloadDecodes()
     {
@@ -254,6 +271,17 @@ public sealed class ProtocolMessageReaderTests
         var message = (InteractionResultMessage)result.Message!;
         Assert.That(message.Result.RequestId, Is.EqualTo("r-1"));
         Assert.That(message.Result.Stages, Has.Count.EqualTo(1));
+    }
+
+    [TestCase("{\"protocol\":\"1.0\",\"messageId\":\"m\\uD800id\",\"type\":\"ping\",\"payload\":{}}")]
+    [TestCase("{\"protocol\":\"1.0\",\"messageId\":\"m-1\",\"type\":\"error\","
+        + "\"payload\":{\"code\":\"a\",\"message\":\"x\\uDC00y\"}}")]
+    public void LoneSurrogateEscapesAreMalformedNotExceptions(string input)
+    {
+        var result = Read(input);
+
+        Assert.That(result.Status, Is.EqualTo(ProtocolReadStatus.Malformed));
+        Assert.That(result.Message, Is.Null);
     }
 
     [Test]

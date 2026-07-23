@@ -121,7 +121,21 @@ namespace SignalRouter.Protocol
 
             using (document)
             {
-                return ReadEnvelope(document.RootElement);
+                try
+                {
+                    return ReadEnvelope(document.RootElement);
+                }
+                catch (InvalidOperationException)
+                {
+                    // JsonDocument.Parse accepts lone-surrogate \u escapes but
+                    // JsonElement.GetString() refuses to materialize them. That
+                    // is peer-controlled data, so it must surface as a verdict,
+                    // never as an exception out of the receive loop.
+                    return Malformed(
+                        "The message carries invalid UTF-16 text.",
+                        null,
+                        null);
+                }
             }
         }
 
@@ -373,6 +387,9 @@ namespace SignalRouter.Protocol
                 stageIndex++;
             }
 
+            // Code fields must be present exactly when their status requires
+            // them: a succeeded result carrying a rejection code is contradictory
+            // wire data, not a forward-compatible extension.
             InteractionRejectionCode? rejectionCode = null;
             if (status == InteractionStatus.Rejected)
             {
@@ -380,11 +397,19 @@ namespace SignalRouter.Protocol
                     result,
                     ProtocolSchema.RejectionCodeProperty);
             }
+            else
+            {
+                RequireAbsent(result, ProtocolSchema.RejectionCodeProperty);
+            }
 
             string? faultCode = null;
             if (status == InteractionStatus.Faulted)
             {
                 faultCode = RequireNullableString(result, ProtocolSchema.FaultCodeProperty);
+            }
+            else
+            {
+                RequireAbsent(result, ProtocolSchema.FaultCodeProperty);
             }
 
             var state = RequireObject(result, ProtocolSchema.StateProperty);
@@ -512,6 +537,16 @@ namespace SignalRouter.Protocol
         private static void RequireAbsentEnvelopeField(string? value)
         {
             if (value != null)
+            {
+                throw new MalformedPayloadException();
+            }
+        }
+
+        private static void RequireAbsent(
+            Dictionary<string, JsonElement> properties,
+            string name)
+        {
+            if (properties.ContainsKey(name))
             {
                 throw new MalformedPayloadException();
             }

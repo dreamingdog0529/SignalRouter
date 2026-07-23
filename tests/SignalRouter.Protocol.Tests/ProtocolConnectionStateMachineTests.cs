@@ -181,6 +181,32 @@ public sealed class ProtocolConnectionStateMachineTests
     }
 
     [Test]
+    public void MessagesBeyondTheNegotiatedVersionAreRejected()
+    {
+        var runtime = CreateReadyRuntime();
+
+        var decision = runtime.OnMessageReceived(new ExecuteInteractionMessage(
+            "m-2",
+            Epoch,
+            "r-1",
+            "click",
+            1,
+            "target-1",
+            "{}",
+            null,
+            null,
+            new ProtocolVersion(
+                ProtocolVersion.CurrentMajor,
+                ProtocolVersion.CurrentMinor + 1)));
+
+        Assert.That(decision.Verdict, Is.EqualTo(ProtocolConnectionVerdict.Reject));
+        Assert.That(
+            decision.ErrorCode,
+            Is.EqualTo(ProtocolErrorCodes.ProtocolVersionIncompatible));
+        Assert.That(runtime.Phase, Is.EqualTo(ProtocolConnectionPhase.Ready));
+    }
+
+    [Test]
     public void AForeignSessionEpochClosesTheConnection()
     {
         var runtime = CreateReadyRuntime();

@@ -107,6 +107,18 @@ public sealed class ProtocolRequestLedgerTests
     }
 
     [Test]
+    public void TerminalOutcomesMustMatchTheQueuedSequence()
+    {
+        var ledger = CreateLedger();
+        ledger.Submit(CreateExecute("r-1"));
+        ledger.MarkQueued("r-1", 2);
+
+        NUnitCompat.Throws<ArgumentException>(() => ledger.MarkTerminal(
+            "r-1",
+            ProtocolInteractionOutcomeTests.CreateSucceededOutcome("r-1")));
+    }
+
+    [Test]
     public void UntrackedRequestsFailFast()
     {
         var ledger = CreateLedger();

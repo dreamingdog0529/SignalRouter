@@ -240,14 +240,19 @@ namespace SignalRouter.Protocol
                 this.maxBytes = maxBytes;
             }
 
+            // A span request is sized for the worst-case encoding of one token,
+            // which for any message that could still fit the limit is bounded by
+            // a small multiple of it (UTF-16 → escaped UTF-8 expands at most
+            // 6x). Requests beyond that can only come from a payload that is
+            // guaranteed to overflow, so they are refused before the underlying
+            // buffer grows towards the payload's size.
+            private const int TokenExpansionBound = 7;
+
             public void Advance(int count)
             {
                 if (buffer.WrittenCount + count > maxBytes)
                 {
-                    throw new InvalidOperationException(
-                        "The encoded message exceeds the "
-                        + maxBytes.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                        + "-byte size limit.");
+                    throw Overflow();
                 }
 
                 buffer.Advance(count);
@@ -255,17 +260,35 @@ namespace SignalRouter.Protocol
 
             public Memory<byte> GetMemory(int sizeHint = 0)
             {
+                RequireBoundedRequest(sizeHint);
                 return buffer.GetMemory(sizeHint);
             }
 
             public Span<byte> GetSpan(int sizeHint = 0)
             {
+                RequireBoundedRequest(sizeHint);
                 return buffer.GetSpan(sizeHint);
             }
 
             public byte[] ToArray()
             {
                 return buffer.WrittenSpan.ToArray();
+            }
+
+            private void RequireBoundedRequest(int sizeHint)
+            {
+                if (buffer.WrittenCount + (long)sizeHint > (long)maxBytes * TokenExpansionBound)
+                {
+                    throw Overflow();
+                }
+            }
+
+            private InvalidOperationException Overflow()
+            {
+                return new InvalidOperationException(
+                    "The encoded message exceeds the "
+                    + maxBytes.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + "-byte size limit.");
             }
         }
     }

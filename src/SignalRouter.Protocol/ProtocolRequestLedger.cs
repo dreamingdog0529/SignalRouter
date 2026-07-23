@@ -241,6 +241,16 @@ namespace SignalRouter.Protocol
                     nameof(outcome));
             }
 
+            // The sequence acknowledged at admission and the one on the terminal
+            // result must be the same dispatch; letting them disagree would make
+            // the ledger vouch for two different orderings of one request.
+            if (entry.Sequence.HasValue && outcome.Sequence != entry.Sequence.Value)
+            {
+                throw new ArgumentException(
+                    "The outcome does not match the request's queued sequence.",
+                    nameof(outcome));
+            }
+
             RequireForwardTransition(entry, ProtocolRequestState.Terminal);
             entry.State = ProtocolRequestState.Terminal;
             entry.Outcome = outcome;
