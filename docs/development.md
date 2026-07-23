@@ -5,9 +5,12 @@
 > state probes, semantic-UI property-level diffs (matched-target scalar fields, per-field
 > target add/remove, and nested interaction/argument changes), the JSON Lines recorder
 > with its recovery-capable reader, the strict replayer with its structured divergence
-> reports, and the uGUI integration (interaction runtime, button/text-input adapters,
-> editor scene validator, BasicUi sample scene, and the PlayMode suite) are implemented
-> and verified. WebSocket and MCP behavior remain unimplemented.
+> reports, the uGUI integration (interaction runtime, button/text-input adapters,
+> editor scene validator, BasicUi sample scene, and the PlayMode suite), and the
+> versioned runtime protocol contract (envelope model and codecs, handshake negotiation,
+> connection phase enforcement, and the bounded request ledger — ADR 0007) are
+> implemented and verified. The WebSocket transport and MCP behavior remain
+> unimplemented.
 
 ## Prerequisites
 
