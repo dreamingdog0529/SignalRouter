@@ -292,6 +292,33 @@ public sealed class ProtocolMessageRoundTripTests
         Assert.That(rejectedBytes, Does.Not.Contain("Secret rejection detail"));
     }
 
+    // The same golden constant is asserted by the Unity EditMode suite
+    // (ProtocolGoldenVectorTests) against the bundled System.Text.Json 8.0, so
+    // both runtimes are pinned to identical bytes. Writers own property order,
+    // which is what makes encode output deterministic enough to pin.
+    [Test]
+    public void GoldenExecuteEnvelopeEncodesByteExactly()
+    {
+        var message = new ExecuteInteractionMessage(
+            "m-1",
+            "epoch-1",
+            "r-1",
+            "set_value",
+            1,
+            "target-1",
+            "{\"value\":\"text\"}",
+            "correlation-1");
+
+        var encoded = Encoding.UTF8.GetString(ProtocolMessageWriter.Encode(message, Limit));
+
+        Assert.That(encoded, Is.EqualTo(
+            "{\"protocol\":\"1.0\",\"messageId\":\"m-1\",\"type\":\"execute_interaction\","
+            + "\"sessionEpoch\":\"epoch-1\",\"requestId\":\"r-1\","
+            + "\"payload\":{\"command\":{\"name\":\"set_value\",\"version\":1,"
+            + "\"targetId\":\"target-1\",\"arguments\":{\"value\":\"text\"}},"
+            + "\"correlationId\":\"correlation-1\"}}"));
+    }
+
     private static ProtocolMessage RoundTrip(ProtocolMessage message)
     {
         var encoded = ProtocolMessageWriter.Encode(message, Limit);
