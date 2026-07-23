@@ -77,6 +77,7 @@ namespace SignalRouter.Protocol
         public const string HandshakeRequired = "handshake_required";
         public const string RequestIdConflict = "request_id_conflict";
         public const string ResultUnavailable = "result_unavailable";
+        public const string CapacityExhausted = "capacity_exhausted";
     }
 
     // Pre-item-9 defaults; the security pass (design §19, §25) finalizes the
