@@ -23,6 +23,14 @@ namespace SignalRouter
         private readonly object gate = new object();
         private readonly object idempotencyGate = new object();
         private readonly IdempotencyCache idempotencyCache;
+
+        // Split-phase submissions in flight, keyed by their external request ID
+        // (ADR 0007). Registration happens inside AssignIdentity's lock so the
+        // duplicate check, sequence reservation, FIFO chaining, and cancellation
+        // registration are one linearization point; entries leave on terminal
+        // completion.
+        private readonly Dictionary<string, CancellationTokenSource> activeSubmissions =
+            new Dictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
         private long nextSequence;
         private Task queueTail = Task.CompletedTask;
         private InteractionExecutionScope? activeScope;
@@ -229,6 +237,164 @@ namespace SignalRouter
             return result;
         }
 
+        // Split-phase submission (ADR 0007): admission — identity, sequence, and
+        // FIFO position — is fixed synchronously under the enqueue lock before
+        // this method returns, so a transport can acknowledge acceptance before
+        // the terminal result exists. The caller owns the request ID; duplicate
+        // live IDs fail fast. Cancellation via TryCancel is a request, not a
+        // guarantee — the terminal status on Completion is authoritative.
+        public InteractionSubmission Submit<TCommand>(
+            TCommand command,
+            InteractionSubmissionOptions options,
+            CancellationToken cancellationToken = default)
+            where TCommand : struct, IInteractionCommand
+        {
+            InteractionContract.RequireTargetId(command.TargetId, nameof(command));
+
+            InteractionCommandCatalogEntry entry;
+            string commandName;
+            int commandVersion;
+            try
+            {
+                entry = catalog.Get<TCommand>();
+                commandName = entry.WireName;
+                commandVersion = entry.Version;
+            }
+            catch (InteractionCommandException exception)
+            {
+                return CompletedSubmission(Rejected(
+                    AssignIdentity(chainQueue: false, out _, null, options.RequestId),
+                    command.TargetId,
+                    typeof(TCommand).Name,
+                    1,
+                    options.Origin,
+                    new RejectionInfo(exception.RejectionCode, exception.Message)));
+            }
+
+            if (currentScope.Value != null)
+            {
+                return CompletedSubmission(Rejected(
+                    AssignIdentity(chainQueue: false, out _, null, options.RequestId),
+                    command.TargetId,
+                    commandName,
+                    commandVersion,
+                    options.Origin,
+                    new RejectionInfo(
+                        InteractionRejectionCode.ReentrantDispatch,
+                        "Submit must not be called from an executing interaction; use InteractionContext.EnqueueContinuation.")));
+            }
+
+            var dispatchOptions = new InteractionDispatchOptions(
+                options.Origin,
+                options.CorrelationId);
+            var callerContext = SynchronizationContext.Current;
+            RecordingRequestPayload? payload = null;
+            if (recorder != null)
+            {
+                payload = new RecordingRequestPayload(
+                    options.Origin,
+                    commandName,
+                    commandVersion,
+                    command.TargetId,
+                    InteractionRecordingRedaction.SerializeArguments(entry, command));
+            }
+
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            RequestIdentity request;
+            QueueSlot queueSlot;
+            try
+            {
+                request = AssignIdentity(
+                    chainQueue: true,
+                    out queueSlot,
+                    payload,
+                    options.RequestId,
+                    cancellation);
+            }
+            catch
+            {
+                cancellation.Dispose();
+                throw;
+            }
+
+            var started = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = RunAdmittedAsync(
+                command,
+                dispatchOptions,
+                entry,
+                commandName,
+                commandVersion,
+                request,
+                queueSlot,
+                callerContext,
+                started,
+                cancellation);
+            return new InteractionSubmission(
+                InteractionAdmissionKind.Queued,
+                request.RequestId,
+                request.Sequence,
+                started.Task,
+                completion);
+        }
+
+        private async Task<InteractionResult> RunAdmittedAsync<TCommand>(
+            TCommand command,
+            InteractionDispatchOptions options,
+            InteractionCommandCatalogEntry entry,
+            string commandName,
+            int commandVersion,
+            RequestIdentity request,
+            QueueSlot queueSlot,
+            SynchronizationContext? callerContext,
+            TaskCompletionSource<bool> started,
+            CancellationTokenSource cancellation)
+            where TCommand : struct, IInteractionCommand
+        {
+            // Runs synchronously up to the first await inside Submit's frame, so
+            // the active-dispatch bracket is in place before Submit returns and a
+            // replay lease can never be acquired in the admission-to-run window.
+            lock (gate)
+            {
+                activeDispatches++;
+            }
+
+            try
+            {
+                return await ExecuteAdmittedAsync(
+                    command,
+                    options,
+                    entry,
+                    commandName,
+                    commandVersion,
+                    request,
+                    queueSlot,
+                    callerContext,
+                    started,
+                    cancellation.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (gate)
+                {
+                    activeDispatches--;
+                    activeSubmissions.Remove(request.RequestId);
+                }
+
+                cancellation.Dispose();
+            }
+        }
+
+        private static InteractionSubmission CompletedSubmission(InteractionResult result)
+        {
+            return new InteractionSubmission(
+                InteractionAdmissionKind.Completed,
+                result.RequestId,
+                result.Sequence,
+                Task.FromResult(false),
+                Task.FromResult(result));
+        }
+
         public void Dispose()
         {
             lock (gate)
@@ -432,6 +598,36 @@ namespace SignalRouter
             }
 
             var request = AssignIdentity(chainQueue: true, out var queueSlot, payload);
+            return await ExecuteAdmittedAsync(
+                command,
+                options,
+                entry,
+                commandName,
+                commandVersion,
+                request,
+                queueSlot,
+                callerContext,
+                null,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        // The post-admission half of a dispatch: identity and FIFO position are
+        // already fixed. Shared by DispatchAsync and the split-phase Submit path;
+        // `started` (submission only) resolves true when execution genuinely
+        // begins and false when the request terminates without starting.
+        private async ValueTask<InteractionResult> ExecuteAdmittedAsync<TCommand>(
+            TCommand command,
+            InteractionDispatchOptions options,
+            InteractionCommandCatalogEntry entry,
+            string commandName,
+            int commandVersion,
+            RequestIdentity request,
+            QueueSlot queueSlot,
+            SynchronizationContext? callerContext,
+            TaskCompletionSource<bool>? started,
+            CancellationToken cancellationToken)
+            where TCommand : struct, IInteractionCommand
+        {
             InteractionResult result;
             InteractionExecutionScope? scope = null;
             StateProbeReading? beforeReading = null;
@@ -465,6 +661,7 @@ namespace SignalRouter
                 // guarantee (§15.1), so this dispatch fails before any side effect.
                 recorder?.ThrowIfFaulted();
 
+                started?.TrySetResult(true);
                 if (callerContext != null)
                 {
                     await SwitchTo(callerContext);
@@ -595,6 +792,12 @@ namespace SignalRouter
             finally
             {
                 queueSlot.Release(predecessorObserved);
+
+                // Idempotent when execution already began; every other exit —
+                // pre-start cancellation, poisoned recorder, probe invariant
+                // violation — resolves Started to "never ran" so a submission
+                // consumer can always distinguish the two outcomes.
+                started?.TrySetResult(false);
             }
 
             StartContinuations(scope, callerContext);
@@ -672,7 +875,9 @@ namespace SignalRouter
         private RequestIdentity AssignIdentity(
             bool chainQueue,
             out QueueSlot queueSlot,
-            RecordingRequestPayload? payload = null)
+            RecordingRequestPayload? payload = null,
+            string? externalRequestId = null,
+            CancellationTokenSource? submissionCancellation = null)
         {
             long sequence;
             string requestId;
@@ -696,8 +901,20 @@ namespace SignalRouter
                     throw ReplayLeaseRejection();
                 }
 
+                // Two live submissions under one external ID would alias their
+                // cancellation sources and produce two results for one identity;
+                // Core trusts submitter uniqueness, so a collision is a
+                // programming error, not a request to deduplicate (ADR 0007 —
+                // deduplication lives in the protocol ledger).
+                if (submissionCancellation != null
+                    && activeSubmissions.ContainsKey(externalRequestId!))
+                {
+                    throw new InvalidOperationException(
+                        "A submission with the same request ID is already in flight.");
+                }
+
                 sequence = checked(++nextSequence);
-                requestId = Guid.NewGuid().ToString("N");
+                requestId = externalRequestId ?? Guid.NewGuid().ToString("N");
 
                 // The request event is appended under the enqueue lock — the only
                 // place the §15.1 sequence-order guarantee holds under concurrent
@@ -716,6 +933,14 @@ namespace SignalRouter
                         payload.CommandVersion,
                         payload.TargetId,
                         payload.ArgumentsJson);
+                }
+
+                // Registered only after the append can no longer throw, so a
+                // failed admission never strands a submission entry that no
+                // completion path will ever remove.
+                if (submissionCancellation != null)
+                {
+                    activeSubmissions.Add(requestId, submissionCancellation);
                 }
 
                 predecessor = queueTail;
