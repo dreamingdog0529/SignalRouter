@@ -267,6 +267,104 @@ public sealed class HostBridgeTests
         firstPeer.Dispose();
     }
 
+    [Test]
+    public async Task StartRecordingCorrelatesItsReplyAcrossTheEpochChange()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
+        var firstPeer = await harness.ConnectRuntimeAsync();
+        await firstPeer.PerformHandshakeAsync();
+
+        var startTask = harness.Bridge.StartRecordingAsync("smoke", CancellationToken.None);
+        var start = (StartRecordingMessage)await firstPeer.ReceiveAsync();
+        Assert.That(start.Label, Is.EqualTo("smoke"));
+
+        // Recording recreates the runtime: the old connection drops and the
+        // runtime reconnects under a new epoch, then answers by operationId.
+        firstPeer.Drop();
+        await harness.WaitForDisconnectAsync();
+        using var recordingPeer = await harness.ConnectRuntimeAsync("epoch-rec");
+        await recordingPeer.PerformHandshakeAsync();
+        await recordingPeer.SendAsync(new RecordingStartedMessage(
+            recordingPeer.NextId(),
+            "epoch-rec",
+            start.OperationId,
+            "rec-20260724t0100-1a2b3c4d",
+            "epoch-rec"));
+
+        var report = await startTask;
+        Assert.That(report.Status, Is.EqualTo("recording_started"));
+        Assert.That(report.RecordingHandle, Is.EqualTo("rec-20260724t0100-1a2b3c4d"));
+        Assert.That(report.NewSessionEpoch, Is.EqualTo("epoch-rec"));
+        firstPeer.Dispose();
+    }
+
+    [Test]
+    public async Task ReplayReturnsTheSanitizedOutcome()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
+        var firstPeer = await harness.ConnectRuntimeAsync();
+        await firstPeer.PerformHandshakeAsync();
+
+        var replayTask = harness.Bridge.ReplayRecordingAsync(
+            "rec-20260724t0100-1a2b3c4d",
+            CancellationToken.None);
+        var replay = (ReplayRecordingMessage)await firstPeer.ReceiveAsync();
+        Assert.That(replay.RecordingHandle, Is.EqualTo("rec-20260724t0100-1a2b3c4d"));
+
+        firstPeer.Drop();
+        await harness.WaitForDisconnectAsync();
+        using var livePeer = await harness.ConnectRuntimeAsync("epoch-live");
+        await livePeer.PerformHandshakeAsync();
+        await livePeer.SendAsync(new ReplayReportMessage(
+            livePeer.NextId(),
+            "epoch-live",
+            replay.OperationId,
+            ProtocolReplayOutcomes.Diverged,
+            "epoch-live",
+            "status mismatch at sequence 2"));
+
+        var report = await replayTask;
+        Assert.That(report.Status, Is.EqualTo("replayed"));
+        Assert.That(report.OutcomeKind, Is.EqualTo(ProtocolReplayOutcomes.Diverged));
+        Assert.That(report.Detail, Is.EqualTo("status mismatch at sequence 2"));
+        firstPeer.Dispose();
+    }
+
+    [Test]
+    public async Task ControlOperationsBeforeAnyConnectionAnswerDisconnected()
+    {
+        using var harness = new HostHarness();
+
+        var report = await harness.Bridge.StopRecordingAsync(CancellationToken.None);
+
+        Assert.That(report.Status, Is.EqualTo("disconnected"));
+    }
+
+    [Test]
+    public async Task AnImmediateControlRefusalCorrelatesInsteadOfHanging()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
+        using var peer = await harness.ConnectRuntimeAsync();
+        await peer.PerformHandshakeAsync();
+
+        var stopTask = harness.Bridge.StopRecordingAsync(CancellationToken.None);
+        var stop = (StopRecordingMessage)await peer.ReceiveAsync();
+
+        // The runtime refuses (no active recording) with an error correlated by
+        // inReplyTo to the control message, not by a request ID.
+        await peer.SendAsync(new ErrorMessage(
+            peer.NextId(),
+            ProtocolErrorCodes.RecordingUnavailable,
+            "No recording is active.",
+            Epoch,
+            null,
+            stop.MessageId));
+
+        var report = await stopTask;
+        Assert.That(report.Status, Is.EqualTo("refused"));
+        Assert.That(report.Detail, Does.Contain(ProtocolErrorCodes.RecordingUnavailable));
+    }
+
     private static ProtocolInteractionOutcome SucceededOutcome(string requestId)
     {
         return new ProtocolInteractionOutcome(

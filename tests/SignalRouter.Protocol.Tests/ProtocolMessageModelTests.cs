@@ -281,6 +281,34 @@ public sealed class ProtocolMessageModelTests
     }
 
     [Test]
+    public void RecordingMessagesValidateHandlesAndOutcomes()
+    {
+        NUnitCompat.Throws<ArgumentException>(() => _ = new RecordingStartedMessage(
+            "m-1", Epoch, "op-1", "bad handle", Epoch));
+        NUnitCompat.Throws<ArgumentException>(() => _ = new ReplayRecordingMessage(
+            "m-1", Epoch, "op-1", "../escape"));
+        NUnitCompat.Throws<ArgumentOutOfRangeException>(() => _ = new RecordingStoppedMessage(
+            "m-1", Epoch, "op-1", "rec-0", -1, Epoch));
+        NUnitCompat.Throws<ArgumentException>(() => _ = new ReplayReportMessage(
+            "m-1", Epoch, "op-1", "future_outcome", Epoch));
+        NUnitCompat.Throws<ArgumentException>(() => _ = new StartRecordingMessage(
+            "m-1", Epoch, "op-1", new string('x', ProtocolLimits.MaxLabelChars + 1)));
+    }
+
+    [Test]
+    public void RecordingAcknowledgmentsRejectAContradictoryEpoch()
+    {
+        // The new-epoch payload must equal the envelope epoch the message
+        // arrives on; a mismatch is a contradictory acknowledgment.
+        NUnitCompat.Throws<ArgumentException>(() => _ = new RecordingStartedMessage(
+            "m-1", Epoch, "op-1", "rec-0", "epoch-other"));
+        NUnitCompat.Throws<ArgumentException>(() => _ = new RecordingStoppedMessage(
+            "m-1", Epoch, "op-1", "rec-0", 0, "epoch-other"));
+        NUnitCompat.Throws<ArgumentException>(() => _ = new ReplayReportMessage(
+            "m-1", Epoch, "op-1", ProtocolReplayOutcomes.Completed, "epoch-other"));
+    }
+
+    [Test]
     public void RegistrySnapshotValidatesItsPayload()
     {
         var snapshot = new RegistrySnapshotMessage(

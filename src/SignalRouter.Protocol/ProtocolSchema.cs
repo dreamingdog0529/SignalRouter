@@ -52,6 +52,14 @@ namespace SignalRouter.Protocol
         public const string TimeoutMsProperty = "timeoutMs";
         public const string SatisfiedProperty = "satisfied";
         public const string ElapsedMsProperty = "elapsedMs";
+
+        public const string OperationIdProperty = "operationId";
+        public const string LabelProperty = "label";
+        public const string RecordingHandleProperty = "recordingHandle";
+        public const string NewSessionEpochProperty = "newSessionEpoch";
+        public const string EntryCountProperty = "entryCount";
+        public const string OutcomeKindProperty = "outcomeKind";
+        public const string DetailProperty = "detail";
     }
 
     public static class ProtocolMessageTypes
@@ -71,6 +79,21 @@ namespace SignalRouter.Protocol
         public const string RegistrySnapshot = "registry_snapshot";
         public const string WaitFor = "wait_for";
         public const string WaitResult = "wait_result";
+        public const string StartRecording = "start_recording";
+        public const string RecordingStarted = "recording_started";
+        public const string StopRecording = "stop_recording";
+        public const string RecordingStopped = "recording_stopped";
+        public const string ReplayRecording = "replay_recording";
+        public const string ReplayReport = "replay_report";
+    }
+
+    // The terminal outcome kinds of a strict replay (design §16.1, ADR 0006),
+    // projected onto the wire so the host never reconstructs the Core report.
+    public static class ProtocolReplayOutcomes
+    {
+        public const string Completed = "completed";
+        public const string Diverged = "diverged";
+        public const string Stopped = "stopped";
     }
 
     // The bounded wait conditions of the wait_for message (design §18.2,
@@ -100,6 +123,7 @@ namespace SignalRouter.Protocol
         public const string ResultUnavailable = "result_unavailable";
         public const string CapacityExhausted = "capacity_exhausted";
         public const string RuntimeBusy = "runtime_busy";
+        public const string RecordingUnavailable = "recording_unavailable";
     }
 
     // Pre-item-9 defaults; the security pass (design §19, §25) finalizes the
@@ -143,6 +167,10 @@ namespace SignalRouter.Protocol
         // wait_for timeouts are frame-polled main-thread work; the cap keeps a
         // single wait from parking runtime state for minutes (§25 finalizes).
         public const int MaxWaitTimeoutMs = 30_000;
+
+        // A human recording label recorded in the tool response for the agent's
+        // bookkeeping; never used in the filename (design §19).
+        public const int MaxLabelChars = 128;
 
         // Command arguments sit under envelope → payload → command, three
         // containers deep, so their own nesting may use the remaining budget.

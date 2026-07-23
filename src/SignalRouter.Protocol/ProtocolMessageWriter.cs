@@ -164,6 +164,70 @@ namespace SignalRouter.Protocol
                     writer.WriteBoolean(ProtocolSchema.SatisfiedProperty, waitResult.Satisfied);
                     writer.WriteNumber(ProtocolSchema.ElapsedMsProperty, waitResult.ElapsedMs);
                     return;
+                case StartRecordingMessage startRecording:
+                    writer.WriteString(
+                        ProtocolSchema.OperationIdProperty,
+                        startRecording.OperationId);
+                    if (startRecording.Label != null)
+                    {
+                        writer.WriteString(ProtocolSchema.LabelProperty, startRecording.Label);
+                    }
+
+                    return;
+                case RecordingStartedMessage recordingStarted:
+                    writer.WriteString(
+                        ProtocolSchema.OperationIdProperty,
+                        recordingStarted.OperationId);
+                    writer.WriteString(
+                        ProtocolSchema.RecordingHandleProperty,
+                        recordingStarted.RecordingHandle);
+                    writer.WriteString(
+                        ProtocolSchema.NewSessionEpochProperty,
+                        recordingStarted.NewSessionEpoch);
+                    return;
+                case StopRecordingMessage stopRecording:
+                    writer.WriteString(
+                        ProtocolSchema.OperationIdProperty,
+                        stopRecording.OperationId);
+                    return;
+                case RecordingStoppedMessage recordingStopped:
+                    writer.WriteString(
+                        ProtocolSchema.OperationIdProperty,
+                        recordingStopped.OperationId);
+                    writer.WriteString(
+                        ProtocolSchema.RecordingHandleProperty,
+                        recordingStopped.RecordingHandle);
+                    writer.WriteNumber(
+                        ProtocolSchema.EntryCountProperty,
+                        recordingStopped.EntryCount);
+                    writer.WriteString(
+                        ProtocolSchema.NewSessionEpochProperty,
+                        recordingStopped.NewSessionEpoch);
+                    return;
+                case ReplayRecordingMessage replayRecording:
+                    writer.WriteString(
+                        ProtocolSchema.OperationIdProperty,
+                        replayRecording.OperationId);
+                    writer.WriteString(
+                        ProtocolSchema.RecordingHandleProperty,
+                        replayRecording.RecordingHandle);
+                    return;
+                case ReplayReportMessage replayReport:
+                    writer.WriteString(
+                        ProtocolSchema.OperationIdProperty,
+                        replayReport.OperationId);
+                    writer.WriteString(
+                        ProtocolSchema.OutcomeKindProperty,
+                        replayReport.OutcomeKind);
+                    writer.WriteString(
+                        ProtocolSchema.NewSessionEpochProperty,
+                        replayReport.NewSessionEpoch);
+                    if (replayReport.Detail != null)
+                    {
+                        writer.WriteString(ProtocolSchema.DetailProperty, replayReport.Detail);
+                    }
+
+                    return;
                 default:
                     throw new ArgumentException(
                         "The message type '" + message.Type + "' has no v1 payload writer.",

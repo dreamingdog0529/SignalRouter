@@ -16,7 +16,9 @@
 > Kestrel loopback WebSocket endpoint — execute_interaction, get_interaction_result,
 > get_ui_tree, list_interactions, wait_for) are implemented and verified. The
 > recording and replay tools (start_recording, stop_recording, replay_recording)
-> remain unimplemented.
+> have their wire contract and host surface implemented and tested; the Unity
+> runtime-side session supervisor that recreates the runtime with a recorder and runs
+> the strict replayer is the remaining sub-item before the protocol v1.0 freeze.
 
 ## Prerequisites
 

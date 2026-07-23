@@ -117,4 +117,13 @@ public sealed class SignalRouterTools
             .ConfigureAwait(false);
         return ToolReports.FromWaitResult(condition, result);
     }
+
+    // The recording and replay tools (start_recording, stop_recording,
+    // replay_recording) are intentionally not registered on the live MCP
+    // surface yet: their wire contract and the HostBridge control methods that
+    // back them are complete and tested, but the Unity runtime-side supervisor
+    // that recreates the runtime with a recorder does not exist yet, so an
+    // exposed tool could only ever answer "pending". They are wired and exposed
+    // together with that runtime implementation, which also freezes protocol
+    // v1.0 (ADR 0007, item 8d).
 }
