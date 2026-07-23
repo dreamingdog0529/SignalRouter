@@ -647,6 +647,25 @@ namespace SignalRouter.Protocol
         }
     }
 
+    // The recording/replay acknowledgments arrive on the session they left the
+    // runtime in, so their new-epoch payload must equal the validated envelope
+    // epoch. Rejecting a mismatch keeps a contradictory acknowledgment — one
+    // whose reported epoch is not the one actually active — off the wire
+    // (Codex review, item 8d).
+    internal static class RecordingEpochContract
+    {
+        public static void Require(string newSessionEpoch, string? envelopeEpoch)
+        {
+            ProtocolContract.RequireIdentifier(newSessionEpoch, "newSessionEpoch");
+            if (!string.Equals(newSessionEpoch, envelopeEpoch, StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "The acknowledged epoch must equal the message's session epoch.",
+                    "newSessionEpoch");
+            }
+        }
+    }
+
     // Host → runtime. Begins recording a fresh session. Recording needs a new
     // dispatcher (the recorder is a constructor argument) and therefore a new
     // session epoch, so this recreates the runtime; the reply arrives on the
@@ -709,7 +728,7 @@ namespace SignalRouter.Protocol
         {
             ProtocolContract.RequireIdentifier(operationId, nameof(operationId));
             RecordingHandles.Require(recordingHandle, nameof(recordingHandle));
-            ProtocolContract.RequireIdentifier(newSessionEpoch, nameof(newSessionEpoch));
+            RecordingEpochContract.Require(newSessionEpoch, sessionEpoch);
             OperationId = operationId;
             RecordingHandle = recordingHandle;
             NewSessionEpoch = newSessionEpoch;
@@ -784,7 +803,7 @@ namespace SignalRouter.Protocol
                     "The entry count must be non-negative.");
             }
 
-            ProtocolContract.RequireIdentifier(newSessionEpoch, nameof(newSessionEpoch));
+            RecordingEpochContract.Require(newSessionEpoch, sessionEpoch);
             OperationId = operationId;
             RecordingHandle = recordingHandle;
             EntryCount = entryCount;
@@ -871,7 +890,7 @@ namespace SignalRouter.Protocol
                     nameof(outcomeKind));
             }
 
-            ProtocolContract.RequireIdentifier(newSessionEpoch, nameof(newSessionEpoch));
+            RecordingEpochContract.Require(newSessionEpoch, sessionEpoch);
             if (detail != null)
             {
                 ProtocolContract.RequireText(

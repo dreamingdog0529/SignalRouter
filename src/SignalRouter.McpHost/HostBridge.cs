@@ -155,6 +155,9 @@ public sealed class HostOperationReport
         string? detail)
         => new("replayed", operationId, null, null, newEpoch, outcomeKind, detail);
 
+    public static HostOperationReport Refused(string operationId, string errorCode, string detail)
+        => new("refused", operationId, null, null, null, null, errorCode + ": " + detail);
+
     public static HostOperationReport Pending(string operationId)
         => new("pending", operationId, null, null, null, null, null);
 
@@ -186,6 +189,13 @@ public sealed class HostBridge : IDisposable
     // acknowledgment arrives on the reconnected session under the new epoch
     // (item 8d).
     private readonly Dictionary<string, PendingOperation> pendingOperations =
+        new(StringComparer.Ordinal);
+
+    // Maps a control message's transmission ID to its operation ID so an
+    // error reply (correlated by inReplyTo, and without a request ID) can
+    // complete the operation as a refusal instead of hanging until the tool
+    // timeout (Codex review, item 8d).
+    private readonly Dictionary<string, string> controlMessageToOperation =
         new(StringComparer.Ordinal);
 
     // `active` claims the single-runtime slot at accept time; `ready` is the
@@ -555,6 +565,7 @@ public sealed class HostBridge : IDisposable
             message = build(operationId);
             pending = new PendingOperation(operationId);
             pendingOperations.Add(operationId, pending);
+            controlMessageToOperation[message.MessageId] = operationId;
             connection = ready;
         }
 
@@ -895,9 +906,60 @@ public sealed class HostBridge : IDisposable
             {
                 pendingOperations.Remove(operationId);
             }
+
+            ForgetControlMessageMapping(operationId);
         }
 
         pending?.Completion.TrySetResult(report);
+    }
+
+    private void ForgetControlMessageMapping(string operationId)
+    {
+        string? messageId = null;
+        foreach (var pair in controlMessageToOperation)
+        {
+            if (string.Equals(pair.Value, operationId, StringComparison.Ordinal))
+            {
+                messageId = pair.Key;
+                break;
+            }
+        }
+
+        if (messageId != null)
+        {
+            controlMessageToOperation.Remove(messageId);
+        }
+    }
+
+    // Completes a control operation from an error the runtime returned for it
+    // (e.g. stop with no active recording, replay of a missing handle). The
+    // error correlates by inReplyTo to the sent control message, which maps to
+    // the operation. Returns true when it belonged to an operation.
+    private bool TryCompleteOperationFromError(ErrorMessage error)
+    {
+        if (error.InReplyTo == null)
+        {
+            return false;
+        }
+
+        PendingOperation? pending;
+        lock (gate)
+        {
+            if (!controlMessageToOperation.TryGetValue(error.InReplyTo, out var operationId))
+            {
+                return false;
+            }
+
+            controlMessageToOperation.Remove(error.InReplyTo);
+            if (pendingOperations.TryGetValue(operationId, out pending))
+            {
+                pendingOperations.Remove(operationId);
+            }
+        }
+
+        pending?.Completion.TrySetResult(
+            HostOperationReport.Refused(pending.OperationId, error.Code, error.Message));
+        return true;
     }
 
     private void CompleteReply(ProtocolMessage message)
@@ -924,6 +986,12 @@ public sealed class HostBridge : IDisposable
         ErrorMessage error,
         CancellationToken cancellationToken)
     {
+        // A control operation's refusal correlates by inReplyTo, not requestId.
+        if (TryCompleteOperationFromError(error))
+        {
+            return;
+        }
+
         // Reply-correlated errors answer their waiting call directly.
         CompleteReply(error);
 

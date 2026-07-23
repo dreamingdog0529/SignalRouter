@@ -340,6 +340,31 @@ public sealed class HostBridgeTests
         Assert.That(report.Status, Is.EqualTo("disconnected"));
     }
 
+    [Test]
+    public async Task AnImmediateControlRefusalCorrelatesInsteadOfHanging()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
+        using var peer = await harness.ConnectRuntimeAsync();
+        await peer.PerformHandshakeAsync();
+
+        var stopTask = harness.Bridge.StopRecordingAsync(CancellationToken.None);
+        var stop = (StopRecordingMessage)await peer.ReceiveAsync();
+
+        // The runtime refuses (no active recording) with an error correlated by
+        // inReplyTo to the control message, not by a request ID.
+        await peer.SendAsync(new ErrorMessage(
+            peer.NextId(),
+            ProtocolErrorCodes.RecordingUnavailable,
+            "No recording is active.",
+            Epoch,
+            null,
+            stop.MessageId));
+
+        var report = await stopTask;
+        Assert.That(report.Status, Is.EqualTo("refused"));
+        Assert.That(report.Detail, Does.Contain(ProtocolErrorCodes.RecordingUnavailable));
+    }
+
     private static ProtocolInteractionOutcome SucceededOutcome(string requestId)
     {
         return new ProtocolInteractionOutcome(
