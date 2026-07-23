@@ -218,6 +218,77 @@ public sealed class InteractionSubmissionTests
     }
 
     [Test]
+    public async Task CancellingBeforeStartProducesACancelledResultWithoutStages()
+    {
+        using var runtime = new SubmissionRuntime();
+        runtime.RegisterBlockingClick("menu.start");
+
+        var blocked = runtime.Dispatcher.Submit(
+            new ClickCommand("menu.start"),
+            new InteractionSubmissionOptions("req-1", InteractionOrigin.Agent));
+        await blocked.Started;
+        var waiting = runtime.Dispatcher.Submit(
+            new ClickCommand("menu.start"),
+            new InteractionSubmissionOptions("req-2", InteractionOrigin.Agent));
+
+        Assert.That(runtime.Dispatcher.TryCancel("req-2"), Is.True);
+        var result = await waiting.Completion;
+        Assert.That(result.Status, Is.EqualTo(InteractionStatus.Cancelled));
+        Assert.That(result.Stages.Stages, Is.Empty);
+        Assert.That(await waiting.Started, Is.False);
+        Assert.That(runtime.ExecutedRequestIds, Does.Not.Contain("req-2"));
+
+        runtime.ReleaseBlockedStage();
+        await blocked.Completion;
+    }
+
+    [Test]
+    public async Task CancellingMidExecutionIsObservedByTheStagePipeline()
+    {
+        using var runtime = new SubmissionRuntime();
+        runtime.RegisterBlockingClick("menu.start");
+
+        var submission = runtime.Dispatcher.Submit(
+            new ClickCommand("menu.start"),
+            new InteractionSubmissionOptions("req-1", InteractionOrigin.Agent));
+        Assert.That(await submission.Started, Is.True);
+
+        Assert.That(runtime.Dispatcher.TryCancel("req-1"), Is.True);
+        var result = await submission.Completion;
+        Assert.That(result.Status, Is.EqualTo(InteractionStatus.Cancelled));
+        Assert.That(result.Stages.Stages, Has.Count.EqualTo(1));
+        Assert.That(
+            result.Stages.Stages[0].Status,
+            Is.EqualTo(InteractionStageStatus.Cancelled));
+    }
+
+    [Test]
+    public async Task CancelReturnsFalseForUnknownAndTerminalRequests()
+    {
+        using var runtime = new SubmissionRuntime();
+        runtime.RegisterClick("menu.start");
+
+        Assert.That(runtime.Dispatcher.TryCancel("req-unknown"), Is.False);
+
+        var submission = runtime.Dispatcher.Submit(
+            new ClickCommand("menu.start"),
+            new InteractionSubmissionOptions("req-1", InteractionOrigin.Agent));
+        await submission.Completion;
+
+        Assert.That(runtime.Dispatcher.TryCancel("req-1"), Is.False);
+    }
+
+    [Test]
+    public void CancelOnADisposedDispatcherThrows()
+    {
+        var runtime = new SubmissionRuntime();
+        runtime.Dispose();
+
+        NUnitCompat.Throws<ObjectDisposedException>(
+            () => _ = runtime.Dispatcher.TryCancel("req-1"));
+    }
+
+    [Test]
     public async Task DecodedCommandsSubmitThroughTheSameSplitPhasePath()
     {
         using var runtime = new SubmissionRuntime();

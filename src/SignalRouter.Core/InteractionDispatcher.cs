@@ -385,6 +385,47 @@ namespace SignalRouter
             }
         }
 
+        // Requests cancellation of an in-flight submission. A true return means
+        // the cancellation request was accepted — not that the outcome will be
+        // Cancelled: a stage may reach its terminal state before observing the
+        // token, and Completion's status stays authoritative. Unknown and
+        // already-terminal request IDs return false, so cancelling twice or
+        // after completion is a no-op query, not an error (design §8).
+        public bool TryCancel(string requestId)
+        {
+            InteractionContract.RequireIdentifier(requestId, nameof(requestId));
+
+            CancellationTokenSource? cancellation;
+            lock (gate)
+            {
+                if (disposed)
+                {
+                    throw new ObjectDisposedException(nameof(InteractionDispatcher));
+                }
+
+                if (!activeSubmissions.TryGetValue(requestId, out cancellation))
+                {
+                    return false;
+                }
+            }
+
+            try
+            {
+                // Outside the gate: cancellation callbacks (stage token
+                // registrations) may run synchronously and must not execute
+                // under the dispatcher's lock.
+                cancellation!.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The submission reached its terminal state between the lookup
+                // and the cancel; that is exactly the already-terminal case.
+                return false;
+            }
+
+            return true;
+        }
+
         private static InteractionSubmission CompletedSubmission(InteractionResult result)
         {
             return new InteractionSubmission(
