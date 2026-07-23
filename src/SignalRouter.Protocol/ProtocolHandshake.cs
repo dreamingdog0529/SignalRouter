@@ -44,7 +44,8 @@ namespace SignalRouter.Protocol
             string remotePeerVersion,
             ReadOnlyCollection<string> capabilities,
             int maxSendMessageBytes,
-            int maxReceiveMessageBytes)
+            int maxReceiveMessageBytes,
+            TimeSpan recoveryWindow)
         {
             Version = version;
             SessionEpoch = sessionEpoch;
@@ -52,6 +53,7 @@ namespace SignalRouter.Protocol
             Capabilities = capabilities;
             MaxSendMessageBytes = maxSendMessageBytes;
             MaxReceiveMessageBytes = maxReceiveMessageBytes;
+            RecoveryWindow = recoveryWindow;
         }
 
         public ProtocolVersion Version { get; }
@@ -65,6 +67,11 @@ namespace SignalRouter.Protocol
         public int MaxSendMessageBytes { get; }
 
         public int MaxReceiveMessageBytes { get; }
+
+        // The runtime ledger's advertised retention: how long results stay
+        // queryable, and the window inside which an unavailable query answer
+        // makes a byte-exact resend safe (ADR 0007).
+        public TimeSpan RecoveryWindow { get; }
     }
 
     public sealed class ProtocolHandshakeDecision
@@ -140,7 +147,8 @@ namespace SignalRouter.Protocol
                 hello.PeerVersion,
                 Intersect(local.Capabilities, hello.Capabilities),
                 hello.MaxReceiveMessageBytes,
-                local.MaxReceiveMessageBytes));
+                local.MaxReceiveMessageBytes,
+                TimeSpan.FromMilliseconds(hello.RecoveryWindowMs)));
         }
 
         // Runtime side: evaluates the received welcome against the hello this
@@ -194,7 +202,8 @@ namespace SignalRouter.Protocol
                 welcome.PeerVersion,
                 Intersect(sentHello.Capabilities, welcome.Capabilities),
                 welcome.MaxReceiveMessageBytes,
-                sentHello.MaxReceiveMessageBytes));
+                sentHello.MaxReceiveMessageBytes,
+                TimeSpan.FromMilliseconds(sentHello.RecoveryWindowMs)));
         }
 
         private static ReadOnlyCollection<string> Intersect(

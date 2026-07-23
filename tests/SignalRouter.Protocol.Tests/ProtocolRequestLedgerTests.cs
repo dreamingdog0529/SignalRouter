@@ -128,6 +128,21 @@ public sealed class ProtocolRequestLedgerTests
     }
 
     [Test]
+    public void CancelIntentIsTrackedForLiveEntriesOnly()
+    {
+        var ledger = CreateLedger();
+        ledger.Submit(CreateExecute("r-1"));
+
+        Assert.That(ledger.TryMarkCancelRequested("r-1"), Is.True);
+        Assert.That(ledger.TryMarkCancelRequested("r-1"), Is.True);
+        Assert.That(ledger.TryGet("r-1")!.CancelRequested, Is.True);
+        Assert.That(ledger.TryMarkCancelRequested("r-unknown"), Is.False);
+
+        AdvanceToTerminal(ledger, "r-1");
+        Assert.That(ledger.TryMarkCancelRequested("r-1"), Is.False);
+    }
+
+    [Test]
     public void TerminalResultsExpireAfterTheRetentionWindow()
     {
         var clock = new FakeClock();

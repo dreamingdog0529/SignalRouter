@@ -62,6 +62,7 @@ namespace SignalRouter.Protocol
             IEnumerable<string> capabilities,
             int maxReceiveMessageBytes,
             string? authToken = null,
+            int recoveryWindowMs = ProtocolLimits.DefaultRecoveryWindowMs,
             ProtocolVersion? protocol = null)
             : base(
                 protocol,
@@ -77,9 +78,18 @@ namespace SignalRouter.Protocol
             Capabilities = ProtocolContract.CreateCapabilities(capabilities, nameof(capabilities));
             RequireReceiveLimit(maxReceiveMessageBytes);
             ProtocolContract.RequireOptionalIdentifier(authToken, nameof(authToken));
+            if (recoveryWindowMs < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(recoveryWindowMs),
+                    recoveryWindowMs,
+                    "The recovery window must be positive.");
+            }
+
             PeerVersion = peerVersion;
             MaxReceiveMessageBytes = maxReceiveMessageBytes;
             AuthToken = authToken;
+            RecoveryWindowMs = recoveryWindowMs;
         }
 
         public string PeerVersion { get; }
@@ -87,6 +97,12 @@ namespace SignalRouter.Protocol
         public ReadOnlyCollection<string> Capabilities { get; }
 
         public int MaxReceiveMessageBytes { get; }
+
+        // The runtime ledger's terminal-result retention, advertised so the
+        // host knows how long results stay queryable and — critically — for
+        // how long an unavailable query answer proves the request was never
+        // received, making a byte-exact resend safe (ADR 0007).
+        public int RecoveryWindowMs { get; }
 
         // Reserved for the §19 security pass: carried opaquely in v1 and validated
         // by the host once item 9 lands. Must never appear in logs, faults, or
@@ -398,6 +414,70 @@ namespace SignalRouter.Protocol
         public override string Type
         {
             get { return ProtocolMessageTypes.GetInteractionResult; }
+        }
+    }
+
+    // Runtime → host. Answers get_interaction_result for a request that is
+    // known but not yet terminal — the wire projection of the ledger's pending
+    // states, which is what lets a reconnecting host distinguish "still
+    // running, keep waiting" from "never received, safe to resend" (ADR 0007).
+    // A terminal request answers with interaction_result instead, so Terminal
+    // is not a legal state here.
+    public sealed class InteractionStatusMessage : ProtocolMessage
+    {
+        public InteractionStatusMessage(
+            string messageId,
+            string sessionEpoch,
+            string requestId,
+            string inReplyTo,
+            ProtocolRequestState state,
+            long? sequence,
+            bool cancelRequested,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                ProtocolContract.RequireIdentifierValue(requestId, nameof(requestId)),
+                ProtocolContract.RequireIdentifierValue(inReplyTo, nameof(inReplyTo)))
+        {
+            ProtocolContract.RequireDefinedEnum(state, nameof(state));
+            if (state == ProtocolRequestState.Terminal)
+            {
+                throw new ArgumentException(
+                    "Terminal requests answer with interaction_result, not a status.",
+                    nameof(state));
+            }
+
+            if ((state == ProtocolRequestState.Received) != (sequence == null))
+            {
+                throw new ArgumentException(
+                    "A sequence is present exactly when the request was admitted to the FIFO.",
+                    nameof(sequence));
+            }
+
+            if (sequence != null && sequence.Value < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(sequence),
+                    sequence.Value,
+                    "Sequence must be positive.");
+            }
+
+            State = state;
+            Sequence = sequence;
+            CancelRequested = cancelRequested;
+        }
+
+        public ProtocolRequestState State { get; }
+
+        public long? Sequence { get; }
+
+        public bool CancelRequested { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.InteractionStatus; }
         }
     }
 

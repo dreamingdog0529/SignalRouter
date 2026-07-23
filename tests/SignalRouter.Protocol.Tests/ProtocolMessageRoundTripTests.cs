@@ -19,7 +19,8 @@ public sealed class ProtocolMessageRoundTripTests
             new[] { "capability-b", "capability-a" },
             ProtocolLimits.BootstrapMaxMessageBytes,
             "token-value",
-            new ProtocolVersion(1, 0));
+            recoveryWindowMs: 120_000,
+            protocol: new ProtocolVersion(1, 0));
 
         var decoded = (HelloMessage)RoundTrip(hello);
 
@@ -144,6 +145,48 @@ public sealed class ProtocolMessageRoundTripTests
 
         Assert.That(decoded.CorrelationId, Is.Null);
         Assert.That(decoded.IdempotencyKey, Is.Null);
+    }
+
+    [Test]
+    public void HelloAdvertisesItsRecoveryWindow()
+    {
+        var hello = new HelloMessage(
+            "m-1",
+            Epoch,
+            "peer 1.0",
+            Array.Empty<string>(),
+            Limit,
+            null,
+            recoveryWindowMs: 120_000);
+
+        var decoded = (HelloMessage)RoundTrip(hello);
+
+        Assert.That(decoded.RecoveryWindowMs, Is.EqualTo(120_000));
+    }
+
+    [TestCase(ProtocolRequestState.Received, null)]
+    [TestCase(ProtocolRequestState.Queued, 7L)]
+    [TestCase(ProtocolRequestState.Running, 7L)]
+    public void InteractionStatusRoundTripsEveryPendingState(
+        ProtocolRequestState state,
+        long? sequence)
+    {
+        var status = new InteractionStatusMessage(
+            "m-7",
+            Epoch,
+            "r-1",
+            "m-6",
+            state,
+            sequence,
+            cancelRequested: true);
+
+        var decoded = (InteractionStatusMessage)RoundTrip(status);
+
+        Assert.That(decoded.RequestId, Is.EqualTo("r-1"));
+        Assert.That(decoded.InReplyTo, Is.EqualTo("m-6"));
+        Assert.That(decoded.State, Is.EqualTo(state));
+        Assert.That(decoded.Sequence, Is.EqualTo(sequence));
+        Assert.That(decoded.CancelRequested, Is.True);
     }
 
     [Test]

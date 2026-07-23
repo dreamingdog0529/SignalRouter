@@ -267,6 +267,7 @@ namespace SignalRouter.Protocol
                         RequireStringArray(payload, ProtocolSchema.CapabilitiesProperty),
                         RequireInt(payload, ProtocolSchema.MaxReceiveMessageBytesProperty),
                         OptionalString(payload, ProtocolSchema.AuthTokenProperty),
+                        RequireInt(payload, ProtocolSchema.RecoveryWindowMsProperty),
                         protocol);
                 case ProtocolMessageTypes.Welcome:
                     RequireAbsentEnvelopeField(requestId);
@@ -335,6 +336,16 @@ namespace SignalRouter.Protocol
                         messageId,
                         RequirePresent(sessionEpoch),
                         RequirePresent(requestId),
+                        protocol);
+                case ProtocolMessageTypes.InteractionStatus:
+                    return new InteractionStatusMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequirePresent(requestId),
+                        RequirePresent(inReplyTo),
+                        RequireEnum<ProtocolRequestState>(payload, ProtocolSchema.StateProperty),
+                        OptionalLong(payload, ProtocolSchema.SequenceProperty),
+                        RequireBoolean(payload, ProtocolSchema.CancelRequestedProperty),
                         protocol);
                 case ProtocolMessageTypes.CancelInteraction:
                     RequireAbsentEnvelopeField(inReplyTo);
@@ -630,6 +641,40 @@ namespace SignalRouter.Protocol
             }
 
             return value;
+        }
+
+        private static long? OptionalLong(
+            Dictionary<string, JsonElement> properties,
+            string name)
+        {
+            if (!properties.TryGetValue(name, out _))
+            {
+                return null;
+            }
+
+            return RequireLong(properties, name);
+        }
+
+        private static bool RequireBoolean(
+            Dictionary<string, JsonElement> properties,
+            string name)
+        {
+            if (!properties.TryGetValue(name, out var element))
+            {
+                throw new MalformedPayloadException();
+            }
+
+            if (element.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (element.ValueKind == JsonValueKind.False)
+            {
+                return false;
+            }
+
+            throw new MalformedPayloadException();
         }
 
         private static Dictionary<string, JsonElement> RequireObject(

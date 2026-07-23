@@ -36,12 +36,14 @@ namespace SignalRouter.Protocol
             string requestId,
             ProtocolRequestState state,
             long? sequence,
-            ProtocolInteractionOutcome? outcome)
+            ProtocolInteractionOutcome? outcome,
+            bool cancelRequested)
         {
             RequestId = requestId;
             State = state;
             Sequence = sequence;
             Outcome = outcome;
+            CancelRequested = cancelRequested;
         }
 
         public string RequestId { get; }
@@ -51,6 +53,8 @@ namespace SignalRouter.Protocol
         public long? Sequence { get; }
 
         public ProtocolInteractionOutcome? Outcome { get; }
+
+        public bool CancelRequested { get; }
     }
 
     public sealed class ProtocolLedgerSubmission
@@ -266,6 +270,23 @@ namespace SignalRouter.Protocol
             entry.RetainUntil = clock.UtcNow + retention;
         }
 
+        // Records that cancellation was requested for a live entry, so a
+        // status reply can tell a reconnecting host its cancel intent arrived
+        // and the host can stop resending it. Idempotent; false for unknown or
+        // already-terminal requests, mirroring the dispatcher's TryCancel.
+        public bool TryMarkCancelRequested(string requestId)
+        {
+            ProtocolContract.RequireIdentifier(requestId, nameof(requestId));
+            if (!entries.TryGetValue(requestId, out var entry)
+                || entry.State == ProtocolRequestState.Terminal)
+            {
+                return false;
+            }
+
+            entry.CancelRequested = true;
+            return true;
+        }
+
         // Discards a reservation that never reached Core admission — the one
         // case where forgetting is correct: the submitter got no acceptance,
         // Core queued nothing, and keeping the entry would make its honest
@@ -394,9 +415,16 @@ namespace SignalRouter.Protocol
 
             public DateTimeOffset RetainUntil { get; set; }
 
+            public bool CancelRequested { get; set; }
+
             public ProtocolLedgerEntry ToView()
             {
-                return new ProtocolLedgerEntry(RequestId, State, Sequence, Outcome);
+                return new ProtocolLedgerEntry(
+                    RequestId,
+                    State,
+                    Sequence,
+                    Outcome,
+                    CancelRequested);
             }
         }
     }

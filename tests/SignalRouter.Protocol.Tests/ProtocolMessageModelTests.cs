@@ -185,6 +185,56 @@ public sealed class ProtocolMessageModelTests
     }
 
     [Test]
+    public void HelloRequiresAPositiveRecoveryWindow()
+    {
+        NUnitCompat.Throws<ArgumentOutOfRangeException>(() => _ = new HelloMessage(
+            "m-1",
+            Epoch,
+            "peer 1.0",
+            Array.Empty<string>(),
+            ProtocolLimits.DefaultMaxReceiveMessageBytes,
+            null,
+            recoveryWindowMs: 0));
+    }
+
+    [Test]
+    public void InteractionStatusValidatesItsStateShape()
+    {
+        NUnitCompat.Throws<ArgumentException>(() => _ = new InteractionStatusMessage(
+            "m-1",
+            Epoch,
+            "r-1",
+            "m-0",
+            ProtocolRequestState.Terminal,
+            1,
+            false));
+        NUnitCompat.Throws<ArgumentException>(() => _ = new InteractionStatusMessage(
+            "m-1",
+            Epoch,
+            "r-1",
+            "m-0",
+            ProtocolRequestState.Received,
+            1,
+            false));
+        NUnitCompat.Throws<ArgumentException>(() => _ = new InteractionStatusMessage(
+            "m-1",
+            Epoch,
+            "r-1",
+            "m-0",
+            ProtocolRequestState.Queued,
+            null,
+            false));
+        NUnitCompat.Throws<ArgumentNullException>(() => _ = new InteractionStatusMessage(
+            "m-1",
+            Epoch,
+            "r-1",
+            null!,
+            ProtocolRequestState.Received,
+            null,
+            false));
+    }
+
+    [Test]
     public void InteractionResultStampsTheEnvelopeRequestIdFromTheOutcome()
     {
         var outcome = ProtocolInteractionOutcomeTests.CreateSucceededOutcome("r-9");
@@ -262,7 +312,7 @@ public sealed class ProtocolMessageModelTests
             capabilities ?? Array.Empty<string>(),
             maxReceiveMessageBytes,
             null,
-            protocol);
+            protocol: protocol);
     }
 
     private static ExecuteInteractionMessage CreateExecute(
