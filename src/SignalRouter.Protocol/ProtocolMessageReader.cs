@@ -370,6 +370,26 @@ namespace SignalRouter.Protocol
                         RequireInt(payload, ProtocolSchema.ProbeVersionProperty),
                         RequireRawObject(payload, ProtocolSchema.SnapshotProperty),
                         protocol);
+                case ProtocolMessageTypes.WaitFor:
+                    RequireAbsentEnvelopeField(requestId);
+                    RequireAbsentEnvelopeField(inReplyTo);
+                    return new WaitForMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequireString(payload, ProtocolSchema.ConditionProperty),
+                        OptionalString(payload, ProtocolSchema.TargetIdProperty),
+                        RequireInt(payload, ProtocolSchema.TimeoutMsProperty),
+                        protocol);
+                case ProtocolMessageTypes.WaitResult:
+                    RequireAbsentEnvelopeField(requestId);
+                    return new WaitResultMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequirePresent(inReplyTo),
+                        RequireString(payload, ProtocolSchema.ConditionProperty),
+                        RequireBoolean(payload, ProtocolSchema.SatisfiedProperty),
+                        RequireLong(payload, ProtocolSchema.ElapsedMsProperty),
+                        protocol);
                 default:
                     return null;
             }

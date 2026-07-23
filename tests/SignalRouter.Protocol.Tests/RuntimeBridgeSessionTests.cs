@@ -207,6 +207,23 @@ public sealed class RuntimeBridgeSessionTests
     }
 
     [Test]
+    public async Task WaitForRoundTripsThroughTheRuntimeWaiter()
+    {
+        using var harness = new SessionHarness();
+        await harness.CompleteHandshakeAsync();
+
+        harness.HostDeliver(ProtocolMessageWriter.Encode(
+            new WaitForMessage("m-wait", Epoch, ProtocolWaitConditions.Idle, null, 5000),
+            ProtocolLimits.DefaultMaxReceiveMessageBytes));
+        var result = (WaitResultMessage)await harness.HostReceiveAsync();
+
+        Assert.That(result.InReplyTo, Is.EqualTo("m-wait"));
+        Assert.That(result.Condition, Is.EqualTo(ProtocolWaitConditions.Idle));
+        Assert.That(result.Satisfied, Is.True);
+        Assert.That(harness.WaitRequests, Has.Count.EqualTo(1));
+    }
+
+    [Test]
     public async Task ASendFailureEndsTheSessionNormallySoTheOwnerCanReconnect()
     {
         using var harness = new SessionHarness();
@@ -307,6 +324,11 @@ public sealed class RuntimeBridgeSessionTests
                     return true;
                 },
                 () => new RegistrySnapshotDocument(1, snapshotJson ?? "{\"targets\":[]}"),
+                (request, complete) =>
+                {
+                    WaitRequests.Add(request);
+                    complete(true, 5);
+                },
                 null,
                 () => "s-" + (++nextMessageId));
             Session = new RuntimeBridgeSession(channel, options);
@@ -326,6 +348,8 @@ public sealed class RuntimeBridgeSessionTests
         public RuntimeBridgeSession Session { get; }
 
         public List<string> CancelledRequestIds { get; } = new();
+
+        public List<WaitForMessage> WaitRequests { get; } = new();
 
         public async Task<ProtocolMessage> HostReceiveAsync()
         {

@@ -47,6 +47,11 @@ namespace SignalRouter.Protocol
 
         public const string ProbeVersionProperty = "probeVersion";
         public const string SnapshotProperty = "snapshot";
+
+        public const string ConditionProperty = "condition";
+        public const string TimeoutMsProperty = "timeoutMs";
+        public const string SatisfiedProperty = "satisfied";
+        public const string ElapsedMsProperty = "elapsedMs";
     }
 
     public static class ProtocolMessageTypes
@@ -64,6 +69,19 @@ namespace SignalRouter.Protocol
         public const string CancelInteraction = "cancel_interaction";
         public const string GetRegistrySnapshot = "get_registry_snapshot";
         public const string RegistrySnapshot = "registry_snapshot";
+        public const string WaitFor = "wait_for";
+        public const string WaitResult = "wait_result";
+    }
+
+    // The bounded wait conditions of the wait_for message (design §18.2,
+    // ADR 0007): the smallest set that makes agent flows deterministic. State
+    // predicates and probe-hash conditions belong to the planned state-history
+    // feature (§14.1), not v1.
+    public static class ProtocolWaitConditions
+    {
+        public const string Idle = "idle";
+        public const string TargetPresent = "target_present";
+        public const string TargetAbsent = "target_absent";
     }
 
     // Transport-plane error codes. Interaction rejections are payload data inside
@@ -121,6 +139,10 @@ namespace SignalRouter.Protocol
 
         public static readonly System.TimeSpan DefaultLedgerRetention =
             System.TimeSpan.FromMilliseconds(DefaultRecoveryWindowMs);
+
+        // wait_for timeouts are frame-polled main-thread work; the cap keeps a
+        // single wait from parking runtime state for minutes (§25 finalizes).
+        public const int MaxWaitTimeoutMs = 30_000;
 
         // Command arguments sit under envelope → payload → command, three
         // containers deep, so their own nesting may use the remaining budget.

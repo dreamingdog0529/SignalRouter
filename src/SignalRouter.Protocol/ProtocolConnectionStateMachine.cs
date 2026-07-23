@@ -249,11 +249,13 @@ namespace SignalRouter.Protocol
                 case GetInteractionResultMessage _:
                 case CancelInteractionMessage _:
                 case GetRegistrySnapshotMessage _:
+                case WaitForMessage _:
                     return Role == ProtocolConnectionRole.Runtime;
                 case InteractionAcceptedMessage _:
                 case InteractionResultMessage _:
                 case InteractionStatusMessage _:
                 case RegistrySnapshotMessage _:
+                case WaitResultMessage _:
                     return Role == ProtocolConnectionRole.Host;
                 default:
                     return false;
