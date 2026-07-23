@@ -175,6 +175,12 @@ namespace SignalRouter.Protocol
             get { return sessionEpoch; }
         }
 
+        // Advertised in the hello as the recovery window (ADR 0007).
+        public TimeSpan Retention
+        {
+            get { return retention; }
+        }
+
         public int Count
         {
             get { return entries.Count; }

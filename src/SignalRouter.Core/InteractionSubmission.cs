@@ -88,18 +88,30 @@ namespace SignalRouter
     // consumer can always distinguish the two without racing Completion.
     public sealed class InteractionSubmission
     {
-        internal InteractionSubmission(
+        // Public so transport tests can drive session logic with scripted
+        // submissions; the dispatcher remains the only production source.
+        public InteractionSubmission(
             InteractionAdmissionKind kind,
             string requestId,
             long sequence,
             Task<bool> started,
             Task<InteractionResult> completion)
         {
+            InteractionContract.RequireDefinedEnum(kind, nameof(kind));
+            InteractionContract.RequireIdentifier(requestId, nameof(requestId));
+            if (sequence < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(sequence),
+                    sequence,
+                    "Sequence must be positive.");
+            }
+
             Kind = kind;
             RequestId = requestId;
             Sequence = sequence;
-            Started = started;
-            Completion = completion;
+            Started = started ?? throw new ArgumentNullException(nameof(started));
+            Completion = completion ?? throw new ArgumentNullException(nameof(completion));
         }
 
         public InteractionAdmissionKind Kind { get; }
