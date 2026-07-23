@@ -530,6 +530,123 @@ namespace SignalRouter.Protocol
         }
     }
 
+    // Host → runtime. Waits for a bounded runtime condition (design §18.2):
+    // dispatcher idleness or the presence/absence of a target with a stable ID.
+    // A timeout answers satisfied=false — a normal outcome, not an error. The
+    // condition is checked once per frame on the main thread (§17.2).
+    public sealed class WaitForMessage : ProtocolMessage
+    {
+        public WaitForMessage(
+            string messageId,
+            string sessionEpoch,
+            string condition,
+            string? targetId,
+            int timeoutMs,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                null)
+        {
+            if (!string.Equals(condition, ProtocolWaitConditions.Idle, StringComparison.Ordinal)
+                && !string.Equals(
+                    condition,
+                    ProtocolWaitConditions.TargetPresent,
+                    StringComparison.Ordinal)
+                && !string.Equals(
+                    condition,
+                    ProtocolWaitConditions.TargetAbsent,
+                    StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "The condition is not part of protocol v1.",
+                    nameof(condition));
+            }
+
+            var needsTarget = !string.Equals(
+                condition,
+                ProtocolWaitConditions.Idle,
+                StringComparison.Ordinal);
+            if (needsTarget != (targetId != null))
+            {
+                throw new ArgumentException(
+                    "A target ID is present exactly for the target_* conditions.",
+                    nameof(targetId));
+            }
+
+            ProtocolContract.RequireOptionalIdentifier(targetId, nameof(targetId));
+            if (timeoutMs < 1 || timeoutMs > ProtocolLimits.MaxWaitTimeoutMs)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(timeoutMs),
+                    timeoutMs,
+                    "The wait timeout must be within the protocol bound.");
+            }
+
+            Condition = condition;
+            TargetId = targetId;
+            TimeoutMs = timeoutMs;
+        }
+
+        public string Condition { get; }
+
+        public string? TargetId { get; }
+
+        public int TimeoutMs { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.WaitFor; }
+        }
+    }
+
+    // Runtime → host. Answers a wait_for: whether the condition held before
+    // the timeout, and how long the wait actually took.
+    public sealed class WaitResultMessage : ProtocolMessage
+    {
+        public WaitResultMessage(
+            string messageId,
+            string sessionEpoch,
+            string inReplyTo,
+            string condition,
+            bool satisfied,
+            long elapsedMs,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                ProtocolContract.RequireIdentifierValue(inReplyTo, nameof(inReplyTo)))
+        {
+            ProtocolContract.RequireIdentifier(condition, nameof(condition));
+            if (elapsedMs < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(elapsedMs),
+                    elapsedMs,
+                    "Elapsed time must be non-negative.");
+            }
+
+            Condition = condition;
+            Satisfied = satisfied;
+            ElapsedMs = elapsedMs;
+        }
+
+        public string Condition { get; }
+
+        public bool Satisfied { get; }
+
+        public long ElapsedMs { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.WaitResult; }
+        }
+    }
+
     // Runtime → host. Carries the canonical semantic-ui snapshot document
     // (agent view) verbatim, plus the probe schema version that governs its
     // shape (design §13, §16).

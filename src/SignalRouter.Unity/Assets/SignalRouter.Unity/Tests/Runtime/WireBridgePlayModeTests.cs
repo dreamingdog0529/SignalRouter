@@ -134,6 +134,56 @@ public sealed class WireBridgePlayModeTests
         Assert.That(rig.ClickCount, Is.EqualTo(1), "The click must not re-execute.");
     }
 
+    [UnityTest]
+    public IEnumerator HiddenTargetsNeitherExecuteNorDiscloseOverTheWire()
+    {
+        using var peer = new WireHostPeer();
+        using var rig = WireRig.Create(peer.EndpointUrl);
+
+        var hostTask = Task.Run(async () =>
+        {
+            using var connection = await peer.AcceptAsync().ConfigureAwait(false);
+            var hello = await ExpectHelloAsync(connection).ConfigureAwait(false);
+            await SendWelcomeAsync(peer, connection, hello).ConfigureAwait(false);
+
+            // Executing a non-agent-visible target must answer exactly like an
+            // absent one (design §19) — a terminal rejection, never execution.
+            await connection.SendAsync(new ExecuteInteractionMessage(
+                peer.NextMessageId(),
+                hello.SessionEpoch!,
+                "r-hidden",
+                "click",
+                1,
+                "secret.button",
+                "{}")).ConfigureAwait(false);
+            var result = (InteractionResultMessage?)await connection.ReceiveAsync()
+                .ConfigureAwait(false);
+
+            // Probing the hidden target's presence must not disclose it.
+            await connection.SendAsync(new WaitForMessage(
+                peer.NextMessageId(),
+                hello.SessionEpoch!,
+                ProtocolWaitConditions.TargetPresent,
+                "secret.button",
+                300)).ConfigureAwait(false);
+            var wait = (WaitResultMessage?)await connection.ReceiveAsync()
+                .ConfigureAwait(false);
+            return (Result: result!, Wait: wait!);
+        });
+
+        yield return PlayModeAwait.Completion(hostTask, timeoutSeconds: 30f);
+        var exchange = hostTask.Result;
+
+        Assert.That(
+            exchange.Result.Result.Status,
+            Is.EqualTo(InteractionStatus.Rejected));
+        Assert.That(
+            exchange.Result.Result.RejectionCode,
+            Is.EqualTo(InteractionRejectionCode.TargetNotFound));
+        Assert.That(exchange.Wait.Satisfied, Is.False);
+        Assert.That(rig.HiddenClickCount, Is.EqualTo(0));
+    }
+
     private static async Task<HelloMessage> ExpectHelloAsync(WireHostPeer.Connection connection)
     {
         var message = await connection.ReceiveAsync().ConfigureAwait(false);
@@ -165,6 +215,7 @@ public sealed class WireBridgePlayModeTests
         private readonly GameObject root;
         private readonly GameObject buttonObject;
         private int clickCount;
+        private int hiddenClickCount;
 
         private WireRig(GameObject root, GameObject buttonObject)
         {
@@ -175,6 +226,8 @@ public sealed class WireBridgePlayModeTests
         public InteractionRuntime Runtime { get; private set; } = null!;
 
         public int ClickCount => clickCount;
+
+        public int HiddenClickCount => hiddenClickCount;
 
         public static WireRig Create(string endpointUrl)
         {
@@ -199,11 +252,23 @@ public sealed class WireBridgePlayModeTests
             adapter.TargetId = "menu.start";
             adapter.Runtime = runtime;
 
+            var hiddenObject = new GameObject("wire-hidden-button");
+            hiddenObject.SetActive(false);
+            hiddenObject.transform.SetParent(root.transform);
+            hiddenObject.AddComponent<Button>();
+            var hiddenAdapter = hiddenObject.AddComponent<InteractionButton>();
+            hiddenAdapter.TargetId = "secret.button";
+            hiddenAdapter.Runtime = runtime;
+            hiddenAdapter.AgentVisible = false;
+
             var rig = new WireRig(root, buttonObject) { Runtime = runtime };
             adapter.ConfigurePipeline(new[] { new CountingStage(rig) });
+            hiddenAdapter.ConfigurePipeline(
+                new[] { new CountingStage(rig, countHidden: true) });
 
             runtimeObject.SetActive(true);
             buttonObject.SetActive(true);
+            hiddenObject.SetActive(true);
             return rig;
         }
 
@@ -224,10 +289,12 @@ public sealed class WireBridgePlayModeTests
         private sealed class CountingStage : IInteractionStage<ClickCommand>
         {
             private readonly WireRig owner;
+            private readonly bool countHidden;
 
-            public CountingStage(WireRig owner)
+            public CountingStage(WireRig owner, bool countHidden = false)
             {
                 this.owner = owner;
+                this.countHidden = countHidden;
             }
 
             public string Id => "click.count";
@@ -239,7 +306,15 @@ public sealed class WireBridgePlayModeTests
                 InteractionContext context,
                 System.Threading.CancellationToken cancellationToken)
             {
-                owner.clickCount++;
+                if (countHidden)
+                {
+                    owner.hiddenClickCount++;
+                }
+                else
+                {
+                    owner.clickCount++;
+                }
+
                 return default;
             }
         }

@@ -262,6 +262,25 @@ public sealed class ProtocolMessageModelTests
     }
 
     [Test]
+    public void WaitForValidatesItsConditionShape()
+    {
+        NUnitCompat.Throws<ArgumentException>(() => _ = new WaitForMessage(
+            "m-1", Epoch, "future_condition", null, 1000));
+        NUnitCompat.Throws<ArgumentException>(() => _ = new WaitForMessage(
+            "m-1", Epoch, ProtocolWaitConditions.Idle, "target-1", 1000));
+        NUnitCompat.Throws<ArgumentException>(() => _ = new WaitForMessage(
+            "m-1", Epoch, ProtocolWaitConditions.TargetPresent, null, 1000));
+        NUnitCompat.Throws<ArgumentOutOfRangeException>(() => _ = new WaitForMessage(
+            "m-1", Epoch, ProtocolWaitConditions.Idle, null, 0));
+        NUnitCompat.Throws<ArgumentOutOfRangeException>(() => _ = new WaitForMessage(
+            "m-1",
+            Epoch,
+            ProtocolWaitConditions.Idle,
+            null,
+            ProtocolLimits.MaxWaitTimeoutMs + 1));
+    }
+
+    [Test]
     public void RegistrySnapshotValidatesItsPayload()
     {
         var snapshot = new RegistrySnapshotMessage(

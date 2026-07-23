@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>SignalRouter.McpHost</AssemblyName>
+    <RootNamespace>SignalRouter.McpHost</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- A leaf executable outside Unity's restore path: free of the
+         netstandard2.1 / C# 9 / System.Text.Json 8.0 constraints that bind
+         Core and Protocol (docs/development.md). -->
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SignalRouter.Protocol/SignalRouter.Protocol.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SignalRouter.McpHost.Tests" />
+  </ItemGroup>
+</Project>

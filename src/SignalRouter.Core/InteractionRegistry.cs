@@ -333,6 +333,20 @@ namespace SignalRouter
             return false;
         }
 
+        // Whether a registered target is exposed to agents (design §19).
+        // Transports enforce this before dispatch so a hidden target neither
+        // executes nor has its existence disclosed; unknown and hidden targets
+        // are deliberately indistinguishable to the caller.
+        public bool IsAgentVisible(string targetId)
+        {
+            if (targetId == null)
+            {
+                throw new ArgumentNullException(nameof(targetId));
+            }
+
+            return targets.TryGetValue(targetId, out var entry) && entry.AgentVisible;
+        }
+
         public void NotifyDescriptorChanged(string targetId)
         {
             if (targetId == null)

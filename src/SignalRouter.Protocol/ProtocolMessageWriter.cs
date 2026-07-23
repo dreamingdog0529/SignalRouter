@@ -150,6 +150,20 @@ namespace SignalRouter.Protocol
                     writer.WritePropertyName(ProtocolSchema.SnapshotProperty);
                     writer.WriteRawValue(snapshot.SnapshotJson);
                     return;
+                case WaitForMessage waitFor:
+                    writer.WriteString(ProtocolSchema.ConditionProperty, waitFor.Condition);
+                    if (waitFor.TargetId != null)
+                    {
+                        writer.WriteString(ProtocolSchema.TargetIdProperty, waitFor.TargetId);
+                    }
+
+                    writer.WriteNumber(ProtocolSchema.TimeoutMsProperty, waitFor.TimeoutMs);
+                    return;
+                case WaitResultMessage waitResult:
+                    writer.WriteString(ProtocolSchema.ConditionProperty, waitResult.Condition);
+                    writer.WriteBoolean(ProtocolSchema.SatisfiedProperty, waitResult.Satisfied);
+                    writer.WriteNumber(ProtocolSchema.ElapsedMsProperty, waitResult.ElapsedMs);
+                    return;
                 default:
                     throw new ArgumentException(
                         "The message type '" + message.Type + "' has no v1 payload writer.",

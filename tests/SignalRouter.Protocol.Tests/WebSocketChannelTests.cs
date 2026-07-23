@@ -4,7 +4,7 @@ using SignalRouter.Protocol.Transport;
 
 namespace SignalRouter.Protocol.Tests;
 
-public sealed class ClientWebSocketChannelTests
+public sealed class WebSocketChannelTests
 {
     private const int Limit = ProtocolLimits.DefaultMaxReceiveMessageBytes;
 
@@ -13,7 +13,7 @@ public sealed class ClientWebSocketChannelTests
     {
         using var server = new MinimalRfc6455Server();
         var sessionTask = server.AcceptAsync();
-        using var channel = await ClientWebSocketChannel.ConnectAsync(
+        using var channel = await WebSocketChannel.ConnectAsync(
             server.Endpoint,
             CancellationToken.None);
         using var session = await sessionTask;
@@ -34,7 +34,7 @@ public sealed class ClientWebSocketChannelTests
     {
         using var server = new MinimalRfc6455Server();
         var sessionTask = server.AcceptAsync();
-        using var channel = await ClientWebSocketChannel.ConnectAsync(
+        using var channel = await WebSocketChannel.ConnectAsync(
             server.Endpoint,
             CancellationToken.None);
         using var session = await sessionTask;
@@ -57,7 +57,7 @@ public sealed class ClientWebSocketChannelTests
     {
         using var server = new MinimalRfc6455Server();
         var sessionTask = server.AcceptAsync();
-        using var channel = await ClientWebSocketChannel.ConnectAsync(
+        using var channel = await WebSocketChannel.ConnectAsync(
             server.Endpoint,
             CancellationToken.None);
         using var session = await sessionTask;
@@ -74,7 +74,7 @@ public sealed class ClientWebSocketChannelTests
     {
         using var server = new MinimalRfc6455Server();
         var sessionTask = server.AcceptAsync();
-        using var channel = await ClientWebSocketChannel.ConnectAsync(
+        using var channel = await WebSocketChannel.ConnectAsync(
             server.Endpoint,
             CancellationToken.None);
         using var session = await sessionTask;
@@ -90,7 +90,7 @@ public sealed class ClientWebSocketChannelTests
     {
         using var server = new MinimalRfc6455Server();
         var sessionTask = server.AcceptAsync();
-        using var channel = await ClientWebSocketChannel.ConnectAsync(
+        using var channel = await WebSocketChannel.ConnectAsync(
             server.Endpoint,
             CancellationToken.None);
         using var session = await sessionTask;
@@ -106,7 +106,7 @@ public sealed class ClientWebSocketChannelTests
     {
         using var server = new MinimalRfc6455Server();
         var sessionTask = server.AcceptAsync();
-        using var channel = await ClientWebSocketChannel.ConnectAsync(
+        using var channel = await WebSocketChannel.ConnectAsync(
             server.Endpoint,
             CancellationToken.None);
         using var session = await sessionTask;

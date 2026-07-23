@@ -17,6 +17,7 @@ namespace SignalRouter.Protocol.Transport
             Func<ExecuteInteractionMessage, InteractionSubmission> submit,
             Func<string, bool> tryCancel,
             Func<RegistrySnapshotDocument> captureSnapshot,
+            Action<WaitForMessage, Action<bool, long>> beginWait,
             string? authToken = null,
             Func<string>? messageIdSource = null)
         {
@@ -28,6 +29,7 @@ namespace SignalRouter.Protocol.Transport
             TryCancel = tryCancel ?? throw new ArgumentNullException(nameof(tryCancel));
             CaptureSnapshot = captureSnapshot
                 ?? throw new ArgumentNullException(nameof(captureSnapshot));
+            BeginWait = beginWait ?? throw new ArgumentNullException(nameof(beginWait));
             ProtocolContract.RequireOptionalIdentifier(authToken, nameof(authToken));
             AuthToken = authToken;
             MessageIdSource = messageIdSource ?? DefaultMessageId;
@@ -44,6 +46,11 @@ namespace SignalRouter.Protocol.Transport
         public Func<string, bool> TryCancel { get; }
 
         public Func<RegistrySnapshotDocument> CaptureSnapshot { get; }
+
+        // Registers a wait on the runtime's frame loop (main thread); the
+        // completion callback reports (satisfied, elapsedMs) exactly once, on
+        // the main thread, when the condition holds or the timeout passes.
+        public Action<WaitForMessage, Action<bool, long>> BeginWait { get; }
 
         public string? AuthToken { get; }
 
@@ -283,6 +290,19 @@ namespace SignalRouter.Protocol.Transport
                     return;
                 case GetRegistrySnapshotMessage snapshotRequest:
                     TryPost(() => HandleSnapshotRequest(snapshotRequest, cancellationToken));
+                    return;
+                case WaitForMessage waitFor:
+                    TryPost(() => options.BeginWait(
+                        waitFor,
+                        (satisfied, elapsedMs) => FireSend(
+                            new WaitResultMessage(
+                                options.MessageIdSource(),
+                                session!.SessionEpoch,
+                                waitFor.MessageId,
+                                waitFor.Condition,
+                                satisfied,
+                                elapsedMs),
+                            cancellationToken)));
                     return;
                 case PingMessage ping:
                     // The pong round-trips through the main-thread pump on

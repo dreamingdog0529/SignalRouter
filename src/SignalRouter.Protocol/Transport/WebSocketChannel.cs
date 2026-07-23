@@ -6,27 +6,30 @@ using System.Threading.Tasks;
 
 namespace SignalRouter.Protocol.Transport
 {
-    // IProtocolChannel over System.Net.WebSockets.ClientWebSocket — the Unity
-    // runtime's side of the loopback connection (design §18.1: the runtime is
-    // the client so it can reconnect after a domain reload). Receive reassembles
-    // fragments to EndOfMessage because ReceiveAsync guarantees no message
-    // boundary otherwise, and enforces the receive limit during reassembly so
-    // an oversized peer message aborts the socket instead of being buffered
-    // whole (design §19). Verified against Unity 6000.5 Mono by the PlayMode
-    // spike; the fallback, if a Unity upgrade breaks it, is a hand-rolled
-    // RFC 6455 client behind the same interface.
-    public sealed class ClientWebSocketChannel : IProtocolChannel
+    // IProtocolChannel over System.Net.WebSockets.WebSocket, used by both ends
+    // of the loopback connection (design §18.1): the Unity runtime wraps a
+    // ClientWebSocket via ConnectAsync (client side, so a domain reload can
+    // reconnect), and the MCP host wraps the socket its listener accepted.
+    // Receive reassembles fragments to EndOfMessage because ReceiveAsync
+    // guarantees no message boundary otherwise, and enforces the receive limit
+    // during reassembly so an oversized peer message aborts the socket instead
+    // of being buffered whole (design §19). Verified against Unity 6000.5 Mono
+    // by the PlayMode spike; the fallback, if a Unity upgrade breaks it, is a
+    // hand-rolled RFC 6455 client behind the same interface.
+    public sealed class WebSocketChannel : IProtocolChannel
     {
         private const int ReceiveBufferBytes = 16 * 1024;
 
-        private readonly ClientWebSocket socket;
+        private readonly WebSocket socket;
 
-        private ClientWebSocketChannel(ClientWebSocket socket)
+        // Wraps an already-open socket (an accepted server-side connection);
+        // the channel owns and disposes it.
+        public WebSocketChannel(WebSocket socket)
         {
-            this.socket = socket;
+            this.socket = socket ?? throw new ArgumentNullException(nameof(socket));
         }
 
-        public static async Task<ClientWebSocketChannel> ConnectAsync(
+        public static async Task<WebSocketChannel> ConnectAsync(
             Uri endpoint,
             CancellationToken cancellationToken)
         {
@@ -46,7 +49,7 @@ namespace SignalRouter.Protocol.Transport
                 throw;
             }
 
-            return new ClientWebSocketChannel(socket);
+            return new WebSocketChannel(socket);
         }
 
         public async ValueTask SendAsync(

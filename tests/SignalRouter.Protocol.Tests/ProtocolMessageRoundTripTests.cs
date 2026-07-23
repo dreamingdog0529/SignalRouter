@@ -259,6 +259,38 @@ public sealed class ProtocolMessageRoundTripTests
         Assert.That(snapshotRequest.SessionEpoch, Is.EqualTo(Epoch));
     }
 
+    [TestCase(ProtocolWaitConditions.Idle, null)]
+    [TestCase(ProtocolWaitConditions.TargetPresent, "target-1")]
+    [TestCase(ProtocolWaitConditions.TargetAbsent, "target-1")]
+    public void WaitForRoundTripsEveryCondition(string condition, string? targetId)
+    {
+        var waitFor = new WaitForMessage("m-13", Epoch, condition, targetId, 15_000);
+
+        var decoded = (WaitForMessage)RoundTrip(waitFor);
+
+        Assert.That(decoded.Condition, Is.EqualTo(condition));
+        Assert.That(decoded.TargetId, Is.EqualTo(targetId));
+        Assert.That(decoded.TimeoutMs, Is.EqualTo(15_000));
+    }
+
+    [Test]
+    public void WaitResultRoundTrips()
+    {
+        var waitResult = new WaitResultMessage(
+            "m-14",
+            Epoch,
+            "m-13",
+            ProtocolWaitConditions.Idle,
+            satisfied: false,
+            elapsedMs: 15_002);
+
+        var decoded = (WaitResultMessage)RoundTrip(waitResult);
+
+        Assert.That(decoded.InReplyTo, Is.EqualTo("m-13"));
+        Assert.That(decoded.Satisfied, Is.False);
+        Assert.That(decoded.ElapsedMs, Is.EqualTo(15_002));
+    }
+
     [Test]
     public void RegistrySnapshotRoundTripsWithByteExactSnapshot()
     {

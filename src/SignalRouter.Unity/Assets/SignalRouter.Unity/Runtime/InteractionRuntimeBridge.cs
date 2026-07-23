@@ -34,6 +34,7 @@ namespace SignalRouter.Unity
         private bool connectOnEnable = true;
 
         private readonly System.Random jitter = new();
+        private readonly System.Collections.Generic.List<Waiter> waiters = new();
         private InteractionRuntime? runtime;
         private ProtocolRequestLedger? ledger;
         private SemanticUiStateProbe? agentViewProbe;
@@ -134,16 +135,105 @@ namespace SignalRouter.Unity
             StopBridge();
         }
 
+        // Services pending wait_for conditions once per frame on the main
+        // thread (§17.2): the smallest polling scheme that never touches
+        // registry state off-thread and needs no timers.
+        private void Update()
+        {
+            if (waiters.Count == 0)
+            {
+                return;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            for (var index = waiters.Count - 1; index >= 0; index--)
+            {
+                var waiter = waiters[index];
+                if (EvaluateCondition(waiter.Request))
+                {
+                    waiters.RemoveAt(index);
+                    waiter.Complete(true, ElapsedMs(waiter, now));
+                }
+                else if (now >= waiter.Deadline)
+                {
+                    // A timeout is a normal answer, not an error (ADR 0007).
+                    waiters.RemoveAt(index);
+                    waiter.Complete(false, ElapsedMs(waiter, now));
+                }
+            }
+        }
+
+        private void BeginWait(WaitForMessage request, Action<bool, long> complete)
+        {
+            // The fast path answers within the same pump slot; everything else
+            // is frame-polled until the deadline.
+            if (EvaluateCondition(request))
+            {
+                complete(true, 0L);
+                return;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            waiters.Add(new Waiter(
+                request,
+                complete,
+                now,
+                now + (request.TimeoutMs / 1000f)));
+        }
+
+        private bool EvaluateCondition(WaitForMessage request)
+        {
+            switch (request.Condition)
+            {
+                case ProtocolWaitConditions.Idle:
+                    return runtime!.InFlightDispatches == 0;
+                case ProtocolWaitConditions.TargetPresent:
+                    // Waits see the agent view only (design §19): a hidden
+                    // target must not be probeable into disclosure.
+                    return runtime!.Registry.IsAgentVisible(request.TargetId!);
+                default:
+                    return !runtime!.Registry.IsAgentVisible(request.TargetId!);
+            }
+        }
+
+        private static long ElapsedMs(Waiter waiter, float now)
+        {
+            return (long)((now - waiter.StartedAt) * 1000f);
+        }
+
+        private readonly struct Waiter
+        {
+            public Waiter(
+                WaitForMessage request,
+                Action<bool, long> complete,
+                float startedAt,
+                float deadline)
+            {
+                Request = request;
+                Complete = complete;
+                StartedAt = startedAt;
+                Deadline = deadline;
+            }
+
+            public WaitForMessage Request { get; }
+
+            public Action<bool, long> Complete { get; }
+
+            public float StartedAt { get; }
+
+            public float Deadline { get; }
+        }
+
         private async Task RunConnectionLoopAsync(Uri endpoint, CancellationToken cancellationToken)
         {
             var policy = ProtocolReconnectPolicy.CreateDefault(NextRandomSample);
             var attempt = 0;
             while (!cancellationToken.IsCancellationRequested)
             {
-                ClientWebSocketChannel channel;
+                WebSocketChannel channel;
                 try
                 {
-                    channel = await ClientWebSocketChannel.ConnectAsync(endpoint, cancellationToken)
+                    channel = await WebSocketChannel.ConnectAsync(endpoint, cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
@@ -205,7 +295,8 @@ namespace SignalRouter.Unity
                 runtime!.Post,
                 SubmitFromWire,
                 requestId => runtime!.Dispatcher.TryCancel(requestId),
-                CaptureAgentSnapshot);
+                CaptureAgentSnapshot,
+                BeginWait);
         }
 
         // Runs on the main thread (the session posts). Raw arguments cross the
@@ -217,6 +308,40 @@ namespace SignalRouter.Unity
                 message.RequestId!,
                 InteractionOrigin.Agent,
                 message.CorrelationId);
+
+            // Agent visibility is enforced before dispatch (design §19): a
+            // hidden command or target answers exactly like an absent one, so
+            // the wire can neither execute nor disclose what agents were not
+            // shown.
+            if (!runtime!.Catalog.TryGet(
+                    message.CommandName,
+                    message.CommandVersion,
+                    out var catalogEntry)
+                || !catalogEntry!.AgentVisible)
+            {
+                return runtime.Dispatcher.SubmitRejection(
+                    options,
+                    message.TargetId,
+                    message.CommandName,
+                    message.CommandVersion,
+                    new RejectionInfo(
+                        InteractionRejectionCode.CommandNotRegistered,
+                        "Command '" + message.CommandName + "@" + message.CommandVersion
+                        + "' is not registered."));
+            }
+
+            if (!runtime.Registry.IsAgentVisible(message.TargetId))
+            {
+                return runtime.Dispatcher.SubmitRejection(
+                    options,
+                    message.TargetId,
+                    message.CommandName,
+                    message.CommandVersion,
+                    new RejectionInfo(
+                        InteractionRejectionCode.TargetNotFound,
+                        "Target '" + message.TargetId + "' is not registered."));
+            }
+
             DecodedInteractionCommand decoded;
             try
             {
