@@ -601,10 +601,13 @@ done on the current screen?"
 The registry maintains:
 
 - a monotonically increasing `Revision` when observable state changes;
-- a `SessionEpoch` that changes when the Unity runtime is recreated or reconnects.
+- a `SessionEpoch` that changes when the Unity runtime is recreated, including a domain
+  reload. A transport reconnect preserves the epoch: changing it per connection would
+  break the post-disconnect result recovery it exists to scope (ADR 0007).
 
 Clients MUST treat a changed session epoch as a new runtime session, even if revision
-numbers or target IDs overlap.
+numbers or target IDs overlap. Requests stranded by an epoch change are never
+re-executed automatically.
 
 IDs are not normalized and use ordinal comparison. Registration validates the descriptor
 ID, catalog identity, compatible argument schema, and typed pipeline before changing
@@ -1031,6 +1034,7 @@ The MVP is complete only when all of the following are demonstrated in automated
 | D16 | Property-level state diffs are provided by the probe (`IStatePropertyDiffProvider`); the semantic-ui diff enumerates matched-target scalar fields (ADR 0002), per-field `Added`/`Removed` changes for target additions/removals (ADR 0003), and nested `availableInteractions`/argument-schema changes — additions, removals, field changes, and membership-preserving reordering (ADR 0004) |
 | D17 | Recording schema v1 is strict JSON Lines with per-probe state hash maps, full stage arrays, application-code-only fault codes, deterministic catalog-floor secret keys, newline write-commit truncation recovery, and fail-fast recorder poisoning (ADR 0005) |
 | D18 | Strict replay runs under an exclusive dispatcher lease with sanitized hash-level divergence reports; stage progress is compared for faulted results only, pre-start cancellations replay via a synthetic cancelled token, and outcome-unknown entries, mid-execution cancellations, and requested continuations stop the replay (ADR 0006) |
+| D19 | Protocol envelope v1 is a single-object JSON envelope with strict major gating and lower-minor-wins negotiation, per-direction size limits, ignore-unknown-member forward compatibility, submitter-assigned request identity backed by a bounded fingerprinting ledger, epoch preservation across reconnects, hello-payload auth-token placement, and recording-projection-equivalent sanitized results in a wire-owned type (ADR 0007) |
 
 ## 25. Remaining implementation-level decisions
 
@@ -1040,7 +1044,8 @@ before their respective components are considered stable:
 - the MCP host target .NET version;
 - default artifact-root location;
 - state-snapshot size limits;
-- retention limits for idempotency and completed-result caches.
+- retention limits for idempotency and completed-result caches, including the protocol
+  request ledger's default capacity and retention window.
 
 Decisions that change public compatibility, failure semantics, persistent schemas, or the
 security boundary require an Architecture Decision Record and a corresponding test-plan
