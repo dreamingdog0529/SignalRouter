@@ -8,9 +8,12 @@
 > reports, the uGUI integration (interaction runtime, button/text-input adapters,
 > editor scene validator, BasicUi sample scene, and the PlayMode suite), and the
 > versioned runtime protocol contract (envelope model and codecs, handshake negotiation,
-> connection phase enforcement, and the bounded request ledger — ADR 0007) are
-> implemented and verified. The WebSocket transport and MCP behavior remain
-> unimplemented.
+> connection phase enforcement, and the bounded request ledger — ADR 0007), the Core
+> split-phase submission API with cancellation by external request ID, and the
+> WebSocket transport with the Unity runtime bridge (channel framing, reconnect loop,
+> and query-first result recovery, verified end-to-end over a live loopback socket in
+> PlayMode) are implemented and verified. The MCP host process and its tool surface
+> remain unimplemented.
 
 ## Prerequisites
 

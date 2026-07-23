@@ -112,6 +112,31 @@ optional caller-supplied `request_id` (identifier-validated; host-generated othe
 and every response shape — including timeout and error surfaces — carries the
 request ID back.
 
+### Transport and reconnect recovery (resolved, item 8b)
+
+The transport seam is `IProtocolChannel`: one send is one complete protocol message,
+one receive returns one complete message (the implementation reassembles WebSocket
+fragments to `EndOfMessage` and enforces the receive limit during reassembly, aborting
+past-limit instead of buffering). The runtime side runs
+`System.Net.WebSockets.ClientWebSocket`, validated under Unity Mono by a PlayMode
+spike; the recorded fallback is a hand-rolled RFC 6455 client behind the same seam.
+The Unity bridge owns a full-jitter exponential reconnect loop (250 ms doubling to a
+5 s cap, retrying indefinitely while enabled) and one ledger per runtime session
+epoch. Send failures deliberately drop the connection — the ledger makes recovery
+correct, so the send path stays simple.
+
+Recovery is query-first and window-bounded. The hello advertises the ledger retention
+as a **recovery window**: within it, an unavailable query answer proves the request
+was never received (an expired terminal would require the full retention to have
+elapsed), so a byte-exact resend is safe; outside it, the honest answer is
+`OutcomeUnknown`. `get_interaction_result` answers with the terminal
+`interaction_result`, a pending `interaction_status` (ledger state, admission
+sequence, and whether cancel intent arrived), or `error(result_unavailable)`.
+Cancellation is idempotent intent the host may re-send after reconnecting until it
+observes a terminal result. A Core admission failure (replay lease, disposed
+dispatcher) abandons the ledger reservation and answers `runtime_busy`, so an honest
+resend is admitted rather than treated as a duplicate.
+
 ### Session epoch
 
 §13.3 is corrected: the session epoch changes when the Unity runtime is recreated
@@ -191,11 +216,13 @@ property-level diffs) would be additive minor-version work.
   transport around decided contracts instead of deciding them mid-implementation.
 - **Negative.** Hosts must generate unique request IDs or see conflicts; resends must
   repeat bytes verbatim.
-- **Open items (item 8).** Transport framing and reconnect wiring (8b); `wait_for`
-  and recording messages with artifact handles (8c/8d). Resolved in 8a: the Core
-  split-phase submission API with `cancel_interaction` dispatch wiring, and the
-  default ledger capacity and retention (§25). Item 9: `authToken` validation,
-  timing-safe comparison, `unauthorized`, final limits.
+- **Open items (item 8).** `wait_for` and recording messages with artifact handles
+  (8c/8d). Resolved in 8a: the Core split-phase submission API with
+  `cancel_interaction` dispatch wiring, and the default ledger capacity and retention
+  (§25). Resolved in 8b: transport framing, the reconnect loop, and the query-first
+  recovery contract (recovery window, `interaction_status`, `runtime_busy`,
+  resendable cancel intent). Item 9: `authToken` validation, timing-safe comparison,
+  `unauthorized`, final limits.
 
 ## Implementation
 
