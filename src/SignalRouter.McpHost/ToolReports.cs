@@ -147,6 +147,43 @@ internal static class ToolReports
         });
     }
 
+    public static string FromOperationReport(HostOperationReport report)
+    {
+        return WriteObject(writer =>
+        {
+            writer.WriteString("status", report.Status);
+            if (report.OperationId.Length != 0)
+            {
+                writer.WriteString("operationId", report.OperationId);
+            }
+
+            if (report.RecordingHandle != null)
+            {
+                writer.WriteString("recordingHandle", report.RecordingHandle);
+            }
+
+            if (report.EntryCount != null)
+            {
+                writer.WriteNumber("entryCount", report.EntryCount.Value);
+            }
+
+            if (report.OutcomeKind != null)
+            {
+                writer.WriteString("outcomeKind", report.OutcomeKind);
+            }
+
+            if (report.NewSessionEpoch != null)
+            {
+                writer.WriteString("newSessionEpoch", report.NewSessionEpoch);
+            }
+
+            if (report.Detail != null)
+            {
+                writer.WriteString("detail", report.Detail);
+            }
+        });
+    }
+
     public static string Disconnected()
     {
         return WriteObject(writer =>

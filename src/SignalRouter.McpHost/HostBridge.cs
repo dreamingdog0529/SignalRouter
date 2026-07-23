@@ -98,6 +98,70 @@ public sealed class HostExecuteReport
         => new("disconnected", requestId, null, null, "No runtime session has connected yet.");
 }
 
+// How a recording or replay control operation ultimately answered.
+public sealed class HostOperationReport
+{
+    private HostOperationReport(
+        string status,
+        string operationId,
+        string? recordingHandle,
+        long? entryCount,
+        string? newSessionEpoch,
+        string? outcomeKind,
+        string? detail)
+    {
+        Status = status;
+        OperationId = operationId;
+        RecordingHandle = recordingHandle;
+        EntryCount = entryCount;
+        NewSessionEpoch = newSessionEpoch;
+        OutcomeKind = outcomeKind;
+        Detail = detail;
+    }
+
+    // "recording_started" | "recording_stopped" | "replayed" | "pending" |
+    // "disconnected"
+    public string Status { get; }
+
+    public string OperationId { get; }
+
+    public string? RecordingHandle { get; }
+
+    public long? EntryCount { get; }
+
+    public string? NewSessionEpoch { get; }
+
+    public string? OutcomeKind { get; }
+
+    public string? Detail { get; }
+
+    public static HostOperationReport RecordingStarted(
+        string operationId,
+        string handle,
+        string newEpoch)
+        => new("recording_started", operationId, handle, null, newEpoch, null, null);
+
+    public static HostOperationReport RecordingStopped(
+        string operationId,
+        string handle,
+        long entryCount,
+        string newEpoch)
+        => new("recording_stopped", operationId, handle, entryCount, newEpoch, null, null);
+
+    public static HostOperationReport Replayed(
+        string operationId,
+        string outcomeKind,
+        string newEpoch,
+        string? detail)
+        => new("replayed", operationId, null, null, newEpoch, outcomeKind, detail);
+
+    public static HostOperationReport Pending(string operationId)
+        => new("pending", operationId, null, null, null, null, null);
+
+    public static HostOperationReport Disconnected()
+        => new("disconnected", string.Empty, null, null, null, null, null);
+}
+
 // The host side of the loopback protocol (design §18.1): accepts exactly one
 // runtime connection at a time, drives the Host-role state machine, correlates
 // replies by message ID, and owns the query-first recovery flow — after a
@@ -114,6 +178,14 @@ public sealed class HostBridge : IDisposable
     private readonly ProtocolPeerOptions peerOptions;
     private readonly Dictionary<string, PendingExecute> pendingExecutes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TaskCompletionSource<ProtocolMessage>> pendingReplies =
+        new(StringComparer.Ordinal);
+
+    // Recording and replay operations, keyed by their host-assigned operation
+    // ID. Unlike executes and replies, these deliberately SURVIVE an epoch
+    // transition: the operation itself causes the epoch change, and its
+    // acknowledgment arrives on the reconnected session under the new epoch
+    // (item 8d).
+    private readonly Dictionary<string, PendingOperation> pendingOperations =
         new(StringComparer.Ordinal);
 
     // `active` claims the single-runtime slot at accept time; `ready` is the
@@ -412,6 +484,45 @@ public sealed class HostBridge : IDisposable
         return true;
     }
 
+    // Begins recording a fresh session. The runtime recreates itself under a
+    // new epoch and answers via recording_started on the reconnected session,
+    // correlated by operationId across the epoch change.
+    public Task<HostOperationReport> StartRecordingAsync(
+        string? label,
+        CancellationToken cancellationToken)
+    {
+        return RunControlOperationAsync(
+            operationId => new StartRecordingMessage(
+                options.MessageIdSource(),
+                RequireEpoch(),
+                operationId,
+                label),
+            cancellationToken);
+    }
+
+    public Task<HostOperationReport> StopRecordingAsync(CancellationToken cancellationToken)
+    {
+        return RunControlOperationAsync(
+            operationId => new StopRecordingMessage(
+                options.MessageIdSource(),
+                RequireEpoch(),
+                operationId),
+            cancellationToken);
+    }
+
+    public Task<HostOperationReport> ReplayRecordingAsync(
+        string recordingHandle,
+        CancellationToken cancellationToken)
+    {
+        return RunControlOperationAsync(
+            operationId => new ReplayRecordingMessage(
+                options.MessageIdSource(),
+                RequireEpoch(),
+                operationId,
+                recordingHandle),
+            cancellationToken);
+    }
+
     public void Dispose()
     {
         lock (gate)
@@ -423,6 +534,54 @@ public sealed class HostBridge : IDisposable
 
             disposed = true;
         }
+    }
+
+    private async Task<HostOperationReport> RunControlOperationAsync(
+        Func<string, ProtocolMessage> build,
+        CancellationToken cancellationToken)
+    {
+        var operationId = options.MessageIdSource() + "-op";
+        PendingOperation pending;
+        ActiveConnection? connection;
+        ProtocolMessage message;
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (sessionEpoch == null || ready == null)
+            {
+                return HostOperationReport.Disconnected();
+            }
+
+            message = build(operationId);
+            pending = new PendingOperation(operationId);
+            pendingOperations.Add(operationId, pending);
+            connection = ready;
+        }
+
+        await TrySendAsync(connection, message, cancellationToken).ConfigureAwait(false);
+
+        // Control operations span a runtime recreation and reconnect, so they
+        // get the tool timeout rather than the shorter reply budget.
+        var completed = await Task.WhenAny(
+            pending.Completion.Task,
+            Task.Delay(options.ToolTimeout, cancellationToken)).ConfigureAwait(false);
+        if (!ReferenceEquals(completed, pending.Completion.Task))
+        {
+            lock (gate)
+            {
+                pendingOperations.Remove(operationId);
+            }
+
+            return HostOperationReport.Pending(operationId);
+        }
+
+        return await pending.Completion.Task.ConfigureAwait(false);
+    }
+
+    private string RequireEpoch()
+    {
+        return sessionEpoch
+            ?? throw new InvalidOperationException("No runtime session is connected.");
     }
 
     private async Task<bool> PerformHandshakeAsync(
@@ -669,6 +828,32 @@ public sealed class HostBridge : IDisposable
             case WaitResultMessage _:
                 CompleteReply(message);
                 return;
+            case RecordingStartedMessage started:
+                CompleteOperation(
+                    started.OperationId,
+                    HostOperationReport.RecordingStarted(
+                        started.OperationId,
+                        started.RecordingHandle,
+                        started.NewSessionEpoch));
+                return;
+            case RecordingStoppedMessage stopped:
+                CompleteOperation(
+                    stopped.OperationId,
+                    HostOperationReport.RecordingStopped(
+                        stopped.OperationId,
+                        stopped.RecordingHandle,
+                        stopped.EntryCount,
+                        stopped.NewSessionEpoch));
+                return;
+            case ReplayReportMessage replay:
+                CompleteOperation(
+                    replay.OperationId,
+                    HostOperationReport.Replayed(
+                        replay.OperationId,
+                        replay.OutcomeKind,
+                        replay.NewSessionEpoch,
+                        replay.Detail));
+                return;
             case ErrorMessage error:
                 await HandleErrorAsync(connection, error, cancellationToken).ConfigureAwait(false);
                 return;
@@ -699,6 +884,20 @@ public sealed class HostBridge : IDisposable
 
         pending?.Completion.TrySetResult(
             HostExecuteReport.Completed(result.RequestId!, result.Result));
+    }
+
+    private void CompleteOperation(string operationId, HostOperationReport report)
+    {
+        PendingOperation? pending;
+        lock (gate)
+        {
+            if (pendingOperations.TryGetValue(operationId, out pending))
+            {
+                pendingOperations.Remove(operationId);
+            }
+        }
+
+        pending?.Completion.TrySetResult(report);
     }
 
     private void CompleteReply(ProtocolMessage message)
@@ -970,6 +1169,20 @@ public sealed class HostBridge : IDisposable
         {
             FirstSentAt ??= time;
         }
+    }
+
+    private sealed class PendingOperation
+    {
+        public PendingOperation(string operationId)
+        {
+            OperationId = operationId;
+            Completion = new TaskCompletionSource<HostOperationReport>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public string OperationId { get; }
+
+        public TaskCompletionSource<HostOperationReport> Completion { get; }
     }
 
     private sealed class ActiveConnection

@@ -117,4 +117,44 @@ public sealed class SignalRouterTools
             .ConfigureAwait(false);
         return ToolReports.FromWaitResult(condition, result);
     }
+
+    [McpServerTool(Name = "start_recording")]
+    [Description(
+        "Starts recording interactions into a new session. Returns the recording "
+        + "handle and the new session epoch; the runtime is recreated, so any "
+        + "in-flight interaction ends as outcome_unknown.")]
+    public async Task<string> StartRecording(
+        [Description("Optional human label stored with the recording for bookkeeping.")]
+        string? label = null,
+        CancellationToken cancellationToken = default)
+    {
+        var report = await bridge.StartRecordingAsync(label, cancellationToken)
+            .ConfigureAwait(false);
+        return ToolReports.FromOperationReport(report);
+    }
+
+    [McpServerTool(Name = "stop_recording")]
+    [Description(
+        "Stops the active recording and returns its handle and captured entry "
+        + "count. The runtime is recreated into a fresh non-recording session.")]
+    public async Task<string> StopRecording(CancellationToken cancellationToken = default)
+    {
+        var report = await bridge.StopRecordingAsync(cancellationToken).ConfigureAwait(false);
+        return ToolReports.FromOperationReport(report);
+    }
+
+    [McpServerTool(Name = "replay_recording")]
+    [Description(
+        "Replays a stored recording by handle and returns the sanitized strict-"
+        + "replay outcome (completed, diverged, or stopped). The runtime is left "
+        + "in a fresh live session afterward.")]
+    public async Task<string> ReplayRecording(
+        [Description("The recording handle from start_recording / stop_recording.")]
+        string recordingHandle,
+        CancellationToken cancellationToken = default)
+    {
+        var report = await bridge.ReplayRecordingAsync(recordingHandle, cancellationToken)
+            .ConfigureAwait(false);
+        return ToolReports.FromOperationReport(report);
+    }
 }
