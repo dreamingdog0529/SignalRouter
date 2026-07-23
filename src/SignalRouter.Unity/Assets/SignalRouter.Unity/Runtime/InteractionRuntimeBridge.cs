@@ -228,10 +228,10 @@ namespace SignalRouter.Unity
             var attempt = 0;
             while (!cancellationToken.IsCancellationRequested)
             {
-                ClientWebSocketChannel channel;
+                WebSocketChannel channel;
                 try
                 {
-                    channel = await ClientWebSocketChannel.ConnectAsync(endpoint, cancellationToken)
+                    channel = await WebSocketChannel.ConnectAsync(endpoint, cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
