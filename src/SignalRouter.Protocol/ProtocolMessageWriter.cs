@@ -73,6 +73,9 @@ namespace SignalRouter.Protocol
                         hello.PeerVersion,
                         hello.Capabilities,
                         hello.MaxReceiveMessageBytes);
+                    writer.WriteNumber(
+                        ProtocolSchema.RecoveryWindowMsProperty,
+                        hello.RecoveryWindowMs);
                     if (hello.AuthToken != null)
                     {
                         writer.WriteString(ProtocolSchema.AuthTokenProperty, hello.AuthToken);
@@ -122,6 +125,21 @@ namespace SignalRouter.Protocol
                     return;
                 case InteractionAcceptedMessage accepted:
                     writer.WriteNumber(ProtocolSchema.SequenceProperty, accepted.Sequence);
+                    return;
+                case InteractionStatusMessage status:
+                    writer.WriteString(
+                        ProtocolSchema.StateProperty,
+                        status.State.ToString());
+                    if (status.Sequence != null)
+                    {
+                        writer.WriteNumber(
+                            ProtocolSchema.SequenceProperty,
+                            status.Sequence.Value);
+                    }
+
+                    writer.WriteBoolean(
+                        ProtocolSchema.CancelRequestedProperty,
+                        status.CancelRequested);
                     return;
                 case InteractionResultMessage result:
                     writer.WritePropertyName(ProtocolSchema.ResultProperty);

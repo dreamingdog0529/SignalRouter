@@ -252,6 +252,7 @@ namespace SignalRouter.Protocol
                     return Role == ProtocolConnectionRole.Runtime;
                 case InteractionAcceptedMessage _:
                 case InteractionResultMessage _:
+                case InteractionStatusMessage _:
                 case RegistrySnapshotMessage _:
                     return Role == ProtocolConnectionRole.Host;
                 default:

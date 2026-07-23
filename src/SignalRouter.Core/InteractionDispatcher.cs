@@ -390,6 +390,44 @@ namespace SignalRouter
             }
         }
 
+        // Mints a terminal Rejected submission for a request that failed before
+        // it could become a typed command — a wire decode failure. The
+        // transport still owes the host a terminal result under the
+        // caller-owned identity (design §18.2), and only the dispatcher can
+        // mint the sequence that identity carries. Never queued, never
+        // recorded, mirroring the catalog-miss path of Submit.
+        public InteractionSubmission SubmitRejection(
+            InteractionSubmissionOptions options,
+            string targetId,
+            string commandName,
+            int commandVersion,
+            RejectionInfo rejection)
+        {
+            InteractionContract.RequireIdentifier(options.RequestId, nameof(options));
+            InteractionContract.RequireTargetId(targetId, nameof(targetId));
+            InteractionContract.RequireIdentifier(commandName, nameof(commandName));
+            if (commandVersion < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(commandVersion),
+                    commandVersion,
+                    "Command version must be positive.");
+            }
+
+            if (rejection == null)
+            {
+                throw new ArgumentNullException(nameof(rejection));
+            }
+
+            return CompletedSubmission(Rejected(
+                AssignIdentity(chainQueue: false, out _, null, options.RequestId),
+                targetId,
+                commandName,
+                commandVersion,
+                options.Origin,
+                rejection));
+        }
+
         // Requests cancellation of an in-flight submission. A true return means
         // the cancellation request was accepted — not that the outcome will be
         // Cancelled: a stage may reach its terminal state before observing the

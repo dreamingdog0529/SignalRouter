@@ -146,6 +146,29 @@ public sealed class ProtocolHandshakeTests
     }
 
     [Test]
+    public void TheRecoveryWindowPropagatesToBothSessionSides()
+    {
+        var hello = new HelloMessage(
+            "hello-1",
+            Epoch,
+            "SignalRouter.Unity 0.1.0",
+            Array.Empty<string>(),
+            ProtocolLimits.DefaultMaxReceiveMessageBytes,
+            null,
+            recoveryWindowMs: 120_000);
+
+        var hostSide = ProtocolHandshake.EvaluateHello(CreateOptions(), hello);
+        var runtimeSide = ProtocolHandshake.EvaluateWelcome(hello, CreateWelcome(hello));
+
+        Assert.That(
+            hostSide.Session!.RecoveryWindow,
+            Is.EqualTo(TimeSpan.FromMilliseconds(120_000)));
+        Assert.That(
+            runtimeSide.Session!.RecoveryWindow,
+            Is.EqualTo(TimeSpan.FromMilliseconds(120_000)));
+    }
+
+    [Test]
     public void EvaluationIsPure()
     {
         var local = CreateOptions();
@@ -183,7 +206,7 @@ public sealed class ProtocolHandshakeTests
             capabilities ?? Array.Empty<string>(),
             maxReceiveMessageBytes,
             null,
-            protocol);
+            protocol: protocol);
     }
 
     internal static WelcomeMessage CreateWelcome(

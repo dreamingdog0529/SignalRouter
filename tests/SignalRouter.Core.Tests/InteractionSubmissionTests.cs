@@ -336,6 +336,53 @@ public sealed class InteractionSubmissionTests
     }
 
     [Test]
+    public async Task WireDecodeFailuresBecomeTerminalRejectionsUnderTheCallerIdentity()
+    {
+        using var runtime = new SubmissionRuntime();
+
+        var submission = runtime.Dispatcher.SubmitRejection(
+            new InteractionSubmissionOptions("req-1", InteractionOrigin.Agent),
+            "target-1",
+            "click",
+            1,
+            new RejectionInfo(
+                InteractionRejectionCode.InvalidArguments,
+                "The arguments are invalid."));
+
+        Assert.That(submission.Kind, Is.EqualTo(InteractionAdmissionKind.Completed));
+        Assert.That(submission.RequestId, Is.EqualTo("req-1"));
+        Assert.That(await submission.Started, Is.False);
+        var result = await submission.Completion;
+        Assert.That(result.Status, Is.EqualTo(InteractionStatus.Rejected));
+        Assert.That(
+            result.Rejection!.Code,
+            Is.EqualTo(InteractionRejectionCode.InvalidArguments));
+        Assert.That(result.RequestId, Is.EqualTo("req-1"));
+    }
+
+    [Test]
+    public async Task SubmitRejectionCannotAliasALiveRequestId()
+    {
+        using var runtime = new SubmissionRuntime();
+        runtime.RegisterBlockingClick("menu.start");
+        var pending = runtime.Dispatcher.Submit(
+            new ClickCommand("menu.start"),
+            new InteractionSubmissionOptions("req-1", InteractionOrigin.Agent));
+
+        NUnitCompat.Throws<InvalidOperationException>(() => runtime.Dispatcher.SubmitRejection(
+            new InteractionSubmissionOptions("req-1", InteractionOrigin.Agent),
+            "target-1",
+            "click",
+            1,
+            new RejectionInfo(
+                InteractionRejectionCode.InvalidArguments,
+                "The arguments are invalid.")));
+
+        runtime.ReleaseBlockedStage();
+        await pending.Completion;
+    }
+
+    [Test]
     public async Task DecodedCommandsSubmitThroughTheSameSplitPhasePath()
     {
         using var runtime = new SubmissionRuntime();

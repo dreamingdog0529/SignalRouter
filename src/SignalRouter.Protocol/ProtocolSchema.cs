@@ -19,6 +19,8 @@ namespace SignalRouter.Protocol
         public const string CapabilitiesProperty = "capabilities";
         public const string MaxReceiveMessageBytesProperty = "maxReceiveMessageBytes";
         public const string AuthTokenProperty = "authToken";
+        public const string RecoveryWindowMsProperty = "recoveryWindowMs";
+        public const string CancelRequestedProperty = "cancelRequested";
 
         public const string CodeProperty = "code";
         public const string MessageProperty = "message";
@@ -58,6 +60,7 @@ namespace SignalRouter.Protocol
         public const string InteractionAccepted = "interaction_accepted";
         public const string InteractionResult = "interaction_result";
         public const string GetInteractionResult = "get_interaction_result";
+        public const string InteractionStatus = "interaction_status";
         public const string CancelInteraction = "cancel_interaction";
         public const string GetRegistrySnapshot = "get_registry_snapshot";
         public const string RegistrySnapshot = "registry_snapshot";
@@ -78,6 +81,7 @@ namespace SignalRouter.Protocol
         public const string RequestIdConflict = "request_id_conflict";
         public const string ResultUnavailable = "result_unavailable";
         public const string CapacityExhausted = "capacity_exhausted";
+        public const string RuntimeBusy = "runtime_busy";
     }
 
     // Pre-item-9 defaults; the security pass (design §19, §25) finalizes the
@@ -107,10 +111,16 @@ namespace SignalRouter.Protocol
         // pathological retry bursts of near-serial agent traffic at ~1-4 KB per
         // entry, and retention must exceed a client timeout plus reconnect
         // backoff plus a human-in-the-loop retry window with generous margin.
+        // The retention doubles as the recovery window the hello advertises:
+        // within it, an unavailable query result proves the request was never
+        // received (an expired terminal would require the full retention to
+        // have elapsed), which is what makes a byte-exact resend safe.
         public const int DefaultLedgerCapacity = 256;
 
+        public const int DefaultRecoveryWindowMs = 10 * 60 * 1000;
+
         public static readonly System.TimeSpan DefaultLedgerRetention =
-            System.TimeSpan.FromMinutes(10);
+            System.TimeSpan.FromMilliseconds(DefaultRecoveryWindowMs);
 
         // Command arguments sit under envelope → payload → command, three
         // containers deep, so their own nesting may use the remaining budget.
