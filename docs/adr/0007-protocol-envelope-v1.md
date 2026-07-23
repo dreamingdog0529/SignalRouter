@@ -81,9 +81,36 @@ execution). Bounded capacity and unlimited exactly-once cannot coexist, so the
 guarantee is explicit: pending entries are never evicted, terminal results survive
 until their deadline, and a full ledger answers `capacity_exhausted` instead of
 forgetting old work. An expired or unknown query answers `result_unavailable`, which
-the host must surface as `OutcomeUnknown` (§8), never as an invented outcome. The
-dispatcher's split-phase submission API backing this (external ID acceptance) is
-item 8 Core work.
+the host must surface as `OutcomeUnknown` (§8), never as an invented outcome.
+
+### Split-phase submission (resolved, item 8a)
+
+The Core API backing host-owned identity is `InteractionDispatcher.Submit`: identity,
+sequence, and FIFO position are fixed synchronously under the enqueue lock — the
+duplicate-live-ID check, sequence reservation, queue chaining, and cancellation
+registration are one linearization point — and the caller receives them alongside two
+signals. `Started` resolves true at the moment execution genuinely begins (the
+Queued → Running transition the ledger tracks) and false when the request terminates
+without starting; `Completion` carries the terminal result.
+`InteractionAdmissionKind.Completed` marks requests that never entered the FIFO
+(immediate rejections), for which no `interaction_accepted` applies. `TryCancel`
+accepts a cancellation request without guaranteeing a `Cancelled` outcome — the
+terminal status stays authoritative — and answers false for unknown or terminal IDs.
+
+Deduplication authority is deliberately split: the protocol ledger is the single
+transport-level authority (the wire `idempotencyKey` feeds its fingerprint), so
+submissions carry no idempotency key and Core fails fast on concurrent duplicate IDs
+instead of deduplicating. A ledger reservation whose Core admission throws (replay
+lease, disposed dispatcher) is discarded via `Abandon` — the only state that may be
+forgotten, because nothing was queued and no acceptance was sent; the transport maps
+the thrown rejection to a transport-plane error. The ledger defaults resolve §25:
+capacity 256, terminal retention 10 minutes.
+
+Consequence for the MCP tool surface (item 8c): a caller-side timeout is only
+recoverable if the MCP caller knows the request ID, so `execute_interaction` accepts an
+optional caller-supplied `request_id` (identifier-validated; host-generated otherwise)
+and every response shape — including timeout and error surfaces — carries the
+request ID back.
 
 ### Session epoch
 
@@ -162,13 +189,13 @@ property-level diffs) would be additive minor-version work.
 - **Positive.** Every protocol behavior — negotiation, phase enforcement, duplicate
   and conflict handling, retention — is pure and tested without sockets; item 8 wires
   transport around decided contracts instead of deciding them mid-implementation.
-- **Negative.** The Core dispatcher needs a split-phase submission API before the
-  runtime bridge can honor host-assigned IDs; hosts must generate unique request IDs
-  or see conflicts; resends must repeat bytes verbatim.
-- **Open items (item 8).** Transport framing and reconnect wiring; the Core submission
-  API and `cancel_interaction` dispatch wiring; `wait_for` and recording messages with
-  artifact handles; default ledger capacity and retention (§25). Item 9: `authToken`
-  validation, timing-safe comparison, `unauthorized`, final limits.
+- **Negative.** Hosts must generate unique request IDs or see conflicts; resends must
+  repeat bytes verbatim.
+- **Open items (item 8).** Transport framing and reconnect wiring (8b); `wait_for`
+  and recording messages with artifact handles (8c/8d). Resolved in 8a: the Core
+  split-phase submission API with `cancel_interaction` dispatch wiring, and the
+  default ledger capacity and retention (§25). Item 9: `authToken` validation,
+  timing-safe comparison, `unauthorized`, final limits.
 
 ## Implementation
 
@@ -182,6 +209,8 @@ property-level diffs) would be additive minor-version work.
   rejection and identifier-validated error references.
 - `ProtocolConnectionStateMachine.cs` — phase, role-direction, and epoch enforcement.
 - `ProtocolRequestLedger.cs` — bounded submission tracking with fingerprint
-  deduplication and retention.
+  deduplication, retention, and unadmitted-reservation abandonment.
+- `InteractionSubmission.cs` / `InteractionDispatcher.Submit` / `TryCancel` — the
+  split-phase Core submission API (item 8a).
 - Unity `ProtocolGoldenVectorTests.cs` — byte-exact golden-vector parity against the
   bundled System.Text.Json 8.0.

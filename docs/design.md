@@ -1044,8 +1044,9 @@ before their respective components are considered stable:
 - the MCP host target .NET version;
 - default artifact-root location;
 - state-snapshot size limits;
-- retention limits for idempotency and completed-result caches, including the protocol
-  request ledger's default capacity and retention window.
+- retention limits for idempotency and completed-result caches (the protocol request
+  ledger's defaults are resolved: capacity 256, terminal retention 10 minutes —
+  ADR 0007).
 
 Decisions that change public compatibility, failure semantics, persistent schemas, or the
 security boundary require an Architecture Decision Record and a corresponding test-plan
