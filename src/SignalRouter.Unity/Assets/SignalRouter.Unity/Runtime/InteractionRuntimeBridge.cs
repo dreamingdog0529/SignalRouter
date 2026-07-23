@@ -152,13 +152,13 @@ namespace SignalRouter.Unity
                 if (EvaluateCondition(waiter.Request))
                 {
                     waiters.RemoveAt(index);
-                    waiter.Complete(satisfied: true, ElapsedMs(waiter, now));
+                    waiter.Complete(true, ElapsedMs(waiter, now));
                 }
                 else if (now >= waiter.Deadline)
                 {
                     // A timeout is a normal answer, not an error (ADR 0007).
                     waiters.RemoveAt(index);
-                    waiter.Complete(satisfied: false, ElapsedMs(waiter, now));
+                    waiter.Complete(false, ElapsedMs(waiter, now));
                 }
             }
         }
