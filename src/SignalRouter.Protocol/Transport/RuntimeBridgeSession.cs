@@ -118,7 +118,11 @@ namespace SignalRouter.Protocol.Transport
 
         // Drives the connection to completion: handshake, then the receive
         // loop until the channel closes, the peer misbehaves fatally, or the
-        // caller cancels. Always closes the channel on the way out.
+        // caller cancels. Completes normally in every one of those cases —
+        // session-local teardown (a failed send, a rejected post) must look
+        // identical to a peer disconnect so the owning reconnect loop simply
+        // retries. Always closes the channel on the way out, with a bounded
+        // close so a peer that ignores the handshake cannot wedge the loop.
         public async Task RunAsync()
         {
             var cancellationToken = loopCancellation.Token;
@@ -131,12 +135,18 @@ namespace SignalRouter.Protocol.Transport
 
                 await ReceiveLoopAsync(cancellationToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException)
+            {
+                // Cancellation — external or session-local — is a normal way
+                // for a connection to end, never an error of RunAsync itself.
+            }
             finally
             {
                 machine.Close();
+                using var closeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 try
                 {
-                    await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+                    await channel.CloseAsync(closeTimeout.Token).ConfigureAwait(false);
                 }
                 catch (Exception)
                 {
@@ -259,34 +269,53 @@ namespace SignalRouter.Protocol.Transport
             switch (message)
             {
                 case ExecuteInteractionMessage execute:
-                    options.PostToMainThread(() => HandleExecute(execute, cancellationToken));
+                    TryPost(() => HandleExecute(execute, cancellationToken));
                     return;
                 case GetInteractionResultMessage query:
-                    options.PostToMainThread(() => HandleQuery(query, cancellationToken));
+                    TryPost(() => HandleQuery(query, cancellationToken));
                     return;
                 case CancelInteractionMessage cancel:
-                    options.PostToMainThread(() =>
+                    TryPost(() =>
                     {
                         options.Ledger.TryMarkCancelRequested(cancel.RequestId!);
                         options.TryCancel(cancel.RequestId!);
                     });
                     return;
                 case GetRegistrySnapshotMessage snapshotRequest:
-                    options.PostToMainThread(
-                        () => HandleSnapshotRequest(snapshotRequest, cancellationToken));
+                    TryPost(() => HandleSnapshotRequest(snapshotRequest, cancellationToken));
                     return;
                 case PingMessage ping:
-                    FireSend(
+                    // The pong round-trips through the main-thread pump on
+                    // purpose: a protocol-level ping proves the runtime can
+                    // still service work, not merely that the socket loop is
+                    // alive (§17.2).
+                    TryPost(() => FireSend(
                         new PongMessage(
                             options.MessageIdSource(),
                             ping.MessageId,
                             session!.SessionEpoch),
-                        cancellationToken);
+                        cancellationToken));
                     return;
                 default:
                     // Pong and error carry no runtime action in v1; the state
                     // machine already filtered everything else.
                     return;
+            }
+        }
+
+        // A rejected post means the runtime is shutting down: this connection
+        // cannot service work anymore, so it ends — quietly, like any other
+        // disconnect — instead of letting the rejection escape as an unhandled
+        // exception.
+        private void TryPost(Action work)
+        {
+            try
+            {
+                options.PostToMainThread(work);
+            }
+            catch (Exception)
+            {
+                loopCancellation.Cancel();
             }
         }
 
@@ -390,7 +419,7 @@ namespace SignalRouter.Protocol.Transport
 
             if (ran)
             {
-                options.PostToMainThread(() =>
+                TryPost(() =>
                 {
                     // The completion continuation may have already marked the
                     // entry terminal on this same pump; states only move
@@ -425,7 +454,7 @@ namespace SignalRouter.Protocol.Transport
             }
 
             var outcome = ProtocolInteractionOutcome.FromResult(result);
-            options.PostToMainThread(() =>
+            TryPost(() =>
             {
                 options.Ledger.MarkTerminal(requestId, outcome);
                 FireSend(
@@ -557,12 +586,45 @@ namespace SignalRouter.Protocol.Transport
             ProtocolMessage message,
             CancellationToken cancellationToken)
         {
+            // An encode overflow is a deterministic size verdict, not a broken
+            // connection: dropping the socket would make every reconnect and
+            // query repeat the same failure. The peer gets payload_too_large
+            // with the same correlation instead (design §19). Errors are
+            // always small; if even the error overflows something is deeply
+            // wrong and the connection drops.
+            byte[] encoded;
             try
             {
-                await SendAsync(
-                    message,
-                    session!.MaxSendMessageBytes,
-                    cancellationToken).ConfigureAwait(false);
+                encoded = ProtocolMessageWriter.Encode(message, session!.MaxSendMessageBytes);
+            }
+            catch (InvalidOperationException) when (!(message is ErrorMessage))
+            {
+                message = new ErrorMessage(
+                    options.MessageIdSource(),
+                    ProtocolErrorCodes.PayloadTooLarge,
+                    "The reply exceeds the peer's advertised receive limit.",
+                    session!.SessionEpoch,
+                    message.RequestId,
+                    message.InReplyTo);
+                try
+                {
+                    encoded = ProtocolMessageWriter.Encode(message, session.MaxSendMessageBytes);
+                }
+                catch (InvalidOperationException)
+                {
+                    loopCancellation.Cancel();
+                    return;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                loopCancellation.Cancel();
+                return;
+            }
+
+            try
+            {
+                await SendEncodedAsync(encoded, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception)
             {
@@ -576,6 +638,13 @@ namespace SignalRouter.Protocol.Transport
             CancellationToken cancellationToken)
         {
             var encoded = ProtocolMessageWriter.Encode(message, maxMessageBytes);
+            await SendEncodedAsync(encoded, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task SendEncodedAsync(
+            byte[] encoded,
+            CancellationToken cancellationToken)
+        {
             await sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {

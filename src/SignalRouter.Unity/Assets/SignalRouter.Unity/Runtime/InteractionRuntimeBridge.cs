@@ -167,13 +167,19 @@ namespace SignalRouter.Unity
                         channel,
                         CreateSessionOptions(),
                         cancellationToken);
+
+                    // RunAsync completes normally for every way a connection
+                    // ends, including session-local teardown after a failed
+                    // send — only this loop's own token decides whether the
+                    // bridge stops reconnecting. The catch is defensive: a
+                    // session bug must surface as a retry, not as a silently
+                    // dead bridge.
                     try
                     {
                         await session.RunAsync().ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException)
+                    catch (Exception)
                     {
-                        return;
                     }
 
                     // A completed handshake proves the endpoint is healthy;

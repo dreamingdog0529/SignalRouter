@@ -206,6 +206,55 @@ public sealed class RuntimeBridgeSessionTests
         Assert.That(pong.InReplyTo, Is.EqualTo("m-ping"));
     }
 
+    [Test]
+    public async Task ASendFailureEndsTheSessionNormallySoTheOwnerCanReconnect()
+    {
+        using var harness = new SessionHarness();
+        await harness.CompleteHandshakeAsync();
+
+        harness.FailSends = true;
+        harness.HostDeliver(harness.CreateExecute("r-1", "m-exec"));
+
+        // RunAsync must complete without throwing — session-local teardown has
+        // to look exactly like a peer disconnect to the reconnect loop.
+        await harness.WaitForRunCompletionAsync();
+    }
+
+    [Test]
+    public async Task ARejectedMainThreadPostEndsTheSessionQuietly()
+    {
+        using var harness = new SessionHarness(postThrows: true);
+        await harness.CompleteHandshakeAsync();
+
+        harness.HostDeliver(harness.CreateExecute("r-1", "m-exec"));
+
+        await harness.WaitForRunCompletionAsync();
+    }
+
+    [Test]
+    public async Task AnOversizedReplyAnswersPayloadTooLargeInsteadOfDroppingTheConnection()
+    {
+        var hugeSnapshot = "{\"blob\":\"" + new string('x', 80 * 1024) + "\"}";
+        using var harness = new SessionHarness(snapshotJson: hugeSnapshot);
+        await harness.CompleteHandshakeAsync(
+            hostReceiveLimit: ProtocolLimits.BootstrapMaxMessageBytes);
+
+        harness.HostDeliver(ProtocolMessageWriter.Encode(
+            new GetRegistrySnapshotMessage("m-snap", Epoch),
+            ProtocolLimits.DefaultMaxReceiveMessageBytes));
+        var error = (ErrorMessage)await harness.HostReceiveAsync();
+
+        Assert.That(error.Code, Is.EqualTo(ProtocolErrorCodes.PayloadTooLarge));
+        Assert.That(error.InReplyTo, Is.EqualTo("m-snap"));
+
+        // The connection survives the size verdict.
+        harness.HostDeliver(ProtocolMessageWriter.Encode(
+            new PingMessage("m-ping", Epoch),
+            ProtocolLimits.DefaultMaxReceiveMessageBytes));
+        var pong = (PongMessage)await harness.HostReceiveAsync();
+        Assert.That(pong.InReplyTo, Is.EqualTo("m-ping"));
+    }
+
     private static InteractionResult SucceededResult(string requestId)
     {
         return new InteractionResult(
@@ -233,7 +282,7 @@ public sealed class RuntimeBridgeSessionTests
         private readonly Task runTask;
         private int nextMessageId;
 
-        public SessionHarness()
+        public SessionHarness(bool postThrows = false, string? snapshotJson = null)
         {
             Ledger = new ProtocolRequestLedger(
                 Epoch,
@@ -247,18 +296,27 @@ public sealed class RuntimeBridgeSessionTests
                     "SignalRouter.Unity test",
                     Array.Empty<string>(),
                     ProtocolLimits.DefaultMaxReceiveMessageBytes),
-                action => action(),
+                postThrows
+                    ? new Action<Action>(_ => throw new InvalidOperationException(
+                        "The interaction runtime is shut down."))
+                    : action => action(),
                 Submitter.Submit,
                 requestId =>
                 {
                     CancelledRequestIds.Add(requestId);
                     return true;
                 },
-                () => new RegistrySnapshotDocument(1, "{\"targets\":[]}"),
+                () => new RegistrySnapshotDocument(1, snapshotJson ?? "{\"targets\":[]}"),
                 null,
                 () => "s-" + (++nextMessageId));
             Session = new RuntimeBridgeSession(channel, options);
             runTask = Session.RunAsync();
+        }
+
+        public bool FailSends
+        {
+            get => channel.FailSends;
+            set => channel.FailSends = value;
         }
 
         public ProtocolRequestLedger Ledger { get; }
@@ -287,14 +345,17 @@ public sealed class RuntimeBridgeSessionTests
             channel.HostDeliver(payload);
         }
 
-        public async Task CompleteHandshakeAsync()
+        public async Task CompleteHandshakeAsync(
+            int hostReceiveLimit = ProtocolLimits.DefaultMaxReceiveMessageBytes)
         {
             var hello = (HelloMessage)await HostReceiveAsync();
-            HostDeliver(CreateWelcome(hello));
+            HostDeliver(CreateWelcome(hello, hostReceiveLimit));
             await WaitForSessionAsync();
         }
 
-        public byte[] CreateWelcome(HelloMessage hello)
+        public byte[] CreateWelcome(
+            HelloMessage hello,
+            int hostReceiveLimit = ProtocolLimits.DefaultMaxReceiveMessageBytes)
         {
             return ProtocolMessageWriter.Encode(
                 new WelcomeMessage(
@@ -303,7 +364,7 @@ public sealed class RuntimeBridgeSessionTests
                     hello.MessageId,
                     "SignalRouter.McpHost test",
                     Array.Empty<string>(),
-                    ProtocolLimits.DefaultMaxReceiveMessageBytes),
+                    hostReceiveLimit),
                 ProtocolLimits.BootstrapMaxMessageBytes);
         }
 
@@ -454,10 +515,17 @@ public sealed class RuntimeBridgeSessionTests
 
         private readonly Channel<byte[]> toHost = Channel.CreateUnbounded<byte[]>();
 
+        public bool FailSends { get; set; }
+
         public ValueTask SendAsync(
             ReadOnlyMemory<byte> message,
             CancellationToken cancellationToken)
         {
+            if (FailSends)
+            {
+                throw new InvalidOperationException("The transport dropped the send.");
+            }
+
             return toHost.Writer.WriteAsync(message.ToArray(), cancellationToken);
         }
 

@@ -137,6 +137,12 @@ namespace SignalRouter.Protocol.Transport
                     // way and the session treats the channel as closed.
                     socket.Abort();
                 }
+                catch (OperationCanceledException)
+                {
+                    // The caller bounded the close handshake; a peer that
+                    // ignores it does not get to wedge the teardown.
+                    socket.Abort();
+                }
             }
         }
 
