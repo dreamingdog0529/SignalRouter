@@ -218,6 +218,35 @@ public sealed class InteractionSubmissionTests
     }
 
     [Test]
+    public async Task DecodedCommandsSubmitThroughTheSameSplitPhasePath()
+    {
+        using var runtime = new SubmissionRuntime();
+        runtime.RegisterClick("menu.start");
+        using var arguments = System.Text.Json.JsonDocument.Parse("{}");
+        var decoded = runtime.Catalog.Decode("click", 1, "menu.start", arguments.RootElement);
+
+        var submission = decoded.Submit(
+            runtime.Dispatcher,
+            new InteractionSubmissionOptions("req-wire", InteractionOrigin.Agent));
+
+        Assert.That(submission.Kind, Is.EqualTo(InteractionAdmissionKind.Queued));
+        var result = await submission.Completion;
+        Assert.That(result.RequestId, Is.EqualTo("req-wire"));
+        Assert.That(result.Status, Is.EqualTo(InteractionStatus.Succeeded));
+        Assert.That(result.CommandName, Is.EqualTo("click"));
+        Assert.That(runtime.ExecutedRequestIds, Is.EqualTo(new[] { "req-wire" }));
+
+        // The decode-then-submit path and the typed path produce the same
+        // terminal shape (MVP criterion 1 groundwork).
+        var typed = await runtime.Dispatcher.Submit(
+            new ClickCommand("menu.start"),
+            new InteractionSubmissionOptions("req-typed", InteractionOrigin.Agent)).Completion;
+        Assert.That(typed.Status, Is.EqualTo(result.Status));
+        Assert.That(typed.CommandName, Is.EqualTo(result.CommandName));
+        Assert.That(typed.CommandVersion, Is.EqualTo(result.CommandVersion));
+    }
+
+    [Test]
     public async Task SubmissionsRecordTheExternalRequestId()
     {
         using var runtime = new SubmissionRuntime(record: true);

@@ -545,6 +545,12 @@ namespace SignalRouter
             InteractionDispatchOptions options,
             CancellationToken cancellationToken);
 
+        internal abstract InteractionSubmission Submit(
+            InteractionDispatcher dispatcher,
+            IInteractionCommand command,
+            InteractionSubmissionOptions options,
+            CancellationToken cancellationToken);
+
         internal abstract bool SupportsTarget(IInteractionTarget target);
     }
 
@@ -599,6 +605,28 @@ namespace SignalRouter
             }
 
             return entry.DispatchAsync(
+                dispatcher,
+                Command,
+                options,
+                cancellationToken);
+        }
+
+        // Split-phase counterpart of DispatchAsync for transports: the wire
+        // request becomes a dispatch without a compile-time command type. Takes
+        // the concrete dispatcher deliberately — split-phase submission is a
+        // transport-facing capability of it, and IInteractionDispatcher stays
+        // the stable dispatch abstraction (ADR 0007).
+        public InteractionSubmission Submit(
+            InteractionDispatcher dispatcher,
+            InteractionSubmissionOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            if (dispatcher == null)
+            {
+                throw new ArgumentNullException(nameof(dispatcher));
+            }
+
+            return entry.Submit(
                 dispatcher,
                 Command,
                 options,
@@ -693,6 +721,18 @@ namespace SignalRouter
             CancellationToken cancellationToken)
         {
             return dispatcher.DispatchAsync(
+                (TCommand)command,
+                options,
+                cancellationToken);
+        }
+
+        internal override InteractionSubmission Submit(
+            InteractionDispatcher dispatcher,
+            IInteractionCommand command,
+            InteractionSubmissionOptions options,
+            CancellationToken cancellationToken)
+        {
+            return dispatcher.Submit(
                 (TCommand)command,
                 options,
                 cancellationToken);
