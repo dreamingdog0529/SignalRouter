@@ -1,10 +1,12 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/SignalRouter.Core/SignalRouter.Core.csproj" />
+    <Project Path="src/SignalRouter.McpHost/SignalRouter.McpHost.csproj" />
     <Project Path="src/SignalRouter.Protocol/SignalRouter.Protocol.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SignalRouter.Core.Tests/SignalRouter.Core.Tests.csproj" />
+    <Project Path="tests/SignalRouter.McpHost.Tests/SignalRouter.McpHost.Tests.csproj" />
     <Project Path="tests/SignalRouter.Protocol.Tests/SignalRouter.Protocol.Tests.csproj" />
   </Folder>
 </Solution>
