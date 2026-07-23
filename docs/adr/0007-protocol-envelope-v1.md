@@ -216,16 +216,25 @@ property-level diffs) would be additive minor-version work.
   transport around decided contracts instead of deciding them mid-implementation.
 - **Negative.** Hosts must generate unique request IDs or see conflicts; resends must
   repeat bytes verbatim.
-- **Open items (item 8).** Recording messages with artifact handles (8d), which also
-  lifts the draft status. Resolved in 8a: the Core split-phase submission API with
-  `cancel_interaction` dispatch wiring, and the default ledger capacity and retention
-  (§25). Resolved in 8b: transport framing, the reconnect loop, and the query-first
-  recovery contract (recovery window, `interaction_status`, `runtime_busy`,
-  resendable cancel intent). Resolved in 8c: `wait_for`/`wait_result` (bounded
-  frame-polled conditions: idle, target_present, target_absent; a timeout answers
-  satisfied=false), the MCP host process (Kestrel loopback, one runtime connection,
-  stdio tools projecting wire payloads, caller-owned request IDs echoed on every
-  response shape including tool-timeout pending answers). Item 9: `authToken`
+- **Open items (item 8).** The Unity runtime-side recording/replay supervisor (8d
+  runtime) — recreating the runtime under a new epoch with a recorder, rebinding the
+  UI adapters, running the strict replayer against a transport-invisible runtime, and
+  driving the operationId control plane across the reconnect. Its wire contract and
+  host tools are done (see below); the runtime implementation lands with the PlayMode
+  record→execute→stop→replay proof and lifts the draft status / freezes v1.0.
+  Resolved in 8a: the Core split-phase submission API with `cancel_interaction`
+  dispatch wiring, and the default ledger capacity and retention (§25). Resolved in
+  8b: transport framing, the reconnect loop, and the query-first recovery contract
+  (recovery window, `interaction_status`, `runtime_busy`, resendable cancel intent).
+  Resolved in 8c: `wait_for`/`wait_result` (bounded frame-polled conditions: idle,
+  target_present, target_absent; a timeout answers satisfied=false), the MCP host
+  process (Kestrel loopback, one runtime connection, stdio tools projecting wire
+  payloads, caller-owned request IDs echoed on every response shape including
+  tool-timeout pending answers). Resolved in 8d (wire + host): the recording/replay
+  messages with `rec-<utcstamp>-<8char>` filename-stem handles (no host path map, no
+  traversal), the operationId control plane that survives the epoch change these
+  operations cause, and the host tools (start_recording, stop_recording,
+  replay_recording) with cross-epoch operation correlation. Item 9: `authToken`
   validation, timing-safe comparison, `unauthorized`, final limits.
 
 ## Implementation
