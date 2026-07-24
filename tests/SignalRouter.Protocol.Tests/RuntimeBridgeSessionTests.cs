@@ -9,6 +9,7 @@ namespace SignalRouter.Protocol.Tests;
 public sealed class RuntimeBridgeSessionTests
 {
     private const string Epoch = "epoch-1";
+    private const string Handle = "rec-20260724t0100-1a2b3c4d";
 
     [Test]
     public async Task TheHandshakeAdvertisesTheLedgerRetentionAndEstablishesTheSession()
@@ -272,6 +273,84 @@ public sealed class RuntimeBridgeSessionTests
         Assert.That(pong.InReplyTo, Is.EqualTo("m-ping"));
     }
 
+    [Test]
+    public async Task AControlOperationMapsItsAcknowledgmentOntoTheWire()
+    {
+        using var harness = new SessionHarness(
+            beginControl: (request, complete) =>
+                complete(RuntimeControlAck.RecordingStarted(request.OperationId, Handle)));
+        await harness.CompleteHandshakeAsync();
+
+        harness.HostDeliver(ProtocolMessageWriter.Encode(
+            new StartRecordingMessage("m-start", Epoch, "op-1", "smoke"),
+            ProtocolLimits.DefaultMaxReceiveMessageBytes));
+        var started = (RecordingStartedMessage)await harness.HostReceiveAsync();
+
+        Assert.That(started.OperationId, Is.EqualTo("op-1"));
+        Assert.That(started.RecordingHandle, Is.EqualTo(Handle));
+        Assert.That(started.NewSessionEpoch, Is.EqualTo(Epoch));
+        Assert.That(harness.ControlRequests[0].Label, Is.EqualTo("smoke"));
+        Assert.That(
+            harness.ControlRequests[0].Kind,
+            Is.EqualTo(RuntimeControlKind.StartRecording));
+    }
+
+    [Test]
+    public async Task ARefusedControlOperationRepliesWithAnErrorCorrelatedToItsMessage()
+    {
+        using var harness = new SessionHarness(
+            beginControl: (request, complete) =>
+                complete(RuntimeControlAck.Refused(
+                    request.OperationId,
+                    ProtocolErrorCodes.RecordingUnavailable,
+                    "No recording is active.")));
+        await harness.CompleteHandshakeAsync();
+
+        harness.HostDeliver(ProtocolMessageWriter.Encode(
+            new StopRecordingMessage("m-stop", Epoch, "op-2"),
+            ProtocolLimits.DefaultMaxReceiveMessageBytes));
+        var error = (ErrorMessage)await harness.HostReceiveAsync();
+
+        Assert.That(error.Code, Is.EqualTo(ProtocolErrorCodes.RecordingUnavailable));
+        Assert.That(error.InReplyTo, Is.EqualTo("m-stop"));
+    }
+
+    [Test]
+    public async Task AControlOperationQueryIsAnsweredFromTheLedger()
+    {
+        using var harness = new SessionHarness(
+            queryControl: (operationId, complete) =>
+                complete(RuntimeControlQueryResult.Terminal(
+                    RuntimeControlAck.RecordingStopped(operationId, Handle, 3))));
+        await harness.CompleteHandshakeAsync();
+
+        harness.HostDeliver(ProtocolMessageWriter.Encode(
+            new GetControlOperationResultMessage("m-q", Epoch, "op-3"),
+            ProtocolLimits.DefaultMaxReceiveMessageBytes));
+        var result = (ControlOperationResultMessage)await harness.HostReceiveAsync();
+
+        Assert.That(result.OperationId, Is.EqualTo("op-3"));
+        Assert.That(result.State, Is.EqualTo(ProtocolControlOperationStates.Completed));
+        Assert.That(result.RecordingHandle, Is.EqualTo(Handle));
+        Assert.That(result.EntryCount, Is.EqualTo(3));
+        Assert.That(result.NewSessionEpoch, Is.EqualTo(Epoch));
+    }
+
+    [Test]
+    public async Task WithoutASupervisorControlOperationsAreRefusedNotDropped()
+    {
+        using var harness = new SessionHarness();
+        await harness.CompleteHandshakeAsync();
+
+        harness.HostDeliver(ProtocolMessageWriter.Encode(
+            new StartRecordingMessage("m-start", Epoch, "op-1"),
+            ProtocolLimits.DefaultMaxReceiveMessageBytes));
+        var error = (ErrorMessage)await harness.HostReceiveAsync();
+
+        Assert.That(error.Code, Is.EqualTo(ProtocolErrorCodes.RecordingUnavailable));
+        Assert.That(error.InReplyTo, Is.EqualTo("m-start"));
+    }
+
     private static InteractionResult SucceededResult(string requestId)
     {
         return new InteractionResult(
@@ -299,7 +378,11 @@ public sealed class RuntimeBridgeSessionTests
         private readonly Task runTask;
         private int nextMessageId;
 
-        public SessionHarness(bool postThrows = false, string? snapshotJson = null)
+        public SessionHarness(
+            bool postThrows = false,
+            string? snapshotJson = null,
+            Action<RuntimeControlRequest, Action<RuntimeControlAck>>? beginControl = null,
+            Action<string, Action<RuntimeControlQueryResult>>? queryControl = null)
         {
             Ledger = new ProtocolRequestLedger(
                 Epoch,
@@ -330,10 +413,20 @@ public sealed class RuntimeBridgeSessionTests
                     complete(true, 5);
                 },
                 null,
-                () => "s-" + (++nextMessageId));
+                () => "s-" + (++nextMessageId),
+                beginControl == null
+                    ? null
+                    : (request, complete) =>
+                    {
+                        ControlRequests.Add(request);
+                        beginControl(request, complete);
+                    },
+                queryControl);
             Session = new RuntimeBridgeSession(channel, options);
             runTask = Session.RunAsync();
         }
+
+        public List<RuntimeControlRequest> ControlRequests { get; } = new();
 
         public bool FailSends
         {

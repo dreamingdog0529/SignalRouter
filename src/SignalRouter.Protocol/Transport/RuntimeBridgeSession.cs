@@ -19,7 +19,9 @@ namespace SignalRouter.Protocol.Transport
             Func<RegistrySnapshotDocument> captureSnapshot,
             Action<WaitForMessage, Action<bool, long>> beginWait,
             string? authToken = null,
-            Func<string>? messageIdSource = null)
+            Func<string>? messageIdSource = null,
+            Action<RuntimeControlRequest, Action<RuntimeControlAck>>? beginControlOperation = null,
+            Action<string, Action<RuntimeControlQueryResult>>? queryControlOperation = null)
         {
             Ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
             LocalOptions = localOptions ?? throw new ArgumentNullException(nameof(localOptions));
@@ -33,6 +35,12 @@ namespace SignalRouter.Protocol.Transport
             ProtocolContract.RequireOptionalIdentifier(authToken, nameof(authToken));
             AuthToken = authToken;
             MessageIdSource = messageIdSource ?? DefaultMessageId;
+
+            // Without a runtime supervisor wired, control operations are refused
+            // rather than dropped: a host that sends one gets a clean answer, not a
+            // hang. The supervisor (item 8d) supplies the real handlers.
+            BeginControlOperation = beginControlOperation ?? RefuseControlOperation;
+            QueryControlOperation = queryControlOperation ?? RefuseControlQuery;
         }
 
         public ProtocolRequestLedger Ledger { get; }
@@ -56,9 +64,38 @@ namespace SignalRouter.Protocol.Transport
 
         public Func<string> MessageIdSource { get; }
 
+        // Hands a recording/replay control operation to the runtime supervisor and
+        // fires the completion callback exactly once, on the main thread, with the
+        // terminal ack.
+        public Action<RuntimeControlRequest, Action<RuntimeControlAck>> BeginControlOperation { get; }
+
+        // Answers a get_control_operation_result query from the supervisor's
+        // operation ledger, on the main thread.
+        public Action<string, Action<RuntimeControlQueryResult>> QueryControlOperation { get; }
+
         private static string DefaultMessageId()
         {
             return Guid.NewGuid().ToString("N");
+        }
+
+        private static void RefuseControlOperation(
+            RuntimeControlRequest request,
+            Action<RuntimeControlAck> complete)
+        {
+            complete(RuntimeControlAck.Refused(
+                request.OperationId,
+                ProtocolErrorCodes.RecordingUnavailable,
+                "The runtime has no recording supervisor."));
+        }
+
+        private static void RefuseControlQuery(
+            string operationId,
+            Action<RuntimeControlQueryResult> complete)
+        {
+            complete(RuntimeControlQueryResult.Terminal(RuntimeControlAck.Refused(
+                operationId,
+                ProtocolErrorCodes.RecordingUnavailable,
+                "The runtime has no recording supervisor.")));
         }
     }
 
@@ -316,10 +353,124 @@ namespace SignalRouter.Protocol.Transport
                             session!.SessionEpoch),
                         cancellationToken));
                     return;
+                case StartRecordingMessage start:
+                    PostControlOperation(
+                        new RuntimeControlRequest(
+                            RuntimeControlKind.StartRecording,
+                            start.OperationId,
+                            start.MessageId,
+                            null,
+                            start.Label),
+                        cancellationToken);
+                    return;
+                case StopRecordingMessage stop:
+                    PostControlOperation(
+                        new RuntimeControlRequest(
+                            RuntimeControlKind.StopRecording,
+                            stop.OperationId,
+                            stop.MessageId,
+                            null,
+                            null),
+                        cancellationToken);
+                    return;
+                case ReplayRecordingMessage replay:
+                    PostControlOperation(
+                        new RuntimeControlRequest(
+                            RuntimeControlKind.ReplayRecording,
+                            replay.OperationId,
+                            replay.MessageId,
+                            replay.RecordingHandle,
+                            null),
+                        cancellationToken);
+                    return;
+                case GetControlOperationResultMessage controlQuery:
+                    TryPost(() => options.QueryControlOperation(
+                        controlQuery.OperationId,
+                        result => FireSend(
+                            BuildControlOperationResult(controlQuery.OperationId, result),
+                            cancellationToken)));
+                    return;
                 default:
                     // Pong and error carry no runtime action in v1; the state
                     // machine already filtered everything else.
                     return;
+            }
+        }
+
+        private void PostControlOperation(
+            RuntimeControlRequest request,
+            CancellationToken cancellationToken)
+        {
+            // The supervisor runs the operation on the main thread and calls back
+            // exactly once with the terminal ack, which the session maps onto the
+            // wire. No epoch changes in v1, so the ack rides the same session.
+            TryPost(() => options.BeginControlOperation(
+                request,
+                ack => FireSend(MapAckToMessage(request, ack), cancellationToken)));
+        }
+
+        private ProtocolMessage MapAckToMessage(RuntimeControlRequest request, RuntimeControlAck ack)
+        {
+            var epoch = session!.SessionEpoch;
+            var id = options.MessageIdSource();
+            switch (ack.Kind)
+            {
+                case RuntimeControlAckKind.RecordingStarted:
+                    return new RecordingStartedMessage(
+                        id, epoch, ack.OperationId, ack.RecordingHandle!, epoch);
+                case RuntimeControlAckKind.RecordingStopped:
+                    return new RecordingStoppedMessage(
+                        id, epoch, ack.OperationId, ack.RecordingHandle!, ack.EntryCount, epoch);
+                case RuntimeControlAckKind.ReplayReport:
+                    return new ReplayReportMessage(
+                        id, epoch, ack.OperationId, ack.OutcomeKind!, epoch, ack.Detail);
+                case RuntimeControlAckKind.Refused:
+                    // A refusal correlates to the exact control message so the host
+                    // completes the operation instead of hanging.
+                    return new ErrorMessage(
+                        id,
+                        ack.RefusalCode!,
+                        ack.Detail ?? "The control operation was refused.",
+                        epoch,
+                        null,
+                        request.ControlMessageId);
+                default:
+                    throw new InvalidOperationException("Unknown control acknowledgment kind.");
+            }
+        }
+
+        private ProtocolMessage BuildControlOperationResult(
+            string operationId,
+            RuntimeControlQueryResult result)
+        {
+            var epoch = session!.SessionEpoch;
+            var id = options.MessageIdSource();
+            if (result.TerminalAck == null)
+            {
+                return new ControlOperationResultMessage(id, epoch, operationId, result.State, epoch);
+            }
+
+            var ack = result.TerminalAck.Value;
+            switch (ack.Kind)
+            {
+                case RuntimeControlAckKind.RecordingStarted:
+                    return new ControlOperationResultMessage(
+                        id, epoch, operationId, result.State, epoch,
+                        recordingHandle: ack.RecordingHandle);
+                case RuntimeControlAckKind.RecordingStopped:
+                    return new ControlOperationResultMessage(
+                        id, epoch, operationId, result.State, epoch,
+                        recordingHandle: ack.RecordingHandle, entryCount: ack.EntryCount);
+                case RuntimeControlAckKind.ReplayReport:
+                    return new ControlOperationResultMessage(
+                        id, epoch, operationId, result.State, epoch,
+                        outcomeKind: ack.OutcomeKind, detail: ack.Detail);
+                case RuntimeControlAckKind.Refused:
+                    return new ControlOperationResultMessage(
+                        id, epoch, operationId, result.State, epoch,
+                        detail: ack.Detail ?? ack.RefusalCode);
+                default:
+                    throw new InvalidOperationException("Unknown control acknowledgment kind.");
             }
         }
 
