@@ -50,6 +50,20 @@ namespace SignalRouter
                 foreach (var descriptor in snapshot.Targets)
                 {
                     WriteDescriptor(writer, descriptor);
+
+                    // Enforce the ceiling WHILE writing so a pathological registry cannot
+                    // allocate far beyond the bound before the guard fires. The wire layer
+                    // independently enforces the negotiated per-direction limit at send
+                    // time (ADR 0008).
+                    if (writer.BytesCommitted + writer.BytesPending
+                        > InteractionSnapshotLimits.MaxSnapshotBytes)
+                    {
+                        throw new InvalidOperationException(
+                            string.Format(
+                                CultureInfo.InvariantCulture,
+                                "The captured snapshot exceeds the maximum of {0} bytes.",
+                                InteractionSnapshotLimits.MaxSnapshotBytes));
+                    }
                 }
 
                 writer.WriteEndArray();

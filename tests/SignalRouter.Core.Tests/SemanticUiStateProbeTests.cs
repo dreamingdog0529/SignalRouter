@@ -101,6 +101,23 @@ public sealed class SemanticUiStateProbeTests
     }
 
     [Test]
+    public void CaptureRejectsASnapshotBeyondTheByteCeiling()
+    {
+        var catalog = InteractionCommandCatalog.CreateMvp();
+        var registry = new InteractionRegistry(catalog, "session-1");
+        var value = InteractionValue.FromString(
+            new string('x', InteractionSnapshotLimits.MaxValueChars));
+        for (var index = 0; index < 800; index++)
+        {
+            registry.Register(new FakeTarget("t" + index) { Value = value }, true);
+        }
+
+        var probe = new SemanticUiStateProbe(registry);
+
+        NUnitCompat.Throws<InvalidOperationException>(() => probe.Capture());
+    }
+
+    [Test]
     public void AnAddedTargetIsEnumeratedAsPerFieldAddedChanges()
     {
         var catalog = InteractionCommandCatalog.CreateMvp();

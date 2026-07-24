@@ -373,13 +373,25 @@ namespace SignalRouter
             InteractionContract.RequireDefinedEnum(view, nameof(view));
             var ids = new List<string>(targets.Keys);
             ids.Sort(StringComparer.Ordinal);
-            var descriptors = new List<InteractionDescriptor>();
 
+            // Describe and validate the full registered set once so the parent graph is
+            // validated against every registered target, independent of the requested view.
+            var described = new Dictionary<string, InteractionDescriptor>(StringComparer.Ordinal);
             foreach (var id in ids)
             {
                 var entry = targets[id];
                 var descriptor = entry.Target.Describe();
                 ValidateDescriptor(id, entry.Target, descriptor);
+                described[id] = descriptor;
+            }
+
+            ValidateParentGraph(described);
+
+            var descriptors = new List<InteractionDescriptor>();
+            foreach (var id in ids)
+            {
+                var entry = targets[id];
+                var descriptor = described[id];
                 if (view == InteractionRegistryView.Agent && !entry.AgentVisible)
                 {
                     continue;
@@ -393,7 +405,68 @@ namespace SignalRouter
                 descriptors.Add(descriptor);
             }
 
+            // The documented bound is agent-visible targets per snapshot, so it is
+            // enforced after view filtering: an application may register many human-only
+            // controls without inflating the agent snapshot (ADR 0008).
+            if (view == InteractionRegistryView.Agent
+                && descriptors.Count > InteractionSnapshotLimits.MaxSnapshotTargets)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "An agent snapshot cannot exceed {0} targets.",
+                        InteractionSnapshotLimits.MaxSnapshotTargets));
+            }
+
             return new InteractionRegistrySnapshot(SessionEpoch, Revision, descriptors);
+        }
+
+        // Validates the parent links across the full registered set for cycles and
+        // excessive depth. A parentId that does not resolve to a registered target is
+        // NOT an error: a target may be grouped under a non-interactive container that
+        // is not itself a registered interaction target, and agent-view filtering can
+        // remove a registered parent from the snapshot. Such an external parent
+        // terminates the chain. Self-parent links are already rejected at registration
+        // (ADR 0008).
+        private static void ValidateParentGraph(
+            IReadOnlyDictionary<string, InteractionDescriptor> described)
+        {
+            foreach (var startId in described.Keys)
+            {
+                var seen = new HashSet<string>(StringComparer.Ordinal) { startId };
+                var current = startId;
+                var depth = 0;
+                while (true)
+                {
+                    var parentId = described[current].ParentId;
+                    if (parentId == null || !described.ContainsKey(parentId))
+                    {
+                        break;
+                    }
+
+                    if (!seen.Add(parentId))
+                    {
+                        throw new InvalidOperationException(
+                            string.Format(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                "The parent chain of target '{0}' contains a cycle.",
+                                startId));
+                    }
+
+                    depth++;
+                    if (depth > InteractionSnapshotLimits.MaxParentChainDepth)
+                    {
+                        throw new InvalidOperationException(
+                            string.Format(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                "The parent chain of target '{0}' exceeds the maximum depth of {1}.",
+                                startId,
+                                InteractionSnapshotLimits.MaxParentChainDepth));
+                    }
+
+                    current = parentId;
+                }
+            }
         }
 
         private InteractionDescriptor FilterAgentInteractions(
@@ -419,6 +492,19 @@ namespace SignalRouter
             }
 
             return descriptor.WithAvailableInteractions(interactions);
+        }
+
+        private static void RequireBoundedLength(string? value, int maxChars, string field)
+        {
+            if (value != null && value.Length > maxChars)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "The descriptor {0} exceeds the maximum length of {1} characters.",
+                        field,
+                        maxChars));
+            }
         }
 
         private void ValidateDescriptor(
@@ -449,18 +535,40 @@ namespace SignalRouter
                         descriptor.Id));
             }
 
+            RequireBoundedLength(
+                descriptor.Id,
+                InteractionSnapshotLimits.MaxTargetIdChars,
+                "id");
             InteractionContract.RequireOptionalIdentifier(
                 descriptor.ParentId,
                 nameof(descriptor));
+            RequireBoundedLength(
+                descriptor.ParentId,
+                InteractionSnapshotLimits.MaxTargetIdChars,
+                "parentId");
             if (string.Equals(descriptor.Id, descriptor.ParentId, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("A target cannot be its own parent.");
             }
 
             InteractionContract.RequireIdentifier(descriptor.Role, nameof(descriptor));
+            RequireBoundedLength(descriptor.Role, InteractionSnapshotLimits.MaxRoleChars, "role");
             if (descriptor.Label == null)
             {
                 throw new InvalidOperationException("A descriptor label must not be null.");
+            }
+
+            RequireBoundedLength(
+                descriptor.Label,
+                InteractionSnapshotLimits.MaxLabelChars,
+                "label");
+            if (descriptor.Value != null
+                && descriptor.Value.Kind == InteractionValueKind.String)
+            {
+                RequireBoundedLength(
+                    descriptor.Value.GetString(),
+                    InteractionSnapshotLimits.MaxValueChars,
+                    "value");
             }
 
             if (descriptor.AvailableInteractions.Count == 0)
@@ -469,16 +577,48 @@ namespace SignalRouter
                     "A registered interaction target must expose at least one operation.");
             }
 
+            if (descriptor.AvailableInteractions.Count
+                > InteractionSnapshotLimits.MaxAvailableInteractionsPerTarget)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "A registered interaction target must expose at most {0} operations.",
+                        InteractionSnapshotLimits.MaxAvailableInteractionsPerTarget));
+            }
+
             var identities = new HashSet<CommandIdentity>();
             foreach (var interaction in descriptor.AvailableInteractions)
             {
                 InteractionContract.RequireIdentifier(
                     interaction.WireName,
                     nameof(descriptor));
+                RequireBoundedLength(
+                    interaction.WireName,
+                    InteractionSnapshotLimits.MaxInteractionNameChars,
+                    "interaction wire name");
                 if (interaction.Version < 1)
                 {
                     throw new InvalidOperationException(
                         "Descriptor command versions must be positive.");
+                }
+
+                if (interaction.Arguments.Arguments.Count
+                    > InteractionSnapshotLimits.MaxArgumentsPerInteraction)
+                {
+                    throw new InvalidOperationException(
+                        string.Format(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            "An interaction must declare at most {0} arguments.",
+                            InteractionSnapshotLimits.MaxArgumentsPerInteraction));
+                }
+
+                foreach (var argument in interaction.Arguments.Arguments)
+                {
+                    RequireBoundedLength(
+                        argument.Name,
+                        InteractionSnapshotLimits.MaxArgumentNameChars,
+                        "argument name");
                 }
 
                 var identity = new CommandIdentity(

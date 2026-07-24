@@ -1,5 +1,6 @@
 using System.Text;
 using NUnit.Framework;
+using SignalRouter;
 
 namespace SignalRouter.Protocol.Tests;
 
@@ -394,6 +395,144 @@ public sealed class ProtocolMessageModelTests
             "m-10",
             1,
             BuildNestedObject(63)));
+    }
+
+    [Test]
+    public void RegistrySnapshotReValidatesResourceBoundsOnReceive()
+    {
+        NUnitCompat.Throws<ArgumentException>(
+            () => _ = Snapshot(MinimalTargets(
+                InteractionSnapshotLimits.MaxSnapshotTargets + 1)));
+        NUnitCompat.Throws<ArgumentException>(
+            () => _ = Snapshot("{\"id\":\"t0\",\"label\":\""
+                + new string('x', InteractionSnapshotLimits.MaxLabelChars + 1) + "\"}"));
+        NUnitCompat.Throws<ArgumentException>(
+            () => _ = Snapshot("{\"id\":\"t0\",\"availableInteractions\":["
+                + Repeat(
+                    "{\"wireName\":\"click\"}",
+                    InteractionSnapshotLimits.MaxAvailableInteractionsPerTarget + 1)
+                + "]}"));
+        NUnitCompat.Throws<ArgumentException>(
+            () => _ = Snapshot(
+                "{\"id\":\"t0\",\"availableInteractions\":[{\"wireName\":\"click\",\"arguments\":["
+                + Repeat(
+                    "{\"name\":\"a\"}",
+                    InteractionSnapshotLimits.MaxArgumentsPerInteraction + 1)
+                + "]}]}"));
+        NUnitCompat.Throws<ArgumentException>(
+            () => _ = Snapshot(
+                "{\"id\":\"a\",\"parentId\":\"b\"},{\"id\":\"b\",\"parentId\":\"a\"}"));
+        NUnitCompat.Throws<ArgumentException>(() => _ = Snapshot(DeepChain()));
+
+        // A non-object target must be rejected, not silently skipped: downstream
+        // projections would otherwise crash reading its properties.
+        NUnitCompat.Throws<ArgumentException>(() => _ = Snapshot("1"));
+
+        // A duplicate target ID must be rejected before graph validation, or a later
+        // entry could erase an earlier cycle.
+        NUnitCompat.Throws<ArgumentException>(
+            () => _ = Snapshot("{\"id\":\"a\"},{\"id\":\"a\"}"));
+
+        // A parent outside the received set terminates the chain and is accepted.
+        Assert.That(
+            Snapshot("{\"id\":\"child\",\"parentId\":\"external-container\"}").SnapshotJson,
+            Is.Not.Null);
+    }
+
+    [Test]
+    public void TheSnapshotByteCeilingStaysBelowTheReceiveLimit()
+    {
+        // The capture-side byte ceiling must fire before the wire receive limit, so an
+        // over-cap snapshot fails fast at capture rather than only when the envelope is
+        // encoded, and a full envelope still fits (ADR 0008).
+        Assert.That(
+            InteractionSnapshotLimits.MaxSnapshotBytes,
+            Is.LessThan(ProtocolLimits.DefaultMaxReceiveMessageBytes));
+    }
+
+    [Test]
+    public void ARealisticFullSizeSnapshotPassesReceiveValidation()
+    {
+        var builder = new StringBuilder();
+        for (var index = 0; index < InteractionSnapshotLimits.MaxSnapshotTargets; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            builder
+                .Append("{\"id\":\"screen.section.control.").Append(index)
+                .Append("\",\"parentId\":null,\"role\":\"button\",\"label\":\"Realistic label ")
+                .Append(index)
+                .Append("\",\"availableInteractions\":[{\"wireName\":\"click\",\"arguments\":[]}]}");
+        }
+
+        NUnitCompat.ThatThrows(() => _ = Snapshot(builder.ToString()), Throws.Nothing);
+    }
+
+    private static RegistrySnapshotMessage Snapshot(string targetsInner)
+    {
+        return new RegistrySnapshotMessage(
+            "m-11",
+            Epoch,
+            "m-10",
+            1,
+            "{\"targets\":[" + targetsInner + "]}");
+    }
+
+    private static string MinimalTargets(int count)
+    {
+        var builder = new StringBuilder();
+        for (var index = 0; index < count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            builder.Append("{\"id\":\"t").Append(index).Append("\"}");
+        }
+
+        return builder.ToString();
+    }
+
+    private static string Repeat(string element, int count)
+    {
+        var builder = new StringBuilder();
+        for (var index = 0; index < count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            builder.Append(element);
+        }
+
+        return builder.ToString();
+    }
+
+    private static string DeepChain()
+    {
+        var builder = new StringBuilder();
+        for (var index = 0; index <= InteractionSnapshotLimits.MaxParentChainDepth + 1; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            builder.Append("{\"id\":\"t").Append(index).Append('"');
+            if (index > 0)
+            {
+                builder.Append(",\"parentId\":\"t").Append(index - 1).Append('"');
+            }
+
+            builder.Append('}');
+        }
+
+        return builder.ToString();
     }
 
     private static HelloMessage CreateHello(
