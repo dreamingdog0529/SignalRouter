@@ -567,6 +567,260 @@ public sealed class InteractionDispatcherTests
         Assert.That(secondThread, Is.EqualTo(context.ThreadId));
     }
 
+    // ------------------------------------------------ §16.2: maintenance lease
+
+    [Test]
+    public async Task MaintenanceLeaseAttachesARecorderThatCapturesOnlyTheSliceInBetween()
+    {
+        using var harness = new Harness();
+        harness.Register("menu.start");
+        using var stream = new MemoryStream();
+        var recorder = new InteractionRecorder(
+            stream,
+            new InteractionRecorderOptions("session-1", "build-1"),
+            leaveOpen: true);
+
+        // Before attach: not recorded.
+        await harness.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+
+        using (var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync())
+        {
+            lease.AttachRecorder(recorder);
+        }
+
+        // During: recorded.
+        var recorded = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options());
+
+        long entryCount;
+        using (var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync())
+        {
+            var detached = lease.DetachRecorder();
+            Assert.That(detached, Is.SameAs(recorder));
+        }
+
+        // After detach: not recorded.
+        await harness.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), Options());
+
+        recorder.Dispose();
+        stream.Position = 0;
+        var recording = InteractionRecordingReader.Load(stream);
+        entryCount = recording.Interactions.Count;
+
+        NUnitCompat.Multiple(() =>
+        {
+            Assert.That(entryCount, Is.EqualTo(1));
+            Assert.That(recording.Session.SessionId, Is.EqualTo("session-1"));
+            // The slice keeps the dispatcher's own sequence (2), not a fresh 1 —
+            // a recording is an epoch-internal slice, not a whole session.
+            Assert.That(recording.Interactions[0].Sequence, Is.EqualTo(recorded.Sequence));
+            Assert.That(recording.Interactions[0].Sequence, Is.EqualTo(2));
+        });
+    }
+
+    [Test]
+    public async Task MaintenanceLeaseAcquisitionWaitsForInFlightDispatchesToDrain()
+    {
+        using var harness = new Harness();
+        var blocker = harness.Register("menu.start", gate: true);
+
+        var dispatch = harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options()).AsTask();
+        await blocker.Started.Task;
+
+        var acquire = harness.Dispatcher.AcquireMaintenanceLeaseAsync();
+        Assert.That(acquire.IsCompleted, Is.False, "The lease must wait for the in-flight dispatch.");
+
+        blocker.Release();
+        await dispatch;
+        using var lease = await acquire;
+        Assert.That(lease, Is.Not.Null);
+    }
+
+    [Test]
+    public async Task AttachingARecorderWhoseSessionDiffersFromTheEpochThrows()
+    {
+        using var harness = new Harness();
+        using var stream = new MemoryStream();
+        using var recorder = new InteractionRecorder(
+            stream,
+            new InteractionRecorderOptions("other-session", "build-1"),
+            leaveOpen: true);
+
+        using var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync();
+
+        NUnitCompat.Throws<ArgumentException>(() => lease.AttachRecorder(recorder));
+    }
+
+    [Test]
+    public async Task AttachingASecondRecorderThrows()
+    {
+        using var harness = new Harness();
+        using var streamA = new MemoryStream();
+        using var streamB = new MemoryStream();
+        using var recorderA = new InteractionRecorder(
+            streamA,
+            new InteractionRecorderOptions("session-1", "build-1"),
+            leaveOpen: true);
+        using var recorderB = new InteractionRecorder(
+            streamB,
+            new InteractionRecorderOptions("session-1", "build-1"),
+            leaveOpen: true);
+
+        using var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync();
+        lease.AttachRecorder(recorderA);
+
+        NUnitCompat.Throws<InvalidOperationException>(() => lease.AttachRecorder(recorderB));
+        lease.DetachRecorder();
+    }
+
+    [Test]
+    public async Task AcquiringASecondMaintenanceLeaseThrows()
+    {
+        using var harness = new Harness();
+        using var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync();
+
+        NUnitCompat.ThrowsAsync<InvalidOperationException>(
+            () => harness.Dispatcher.AcquireMaintenanceLeaseAsync());
+    }
+
+    [Test]
+    public async Task AHeldMaintenanceLeaseRejectsNewDispatches()
+    {
+        using var harness = new Harness();
+        harness.Register("menu.start");
+        using var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync();
+
+        NUnitCompat.ThrowsAsync<InvalidOperationException>(
+            async () => await harness.Dispatcher.DispatchAsync(
+                new ClickCommand("menu.start"),
+                Options()));
+    }
+
+    [Test]
+    public async Task DispatchesResumeAfterTheMaintenanceLeaseIsReleased()
+    {
+        using var harness = new Harness();
+        harness.Register("menu.start");
+        using (await harness.Dispatcher.AcquireMaintenanceLeaseAsync())
+        {
+        }
+
+        var result = await harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options());
+
+        Assert.That(result.Status, Is.EqualTo(InteractionStatus.Succeeded));
+    }
+
+    [Test]
+    public async Task MaintenanceAndReplayLeasesAreMutuallyExclusive()
+    {
+        using var harness = new Harness();
+
+        using (await harness.Dispatcher.AcquireMaintenanceLeaseAsync())
+        {
+            NUnitCompat.Throws<InteractionReplayException>(
+                () => harness.Dispatcher.AcquireReplayLease());
+        }
+
+        using (harness.Dispatcher.AcquireReplayLease())
+        {
+            NUnitCompat.ThrowsAsync<InvalidOperationException>(
+                () => harness.Dispatcher.AcquireMaintenanceLeaseAsync());
+        }
+    }
+
+    [Test]
+    public async Task CancellingAPendingMaintenanceAcquisitionCancelsTheTask()
+    {
+        using var harness = new Harness();
+        var blocker = harness.Register("menu.start", gate: true);
+        var dispatch = harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options()).AsTask();
+        await blocker.Started.Task;
+
+        using var cancellation = new CancellationTokenSource();
+        var acquire = harness.Dispatcher.AcquireMaintenanceLeaseAsync(cancellation.Token);
+        Assert.That(acquire.IsCompleted, Is.False);
+
+        cancellation.Cancel();
+        NUnitCompat.ThrowsAsync<TaskCanceledException>(() => acquire);
+
+        blocker.Release();
+        await dispatch;
+    }
+
+    [Test]
+    public async Task DisposingWhileAMaintenanceAcquisitionIsPendingFaultsIt()
+    {
+        var harness = new Harness();
+        var blocker = harness.Register("menu.start", gate: true);
+        var dispatch = harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.start"),
+            Options()).AsTask();
+        await blocker.Started.Task;
+
+        var acquire = harness.Dispatcher.AcquireMaintenanceLeaseAsync();
+        Assert.That(acquire.IsCompleted, Is.False);
+
+        harness.Dispose();
+        NUnitCompat.ThrowsAsync<ObjectDisposedException>(() => acquire);
+
+        blocker.Release();
+        try
+        {
+            await dispatch;
+        }
+        catch
+        {
+            // The in-flight dispatch races disposal; its outcome is irrelevant here.
+        }
+    }
+
+    [Test]
+    public async Task AcquiringAReplayLeaseWithAnAttachedRecorderThrows()
+    {
+        using var harness = new Harness();
+        using var stream = new MemoryStream();
+        using var recorder = new InteractionRecorder(
+            stream,
+            new InteractionRecorderOptions("session-1", "build-1"),
+            leaveOpen: true);
+
+        using (var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync())
+        {
+            lease.AttachRecorder(recorder);
+        }
+
+        // The recorder outlives the maintenance lease, so a replay attempt must be
+        // refused even though no lease is held — replay requires a recorder-free
+        // dispatcher.
+        NUnitCompat.Throws<InteractionReplayException>(
+            () => harness.Dispatcher.AcquireReplayLease());
+    }
+
+    [Test]
+    public async Task AnIdempotencyCacheHitIsRejectedWhileTheMaintenanceLeaseIsHeld()
+    {
+        using var harness = new Harness();
+        harness.Register("menu.start");
+        var options = new InteractionDispatchOptions(
+            InteractionOrigin.Test,
+            idempotencyKey: "idem-1");
+        await harness.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), options);
+
+        using var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync();
+
+        NUnitCompat.ThrowsAsync<InvalidOperationException>(
+            async () => await harness.Dispatcher.DispatchAsync(
+                new ClickCommand("menu.start"),
+                options));
+    }
+
     private static InteractionDispatchOptions Options(
         InteractionOrigin origin = InteractionOrigin.Test)
     {
