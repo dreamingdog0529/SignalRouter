@@ -146,7 +146,7 @@ internal sealed class HostDiscoveryStore
         var info = new DirectoryInfo(path);
         if (info.Exists)
         {
-            RequireProtected(info.GetAccessControl().AreAccessRulesProtected, path);
+            RequireWindowsOwnerOnly(info.GetAccessControl(), path);
             return;
         }
 
@@ -184,7 +184,27 @@ internal sealed class HostDiscoveryStore
     [SupportedOSPlatform("windows")]
     private static void VerifyOwnerOnlyWindows(string path)
     {
-        RequireProtected(new FileInfo(path).GetAccessControl().AreAccessRulesProtected, path);
+        RequireWindowsOwnerOnly(new FileInfo(path).GetAccessControl(), path);
+    }
+
+    // Owner-only means inheritance is disabled AND every explicit access rule
+    // grants only the current user. AreAccessRulesProtected alone describes
+    // inheritance, not who has access, so an inherited-off ACL that still grants
+    // another SID would otherwise pass (ADR 0008).
+    [SupportedOSPlatform("windows")]
+    private static void RequireWindowsOwnerOnly(FileSystemSecurity security, string path)
+    {
+        RequireProtected(security.AreAccessRulesProtected, path);
+        var owner = CurrentUser();
+        foreach (FileSystemAccessRule rule in
+            security.GetAccessRules(true, false, typeof(SecurityIdentifier)))
+        {
+            if (!rule.IdentityReference.Equals(owner))
+            {
+                throw new InvalidOperationException(
+                    "The descriptor path grants access to another identity: " + path);
+            }
+        }
     }
 
     [SupportedOSPlatform("windows")]
@@ -207,6 +227,10 @@ internal sealed class HostDiscoveryStore
         }
 
         Directory.CreateDirectory(path, dirMode);
+        // A restrictive umask can strip the requested bits at creation, so verify
+        // the resulting mode and fail closed rather than serving a directory the
+        // owner cannot use.
+        RequireUnixMode(File.GetUnixFileMode(path), dirMode, path);
     }
 
     [UnsupportedOSPlatform("windows")]
@@ -232,8 +256,10 @@ internal sealed class HostDiscoveryStore
 
     private static void RequireUnixMode(UnixFileMode actual, UnixFileMode ownerBits, string path)
     {
-        // No group or other bits may be set; the owner bits are the whole mode.
-        if ((actual & ~ownerBits) != UnixFileMode.None)
+        // Exact match: no group or other bits may be set, and the owner bits must
+        // all be present. A restrictive umask that strips an owner bit (leaving a
+        // write-only descriptor the runtime cannot read) must fail closed, not pass.
+        if (actual != ownerBits)
         {
             throw new InvalidOperationException(
                 "The descriptor path is not owner-only: " + path);

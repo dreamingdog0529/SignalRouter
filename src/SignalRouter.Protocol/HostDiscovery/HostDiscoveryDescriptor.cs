@@ -1,6 +1,5 @@
 using System;
 using System.Globalization;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 
@@ -206,6 +205,13 @@ namespace SignalRouter.Protocol.HostDiscovery
                 {
                     return false;
                 }
+
+                // Nothing but trailing whitespace may follow the object; a second
+                // value or trailing garbage means a corrupted or concatenated file.
+                if (reader.Read())
+                {
+                    return false;
+                }
             }
             catch (JsonException)
             {
@@ -304,8 +310,12 @@ namespace SignalRouter.Protocol.HostDiscovery
                 return false;
             }
 
+            // Only the two literal loopback hosts are permitted. IPAddress.IsLoopback
+            // would also accept other 127.0.0.0/8 addresses (127.0.0.2, 127.1, ...),
+            // which could name a different listener on the selected port.
             var host = uri.Host.Trim('[', ']');
-            if (!IPAddress.TryParse(host, out var address) || !IPAddress.IsLoopback(address))
+            if (!string.Equals(host, "127.0.0.1", StringComparison.Ordinal)
+                && !string.Equals(host, "::1", StringComparison.Ordinal))
             {
                 return false;
             }

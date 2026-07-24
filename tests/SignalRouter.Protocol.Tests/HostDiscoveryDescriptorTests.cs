@@ -70,6 +70,7 @@ public sealed class HostDiscoveryDescriptorTests
         Reject(Build(endpoint: "wss://127.0.0.1:8017/"), "wrong scheme");
         Reject(Build(endpoint: "ws://127.0.0.1:9999/"), "port mismatch");
         Reject(Build(endpoint: "ws://10.0.0.1:8017/"), "non-loopback");
+        Reject(Build(endpoint: "ws://127.0.0.2:8017/"), "other 127/8 address");
         Reject(Build(endpoint: "ws://user@127.0.0.1:8017/"), "userinfo");
         Reject(Build(endpoint: "ws://127.0.0.1:8017/?x=1"), "query");
         Reject(Build(endpoint: "ws://127.0.0.1:8017/#f"), "fragment");
@@ -110,6 +111,17 @@ public sealed class HostDiscoveryDescriptorTests
         Assert.That(HostDiscoveryDescriptor.TryParse("", Port, out _), Is.False);
         Assert.That(HostDiscoveryDescriptor.TryParse("not json", Port, out _), Is.False);
         Assert.That(HostDiscoveryDescriptor.TryParse("[]", Port, out _), Is.False);
+    }
+
+    [Test]
+    public void ContentAfterTheDescriptorObjectIsRejected()
+    {
+        // A valid object followed by a second value or garbage is a corrupted or
+        // concatenated file.
+        Assert.That(HostDiscoveryDescriptor.TryParse(Build() + "{}", Port, out _), Is.False);
+        Assert.That(HostDiscoveryDescriptor.TryParse(Build() + " garbage", Port, out _), Is.False);
+        // Trailing whitespace alone is fine.
+        Assert.That(HostDiscoveryDescriptor.TryParse(Build() + "\n  ", Port, out _), Is.True);
     }
 
     private static void Reject(string json, string because)

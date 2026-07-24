@@ -1,3 +1,4 @@
+using System.IO;
 using NUnit.Framework;
 using SignalRouter.Protocol.HostDiscovery;
 
@@ -65,10 +66,29 @@ public sealed class HostDiscoveryPathsTests
     [Test]
     public void ThePublicResolveNamesTheFileByPortOnTheCurrentOs()
     {
-        // Runs on both CI OSes; each covers its own branch of the resolver.
-        var location = HostDiscoveryPaths.Resolve(8017);
+        // Runs on both CI OSes; each covers its own branch of the resolver. On Unix
+        // XDG_RUNTIME_DIR must be set for the public resolver, and the ubuntu CI
+        // agent does not define it — so set and restore it here rather than depend
+        // on environment state.
+        var original = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                Environment.SetEnvironmentVariable("XDG_RUNTIME_DIR", Path.GetTempPath());
+            }
 
-        Assert.That(location.FilePath, Does.EndWith("host-8017.json"));
-        Assert.That(location.DirectoryPath, Is.Not.Empty);
+            var location = HostDiscoveryPaths.Resolve(8017);
+
+            Assert.That(location.FilePath, Does.EndWith("host-8017.json"));
+            Assert.That(location.DirectoryPath, Is.Not.Empty);
+        }
+        finally
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                Environment.SetEnvironmentVariable("XDG_RUNTIME_DIR", original);
+            }
+        }
     }
 }
