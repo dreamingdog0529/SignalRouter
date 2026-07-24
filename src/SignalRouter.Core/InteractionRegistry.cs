@@ -382,13 +382,25 @@ namespace SignalRouter
             InteractionContract.RequireDefinedEnum(view, nameof(view));
             var ids = new List<string>(targets.Keys);
             ids.Sort(StringComparer.Ordinal);
-            var descriptors = new List<InteractionDescriptor>();
 
+            // Describe and validate the full registered set once so the parent graph is
+            // validated against every registered target, independent of the requested view.
+            var described = new Dictionary<string, InteractionDescriptor>(StringComparer.Ordinal);
             foreach (var id in ids)
             {
                 var entry = targets[id];
                 var descriptor = entry.Target.Describe();
                 ValidateDescriptor(id, entry.Target, descriptor);
+                described[id] = descriptor;
+            }
+
+            ValidateParentGraph(described);
+
+            var descriptors = new List<InteractionDescriptor>();
+            foreach (var id in ids)
+            {
+                var entry = targets[id];
+                var descriptor = described[id];
                 if (view == InteractionRegistryView.Agent && !entry.AgentVisible)
                 {
                     continue;
@@ -403,6 +415,54 @@ namespace SignalRouter
             }
 
             return new InteractionRegistrySnapshot(SessionEpoch, Revision, descriptors);
+        }
+
+        // Validates the parent links across the full registered set for cycles and
+        // excessive depth. A parentId that does not resolve to a registered target is
+        // NOT an error: a target may be grouped under a non-interactive container that
+        // is not itself a registered interaction target, and agent-view filtering can
+        // remove a registered parent from the snapshot. Such an external parent
+        // terminates the chain. Self-parent links are already rejected at registration
+        // (ADR 0008).
+        private static void ValidateParentGraph(
+            IReadOnlyDictionary<string, InteractionDescriptor> described)
+        {
+            foreach (var startId in described.Keys)
+            {
+                var seen = new HashSet<string>(StringComparer.Ordinal) { startId };
+                var current = startId;
+                var depth = 0;
+                while (true)
+                {
+                    var parentId = described[current].ParentId;
+                    if (parentId == null || !described.ContainsKey(parentId))
+                    {
+                        break;
+                    }
+
+                    if (!seen.Add(parentId))
+                    {
+                        throw new InvalidOperationException(
+                            string.Format(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                "The parent chain of target '{0}' contains a cycle.",
+                                startId));
+                    }
+
+                    depth++;
+                    if (depth > InteractionSnapshotLimits.MaxParentChainDepth)
+                    {
+                        throw new InvalidOperationException(
+                            string.Format(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                "The parent chain of target '{0}' exceeds the maximum depth of {1}.",
+                                startId,
+                                InteractionSnapshotLimits.MaxParentChainDepth));
+                    }
+
+                    current = parentId;
+                }
+            }
         }
 
         private InteractionDescriptor FilterAgentInteractions(

@@ -362,6 +362,84 @@ public sealed class InteractionRegistryTests
             Throws.TypeOf<InvalidOperationException>());
     }
 
+    [Test]
+    public void SnapshotAllowsAParentOutsideTheRegisteredSet()
+    {
+        // A target may be grouped under a non-interactive container that is not itself a
+        // registered interaction target, and agent-view filtering can remove a registered
+        // parent from the snapshot. An unresolved parentId terminates the chain; it is not
+        // a dangling-link error (ADR 0008).
+        var registry = Registry();
+        using var child = registry.Register(TargetWithParent("child", "container"), true);
+
+        var snapshot = registry.GetSnapshot(InteractionRegistryView.All);
+
+        Assert.That(snapshot.Targets, Has.Count.EqualTo(1));
+    }
+
+    [Test]
+    public void SnapshotRejectsAParentCycle()
+    {
+        var registry = Registry();
+        using var a = registry.Register(TargetWithParent("a", "b"), true);
+        using var b = registry.Register(TargetWithParent("b", "a"), true);
+
+        NUnitCompat.ThatThrows(
+            () => registry.GetSnapshot(InteractionRegistryView.All),
+            Throws.TypeOf<InvalidOperationException>());
+    }
+
+    [Test]
+    public void SnapshotRejectsAParentChainBeyondTheMaximumDepth()
+    {
+        var registry = Registry();
+        var registrations = new List<IInteractionTargetRegistration>();
+        string? parent = null;
+        for (var index = 0; index <= InteractionSnapshotLimits.MaxParentChainDepth + 1; index++)
+        {
+            registrations.Add(registry.Register(TargetWithParent("t" + index, parent), true));
+            parent = "t" + index;
+        }
+
+        NUnitCompat.ThatThrows(
+            () => registry.GetSnapshot(InteractionRegistryView.All),
+            Throws.TypeOf<InvalidOperationException>());
+
+        foreach (var registration in registrations)
+        {
+            registration.Dispose();
+        }
+    }
+
+    [Test]
+    public void SnapshotAcceptsAValidParentChain()
+    {
+        var registry = Registry();
+        using var parent = registry.Register(TargetWithParent("parent", null), true);
+        using var child = registry.Register(TargetWithParent("child", "parent"), true);
+
+        var snapshot = registry.GetSnapshot(InteractionRegistryView.All);
+
+        Assert.That(snapshot.Targets, Has.Count.EqualTo(2));
+    }
+
+    private static TestTarget TargetWithParent(string id, string? parentId)
+    {
+        return new TestTarget(
+            id,
+            new InteractionDescriptor(
+                id,
+                parentId,
+                "button",
+                "Start",
+                null,
+                true,
+                true,
+                new[] { Click() }),
+            true,
+            false);
+    }
+
     private static InteractionRegistry Registry()
     {
         return new InteractionRegistry(

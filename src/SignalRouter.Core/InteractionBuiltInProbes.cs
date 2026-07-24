@@ -56,6 +56,19 @@ namespace SignalRouter
                 writer.WriteEndObject();
             }
 
+            // Capture-side ceiling: fail fast rather than emit an oversized snapshot.
+            // The wire layer independently enforces the negotiated per-direction limit
+            // (ADR 0008).
+            if (buffer.WrittenCount > InteractionSnapshotLimits.MaxSnapshotBytes)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "The captured snapshot of {0} bytes exceeds the maximum of {1} bytes.",
+                        buffer.WrittenCount,
+                        InteractionSnapshotLimits.MaxSnapshotBytes));
+            }
+
             return StateProbeSnapshot.FromUtf8Bytes(buffer.WrittenMemory);
         }
 

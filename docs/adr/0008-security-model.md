@@ -176,8 +176,11 @@ Cardinality caps:
 | arguments per interaction | 16 |
 | parent-chain depth | 32 |
 
-Structural validation: the parent graph must have **no cycles and no dangling
-`parentId`**, and no chain deeper than the cap.
+Structural validation: the parent graph must have **no cycles** and no chain deeper
+than the cap. A `parentId` that does not resolve to a registered target is **not** an
+error — a target may be grouped under a non-interactive container that is not itself a
+registered interaction target, and agent-view filtering can remove a registered parent
+from the snapshot — so an unresolved parent simply terminates the chain.
 
 Enforcement points:
 
