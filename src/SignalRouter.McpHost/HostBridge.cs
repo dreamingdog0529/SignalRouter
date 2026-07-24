@@ -158,6 +158,11 @@ public sealed class HostOperationReport
     public static HostOperationReport Refused(string operationId, string errorCode, string detail)
         => new("refused", operationId, null, null, null, null, errorCode + ": " + detail);
 
+    // A refusal reconstructed from a queried control_operation_result, whose
+    // detail already carries the runtime's non-secret summary.
+    public static HostOperationReport RefusedDetail(string operationId, string? detail)
+        => new("refused", operationId, null, null, null, null, detail);
+
     public static HostOperationReport Pending(string operationId)
         => new("pending", operationId, null, null, null, null, null);
 
@@ -196,6 +201,12 @@ public sealed class HostBridge : IDisposable
     // complete the operation as a refusal instead of hanging until the tool
     // timeout (Codex review, item 8d).
     private readonly Dictionary<string, string> controlMessageToOperation =
+        new(StringComparer.Ordinal);
+
+    // Outstanding get_control_operation_result queries, keyed by the operation ID
+    // they ask about. A query reconciles an operation the tool call could not
+    // observe synchronously — after its timeout, or after a reconnect (item 8d).
+    private readonly Dictionary<string, TaskCompletionSource<ControlOperationResultMessage>> pendingQueries =
         new(StringComparer.Ordinal);
 
     // `active` claims the single-runtime slot at accept time; `ready` is the
@@ -502,6 +513,7 @@ public sealed class HostBridge : IDisposable
         CancellationToken cancellationToken)
     {
         return RunControlOperationAsync(
+            HostControlOperationKind.StartRecording,
             operationId => new StartRecordingMessage(
                 options.MessageIdSource(),
                 RequireEpoch(),
@@ -513,6 +525,7 @@ public sealed class HostBridge : IDisposable
     public Task<HostOperationReport> StopRecordingAsync(CancellationToken cancellationToken)
     {
         return RunControlOperationAsync(
+            HostControlOperationKind.StopRecording,
             operationId => new StopRecordingMessage(
                 options.MessageIdSource(),
                 RequireEpoch(),
@@ -525,12 +538,67 @@ public sealed class HostBridge : IDisposable
         CancellationToken cancellationToken)
     {
         return RunControlOperationAsync(
+            HostControlOperationKind.ReplayRecording,
             operationId => new ReplayRecordingMessage(
                 options.MessageIdSource(),
                 RequireEpoch(),
                 operationId,
                 recordingHandle),
             cancellationToken);
+    }
+
+    // Reconciles a control operation the caller only saw as "pending" — because
+    // the tool timed out or the connection dropped. Queries the runtime's
+    // operation ledger by ID; a terminal answer clears the single-flight slot so
+    // new control operations can proceed (item 8d).
+    public async Task<HostOperationReport> QueryControlOperationAsync(
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(operationId))
+        {
+            throw new ArgumentException(
+                "The operation ID must be provided.",
+                nameof(operationId));
+        }
+
+        ActiveConnection? connection;
+        TaskCompletionSource<ControlOperationResultMessage> query;
+        ProtocolMessage message;
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (sessionEpoch == null || ready == null)
+            {
+                return HostOperationReport.Disconnected();
+            }
+
+            message = new GetControlOperationResultMessage(
+                options.MessageIdSource(),
+                sessionEpoch,
+                operationId);
+            query = new TaskCompletionSource<ControlOperationResultMessage>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            pendingQueries[operationId] = query;
+            connection = ready;
+        }
+
+        await TrySendAsync(connection, message, cancellationToken).ConfigureAwait(false);
+
+        var completed = await Task.WhenAny(
+            query.Task,
+            Task.Delay(options.ToolTimeout, cancellationToken)).ConfigureAwait(false);
+        lock (gate)
+        {
+            pendingQueries.Remove(operationId);
+        }
+
+        if (!ReferenceEquals(completed, query.Task))
+        {
+            return HostOperationReport.Pending(operationId);
+        }
+
+        return ResolveQueryResult(await query.Task.ConfigureAwait(false));
     }
 
     public void Dispose()
@@ -547,6 +615,7 @@ public sealed class HostBridge : IDisposable
     }
 
     private async Task<HostOperationReport> RunControlOperationAsync(
+        HostControlOperationKind kind,
         Func<string, ProtocolMessage> build,
         CancellationToken cancellationToken)
     {
@@ -562,8 +631,21 @@ public sealed class HostBridge : IDisposable
                 return HostOperationReport.Disconnected();
             }
 
+            // Single-flight: one control operation at a time. The runtime enforces
+            // the same, but refusing here avoids a wasted round trip. A prior
+            // operation that only timed out still holds the slot until a late ack
+            // or a query resolves it.
+            if (pendingOperations.Count > 0)
+            {
+                return HostOperationReport.Refused(
+                    operationId,
+                    ProtocolErrorCodes.ControlInProgress,
+                    "another control operation is in progress");
+            }
+
             message = build(operationId);
-            pending = new PendingOperation(operationId);
+            pending = new PendingOperation(operationId, kind, message);
+            pending.MarkSendAttempted(options.Clock());
             pendingOperations.Add(operationId, pending);
             controlMessageToOperation[message.MessageId] = operationId;
             connection = ready;
@@ -571,18 +653,18 @@ public sealed class HostBridge : IDisposable
 
         await TrySendAsync(connection, message, cancellationToken).ConfigureAwait(false);
 
-        // Control operations span a runtime recreation and reconnect, so they
-        // get the tool timeout rather than the shorter reply budget.
+        // Control operations span a maintenance quiesce (and, for replay, an
+        // isolated verification run), so they get the tool timeout rather than the
+        // shorter reply budget.
         var completed = await Task.WhenAny(
             pending.Completion.Task,
             Task.Delay(options.ToolTimeout, cancellationToken)).ConfigureAwait(false);
         if (!ReferenceEquals(completed, pending.Completion.Task))
         {
-            lock (gate)
-            {
-                pendingOperations.Remove(operationId);
-            }
-
+            // Gap B (Codex review): do NOT drop the operation on timeout. It stays
+            // tracked so a late acknowledgment completes it, a reconnect resends
+            // it, or a query reconciles it — and single-flight keeps blocking new
+            // operations until then.
             return HostOperationReport.Pending(operationId);
         }
 
@@ -745,6 +827,36 @@ public sealed class HostBridge : IDisposable
                     cancellationToken).ConfigureAwait(false);
             }
         }
+
+        // A control operation whose connection dropped before its acknowledgment
+        // arrived is resent, byte-for-byte, with the same operationId. The runtime
+        // deduplicates against its operation ledger — a drop before it saw the
+        // request re-runs it; a drop after re-delivers the retained result. The
+        // recovery window anchors at the first send, past which a resend could
+        // re-run against a runtime that forgot, so beyond it the operation is left
+        // for an explicit query to reconcile.
+        PendingOperation? operation;
+        lock (gate)
+        {
+            operation = null;
+            foreach (var candidate in pendingOperations.Values)
+            {
+                operation = candidate;
+                break;
+            }
+        }
+
+        if (operation != null)
+        {
+            var now = options.Clock();
+            var window = connection.Session!.RecoveryWindow;
+            if (operation.FirstSentAt == null || now - operation.FirstSentAt.Value < window)
+            {
+                operation.MarkSendAttempted(now);
+                await TrySendAsync(connection, operation.Message, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
     }
 
     private async Task ReceiveLoopAsync(
@@ -842,6 +954,7 @@ public sealed class HostBridge : IDisposable
             case RecordingStartedMessage started:
                 CompleteOperation(
                     started.OperationId,
+                    HostControlOperationKind.StartRecording,
                     HostOperationReport.RecordingStarted(
                         started.OperationId,
                         started.RecordingHandle,
@@ -850,6 +963,7 @@ public sealed class HostBridge : IDisposable
             case RecordingStoppedMessage stopped:
                 CompleteOperation(
                     stopped.OperationId,
+                    HostControlOperationKind.StopRecording,
                     HostOperationReport.RecordingStopped(
                         stopped.OperationId,
                         stopped.RecordingHandle,
@@ -859,11 +973,15 @@ public sealed class HostBridge : IDisposable
             case ReplayReportMessage replay:
                 CompleteOperation(
                     replay.OperationId,
+                    HostControlOperationKind.ReplayRecording,
                     HostOperationReport.Replayed(
                         replay.OperationId,
                         replay.OutcomeKind,
                         replay.NewSessionEpoch,
                         replay.Detail));
+                return;
+            case ControlOperationResultMessage controlResult:
+                CompleteControlQuery(controlResult);
                 return;
             case ErrorMessage error:
                 await HandleErrorAsync(connection, error, cancellationToken).ConfigureAwait(false);
@@ -897,7 +1015,99 @@ public sealed class HostBridge : IDisposable
             HostExecuteReport.Completed(result.RequestId!, result.Result));
     }
 
-    private void CompleteOperation(string operationId, HostOperationReport report)
+    private void CompleteOperation(
+        string operationId,
+        HostControlOperationKind ackKind,
+        HostOperationReport report)
+    {
+        PendingOperation? pending;
+        lock (gate)
+        {
+            if (!pendingOperations.TryGetValue(operationId, out pending))
+            {
+                return;
+            }
+
+            // The acknowledgment must match the operation it claims to complete;
+            // a start op is never completed by a replay report (Codex review). A
+            // mismatch is left in place, unresolved.
+            if (pending.Kind != ackKind)
+            {
+                return;
+            }
+
+            pendingOperations.Remove(operationId);
+            ForgetControlMessageMapping(operationId);
+        }
+
+        pending.Completion.TrySetResult(report);
+    }
+
+    private void CompleteControlQuery(ControlOperationResultMessage result)
+    {
+        TaskCompletionSource<ControlOperationResultMessage>? query;
+        lock (gate)
+        {
+            pendingQueries.TryGetValue(result.OperationId, out query);
+        }
+
+        query?.TrySetResult(result);
+    }
+
+    // Maps a queried control_operation_result to a host report and, when the
+    // answer is terminal, clears the operation from the single-flight slot so new
+    // control operations can proceed.
+    private HostOperationReport ResolveQueryResult(ControlOperationResultMessage result)
+    {
+        if (string.Equals(
+                result.State,
+                ProtocolControlOperationStates.Completed,
+                StringComparison.Ordinal))
+        {
+            HostOperationReport report;
+            if (result.OutcomeKind != null)
+            {
+                report = HostOperationReport.Replayed(
+                    result.OperationId,
+                    result.OutcomeKind,
+                    result.NewSessionEpoch,
+                    result.Detail);
+            }
+            else if (result.EntryCount != null)
+            {
+                report = HostOperationReport.RecordingStopped(
+                    result.OperationId,
+                    result.RecordingHandle!,
+                    result.EntryCount.Value,
+                    result.NewSessionEpoch);
+            }
+            else
+            {
+                report = HostOperationReport.RecordingStarted(
+                    result.OperationId,
+                    result.RecordingHandle!,
+                    result.NewSessionEpoch);
+            }
+
+            ClearResolvedOperation(result.OperationId, report);
+            return report;
+        }
+
+        if (string.Equals(
+                result.State,
+                ProtocolControlOperationStates.Refused,
+                StringComparison.Ordinal))
+        {
+            var refused = HostOperationReport.RefusedDetail(result.OperationId, result.Detail);
+            ClearResolvedOperation(result.OperationId, refused);
+            return refused;
+        }
+
+        // pending / in_progress: still running, the slot stays claimed.
+        return HostOperationReport.Pending(result.OperationId);
+    }
+
+    private void ClearResolvedOperation(string operationId, HostOperationReport report)
     {
         PendingOperation? pending;
         lock (gate)
@@ -910,6 +1120,9 @@ public sealed class HostBridge : IDisposable
             ForgetControlMessageMapping(operationId);
         }
 
+        // The original tool call has already returned Pending (a query only runs
+        // after that timeout), so completing its task now is just cleanup that
+        // frees the waiter; the result is authoritative for the query caller.
         pending?.Completion.TrySetResult(report);
     }
 
@@ -1241,16 +1454,46 @@ public sealed class HostBridge : IDisposable
 
     private sealed class PendingOperation
     {
-        public PendingOperation(string operationId)
+        public PendingOperation(
+            string operationId,
+            HostControlOperationKind kind,
+            ProtocolMessage message)
         {
             OperationId = operationId;
+            Kind = kind;
+            Message = message;
             Completion = new TaskCompletionSource<HostOperationReport>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
         public string OperationId { get; }
 
+        // The acknowledgment shape this operation expects, so a start op is never
+        // completed by a replay report (Codex review, item 8d).
+        public HostControlOperationKind Kind { get; }
+
+        // The exact control message, retained so a same-epoch reconnect can resend
+        // it byte-for-byte; the runtime's operation ledger deduplicates by
+        // operationId.
+        public ProtocolMessage Message { get; }
+
+        // The first transmission attempt; the recovery window for a resend anchors
+        // here, never at local creation time.
+        public DateTimeOffset? FirstSentAt { get; private set; }
+
         public TaskCompletionSource<HostOperationReport> Completion { get; }
+
+        public void MarkSendAttempted(DateTimeOffset time)
+        {
+            FirstSentAt ??= time;
+        }
+    }
+
+    private enum HostControlOperationKind
+    {
+        StartRecording,
+        StopRecording,
+        ReplayRecording,
     }
 
     private sealed class ActiveConnection

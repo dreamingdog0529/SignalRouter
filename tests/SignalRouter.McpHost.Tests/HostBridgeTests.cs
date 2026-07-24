@@ -9,6 +9,7 @@ namespace SignalRouter.McpHost.Tests;
 public sealed class HostBridgeTests
 {
     private const string Epoch = "epoch-1";
+    private const string Handle = "rec-20260724t0100-1a2b3c4d";
 
     [Test]
     public async Task TheHandshakeEchoesTheEpochAndSelectsTheVersion()
@@ -363,6 +364,117 @@ public sealed class HostBridgeTests
         var report = await stopTask;
         Assert.That(report.Status, Is.EqualTo("refused"));
         Assert.That(report.Detail, Does.Contain(ProtocolErrorCodes.RecordingUnavailable));
+    }
+
+    [Test]
+    public async Task ASecondConcurrentControlOperationIsRefusedAsInProgress()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
+        using var peer = await harness.ConnectRuntimeAsync();
+        await peer.PerformHandshakeAsync();
+
+        var startTask = harness.Bridge.StartRecordingAsync("a", CancellationToken.None);
+        var start = (StartRecordingMessage)await peer.ReceiveAsync();
+
+        // A second control operation while the first is unresolved is refused
+        // before any wire traffic — single-flight.
+        var refused = await harness.Bridge.StopRecordingAsync(CancellationToken.None);
+        Assert.That(refused.Status, Is.EqualTo("refused"));
+        Assert.That(refused.Detail, Does.Contain(ProtocolErrorCodes.ControlInProgress));
+
+        await peer.SendAsync(new RecordingStartedMessage(
+            peer.NextId(), Epoch, start.OperationId, Handle, Epoch));
+        var report = await startTask;
+        Assert.That(report.Status, Is.EqualTo("recording_started"));
+    }
+
+    [Test]
+    public async Task AMismatchedAcknowledgmentDoesNotCompleteTheOperation()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
+        using var peer = await harness.ConnectRuntimeAsync();
+        await peer.PerformHandshakeAsync();
+
+        var startTask = harness.Bridge.StartRecordingAsync("a", CancellationToken.None);
+        var start = (StartRecordingMessage)await peer.ReceiveAsync();
+
+        // A replay report bearing the start operation's ID must not complete it.
+        await peer.SendAsync(new ReplayReportMessage(
+            peer.NextId(), Epoch, start.OperationId, ProtocolReplayOutcomes.Completed, Epoch));
+        // The correct acknowledgment still resolves it as a recording start.
+        await peer.SendAsync(new RecordingStartedMessage(
+            peer.NextId(), Epoch, start.OperationId, Handle, Epoch));
+
+        var report = await startTask;
+        Assert.That(report.Status, Is.EqualTo("recording_started"));
+        Assert.That(report.RecordingHandle, Is.EqualTo(Handle));
+    }
+
+    [Test]
+    public async Task ATimedOutOperationIsReconciledByAQuery()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromMilliseconds(200));
+        using var peer = await harness.ConnectRuntimeAsync();
+        await peer.PerformHandshakeAsync();
+
+        var startTask = harness.Bridge.StartRecordingAsync("a", CancellationToken.None);
+        var start = (StartRecordingMessage)await peer.ReceiveAsync();
+
+        // The runtime never acknowledges within the tool timeout: the operation is
+        // retained, and the tool answers pending (Gap B).
+        var pending = await startTask;
+        Assert.That(pending.Status, Is.EqualTo("pending"));
+        Assert.That(pending.OperationId, Is.EqualTo(start.OperationId));
+
+        var queryTask = harness.Bridge.QueryControlOperationAsync(
+            start.OperationId,
+            CancellationToken.None);
+        var query = (GetControlOperationResultMessage)await peer.ReceiveAsync();
+        Assert.That(query.OperationId, Is.EqualTo(start.OperationId));
+
+        await peer.SendAsync(new ControlOperationResultMessage(
+            peer.NextId(),
+            Epoch,
+            start.OperationId,
+            ProtocolControlOperationStates.Completed,
+            Epoch,
+            recordingHandle: Handle));
+
+        var report = await queryTask;
+        Assert.That(report.Status, Is.EqualTo("recording_started"));
+        Assert.That(report.RecordingHandle, Is.EqualTo(Handle));
+
+        // The slot is free again once the query reconciled the operation.
+        var next = await harness.Bridge.StopRecordingAsync(CancellationToken.None);
+        Assert.That(next.Status, Is.Not.EqualTo("refused"));
+    }
+
+    [Test]
+    public async Task AnInFlightControlOperationIsResentAfterAReconnect()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
+        var firstPeer = await harness.ConnectRuntimeAsync();
+        await firstPeer.PerformHandshakeAsync();
+
+        var startTask = harness.Bridge.StartRecordingAsync("a", CancellationToken.None);
+        var start = (StartRecordingMessage)await firstPeer.ReceiveAsync();
+
+        // The connection drops before the acknowledgment. A same-epoch reconnect
+        // resends the operation byte-for-byte; the runtime deduplicates by
+        // operationId.
+        firstPeer.Drop();
+        await harness.WaitForDisconnectAsync();
+        using var secondPeer = await harness.ConnectRuntimeAsync();
+        await secondPeer.PerformHandshakeAsync();
+
+        var resent = (StartRecordingMessage)await secondPeer.ReceiveAsync();
+        Assert.That(resent.OperationId, Is.EqualTo(start.OperationId));
+
+        await secondPeer.SendAsync(new RecordingStartedMessage(
+            secondPeer.NextId(), Epoch, start.OperationId, Handle, Epoch));
+        var report = await startTask;
+        Assert.That(report.Status, Is.EqualTo("recording_started"));
+        firstPeer.Dispose();
     }
 
     private static ProtocolInteractionOutcome SucceededOutcome(string requestId)
