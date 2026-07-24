@@ -184,22 +184,33 @@ from the snapshot — so an unresolved parent simply terminates the chain.
 
 Enforcement points:
 
-1. **Registration** — per-target field and cardinality caps and parent-link validity are
-   checked before a descriptor changes registry state (registration already fails fast on
-   contract violations; these extend it). A violation throws and leaves the registry
-   unchanged.
-2. **Snapshot capture** — total agent-visible cardinality and the **aggregate serialized
-   byte size** are checked as the snapshot is produced. If serialization would exceed the
-   negotiated send limit, capture fails fast rather than emitting a truncated snapshot or
-   deferring the cost to the wire layer.
+1. **Registration** — per-target field caps and per-target cardinality caps (interactions
+   per target, arguments per interaction) are checked before a descriptor changes registry
+   state (registration already fails fast on contract violations; these extend it). A
+   violation throws and leaves the registry unchanged. Cross-target rules (the target
+   count and the parent graph) cannot be decided from one descriptor — a parent may be
+   registered later — so they are enforced at capture.
+2. **Snapshot capture** — the agent-visible **target count** (checked after view
+   filtering, because the documented bound is agent-visible targets), the **parent graph**
+   (cycles and depth over the full registered set), and a fixed Core **byte ceiling** are
+   enforced. The byte ceiling is checked **while writing**, not after, so a pathological
+   registry cannot allocate far beyond the bound before failing. Core is
+   session-independent and cannot know a connection's negotiated limit; the byte ceiling
+   is a fixed value below the protocol's default receive limit, and the **transport**
+   enforces the negotiated per-direction limit at send time (`payload_too_large`).
 3. **Host receive** — the host re-validates snapshot shape and counts within its own
-   declared receive limit; it does not trust the peer to have enforced them.
+   declared receive limit; it does not trust the peer to have enforced them, and rejects a
+   malformed element (a non-object target/interaction/argument or a duplicate target ID)
+   rather than skipping it.
 
-The exact cardinality numbers above are provisional: PR-2 confirms that
-`maxTargets × worst-case-node-size + envelope ≤ negotiated limit` holds for the caps as
-written and benchmarks a realistic UI for allocation/latency, adjusting the cardinality
-caps (not the method) if the measurement requires it. State-history length (§14.1) stays
-unbounded-by-absence: the feature does not exist yet, so item 9 adds no history cap.
+The cardinality numbers above are provisional. A single worst-case node at the caps (16
+interactions × 16 maximum-length arguments plus a maximum-length value) far exceeds any
+wire limit, so the byte ceiling — not `count × worst-case-node` — is the binding guard.
+PR-2 confirms a realistic UI populated to the target cap captures within the byte ceiling
+with headroom and that the ceiling sits below the default receive limit, adjusting the
+cardinality caps (not the method) if measurement requires it. State-history length
+(§14.1) stays unbounded-by-absence: the feature does not exist yet, so item 9 adds no
+history cap.
 
 ### Release gating
 

@@ -308,15 +308,6 @@ namespace SignalRouter
                         targetId));
             }
 
-            if (targets.Count >= InteractionSnapshotLimits.MaxSnapshotTargets)
-            {
-                throw new InvalidOperationException(
-                    string.Format(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        "The registry cannot exceed {0} registered targets.",
-                        InteractionSnapshotLimits.MaxSnapshotTargets));
-            }
-
             ValidateDescriptor(targetId, target, target.Describe());
             var token = new object();
             targets.Add(targetId, new TargetEntry(target, agentVisible, token));
@@ -412,6 +403,19 @@ namespace SignalRouter
                 }
 
                 descriptors.Add(descriptor);
+            }
+
+            // The documented bound is agent-visible targets per snapshot, so it is
+            // enforced after view filtering: an application may register many human-only
+            // controls without inflating the agent snapshot (ADR 0008).
+            if (view == InteractionRegistryView.Agent
+                && descriptors.Count > InteractionSnapshotLimits.MaxSnapshotTargets)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "An agent snapshot cannot exceed {0} targets.",
+                        InteractionSnapshotLimits.MaxSnapshotTargets));
             }
 
             return new InteractionRegistrySnapshot(SessionEpoch, Revision, descriptors);

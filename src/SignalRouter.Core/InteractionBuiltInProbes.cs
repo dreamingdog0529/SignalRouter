@@ -50,23 +50,24 @@ namespace SignalRouter
                 foreach (var descriptor in snapshot.Targets)
                 {
                     WriteDescriptor(writer, descriptor);
+
+                    // Enforce the ceiling WHILE writing so a pathological registry cannot
+                    // allocate far beyond the bound before the guard fires. The wire layer
+                    // independently enforces the negotiated per-direction limit at send
+                    // time (ADR 0008).
+                    if (writer.BytesCommitted + writer.BytesPending
+                        > InteractionSnapshotLimits.MaxSnapshotBytes)
+                    {
+                        throw new InvalidOperationException(
+                            string.Format(
+                                CultureInfo.InvariantCulture,
+                                "The captured snapshot exceeds the maximum of {0} bytes.",
+                                InteractionSnapshotLimits.MaxSnapshotBytes));
+                    }
                 }
 
                 writer.WriteEndArray();
                 writer.WriteEndObject();
-            }
-
-            // Capture-side ceiling: fail fast rather than emit an oversized snapshot.
-            // The wire layer independently enforces the negotiated per-direction limit
-            // (ADR 0008).
-            if (buffer.WrittenCount > InteractionSnapshotLimits.MaxSnapshotBytes)
-            {
-                throw new InvalidOperationException(
-                    string.Format(
-                        CultureInfo.InvariantCulture,
-                        "The captured snapshot of {0} bytes exceeds the maximum of {1} bytes.",
-                        buffer.WrittenCount,
-                        InteractionSnapshotLimits.MaxSnapshotBytes));
             }
 
             return StateProbeSnapshot.FromUtf8Bytes(buffer.WrittenMemory);

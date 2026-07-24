@@ -63,7 +63,7 @@ namespace SignalRouter.Protocol
                 {
                     if (target.ValueKind != JsonValueKind.Object)
                     {
-                        continue;
+                        throw Rejected(parameterName, "target shape");
                     }
 
                     ValidateTarget(target, parameterName, parents);
@@ -116,7 +116,7 @@ namespace SignalRouter.Protocol
                 {
                     if (interaction.ValueKind != JsonValueKind.Object)
                     {
-                        continue;
+                        throw Rejected(parameterName, "interaction shape");
                     }
 
                     ValidateInteraction(interaction, parameterName);
@@ -125,6 +125,11 @@ namespace SignalRouter.Protocol
 
             if (id != null)
             {
+                if (parents.ContainsKey(id))
+                {
+                    throw Rejected(parameterName, "duplicate target id");
+                }
+
                 parents[id] = parentId;
             }
         }
@@ -153,7 +158,7 @@ namespace SignalRouter.Protocol
             {
                 if (argument.ValueKind != JsonValueKind.Object)
                 {
-                    continue;
+                    throw Rejected(parameterName, "argument shape");
                 }
 
                 RequireBounded(

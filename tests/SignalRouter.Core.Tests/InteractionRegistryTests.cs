@@ -349,17 +349,36 @@ public sealed class InteractionRegistryTests
     }
 
     [Test]
-    public void RegistrationRejectsTargetsBeyondTheSnapshotCap()
+    public void AgentSnapshotRejectsTooManyAgentVisibleTargets()
     {
         var registry = Registry();
-        for (var index = 0; index < InteractionSnapshotLimits.MaxSnapshotTargets; index++)
+        for (var index = 0; index <= InteractionSnapshotLimits.MaxSnapshotTargets; index++)
         {
             registry.Register(Target("t" + index, Click()), true);
         }
 
         NUnitCompat.ThatThrows(
-            () => registry.Register(Target("overflow", Click()), true),
+            () => registry.GetSnapshot(InteractionRegistryView.Agent),
             Throws.TypeOf<InvalidOperationException>());
+    }
+
+    [Test]
+    public void HiddenTargetsDoNotCountAgainstTheAgentSnapshotCap()
+    {
+        // The bound is agent-visible targets per snapshot, so an application may register
+        // more than the cap in total human-only controls and still produce a small agent
+        // snapshot (ADR 0008).
+        var registry = Registry();
+        for (var index = 0; index < InteractionSnapshotLimits.MaxSnapshotTargets + 50; index++)
+        {
+            registry.Register(Target("t" + index, Click()), false);
+        }
+
+        registry.Register(Target("visible", Click()), true);
+
+        var snapshot = registry.GetSnapshot(InteractionRegistryView.Agent);
+
+        Assert.That(snapshot.Targets, Has.Count.EqualTo(1));
     }
 
     [Test]

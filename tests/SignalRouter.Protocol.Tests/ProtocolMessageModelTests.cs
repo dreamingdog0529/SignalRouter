@@ -424,6 +424,15 @@ public sealed class ProtocolMessageModelTests
                 "{\"id\":\"a\",\"parentId\":\"b\"},{\"id\":\"b\",\"parentId\":\"a\"}"));
         NUnitCompat.Throws<ArgumentException>(() => _ = Snapshot(DeepChain()));
 
+        // A non-object target must be rejected, not silently skipped: downstream
+        // projections would otherwise crash reading its properties.
+        NUnitCompat.Throws<ArgumentException>(() => _ = Snapshot("1"));
+
+        // A duplicate target ID must be rejected before graph validation, or a later
+        // entry could erase an earlier cycle.
+        NUnitCompat.Throws<ArgumentException>(
+            () => _ = Snapshot("{\"id\":\"a\"},{\"id\":\"a\"}"));
+
         // A parent outside the received set terminates the chain and is accepted.
         Assert.That(
             Snapshot("{\"id\":\"child\",\"parentId\":\"external-container\"}").SnapshotJson,
