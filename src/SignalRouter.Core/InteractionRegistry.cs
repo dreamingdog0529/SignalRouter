@@ -308,6 +308,15 @@ namespace SignalRouter
                         targetId));
             }
 
+            if (targets.Count >= InteractionSnapshotLimits.MaxSnapshotTargets)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "The registry cannot exceed {0} registered targets.",
+                        InteractionSnapshotLimits.MaxSnapshotTargets));
+            }
+
             ValidateDescriptor(targetId, target, target.Describe());
             var token = new object();
             targets.Add(targetId, new TargetEntry(target, agentVisible, token));
@@ -421,6 +430,19 @@ namespace SignalRouter
             return descriptor.WithAvailableInteractions(interactions);
         }
 
+        private static void RequireBoundedLength(string? value, int maxChars, string field)
+        {
+            if (value != null && value.Length > maxChars)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "The descriptor {0} exceeds the maximum length of {1} characters.",
+                        field,
+                        maxChars));
+            }
+        }
+
         private void ValidateDescriptor(
             string registeredId,
             IInteractionTarget target,
@@ -449,18 +471,40 @@ namespace SignalRouter
                         descriptor.Id));
             }
 
+            RequireBoundedLength(
+                descriptor.Id,
+                InteractionSnapshotLimits.MaxTargetIdChars,
+                "id");
             InteractionContract.RequireOptionalIdentifier(
                 descriptor.ParentId,
                 nameof(descriptor));
+            RequireBoundedLength(
+                descriptor.ParentId,
+                InteractionSnapshotLimits.MaxTargetIdChars,
+                "parentId");
             if (string.Equals(descriptor.Id, descriptor.ParentId, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("A target cannot be its own parent.");
             }
 
             InteractionContract.RequireIdentifier(descriptor.Role, nameof(descriptor));
+            RequireBoundedLength(descriptor.Role, InteractionSnapshotLimits.MaxRoleChars, "role");
             if (descriptor.Label == null)
             {
                 throw new InvalidOperationException("A descriptor label must not be null.");
+            }
+
+            RequireBoundedLength(
+                descriptor.Label,
+                InteractionSnapshotLimits.MaxLabelChars,
+                "label");
+            if (descriptor.Value != null
+                && descriptor.Value.Kind == InteractionValueKind.String)
+            {
+                RequireBoundedLength(
+                    descriptor.Value.GetString(),
+                    InteractionSnapshotLimits.MaxValueChars,
+                    "value");
             }
 
             if (descriptor.AvailableInteractions.Count == 0)
@@ -469,16 +513,48 @@ namespace SignalRouter
                     "A registered interaction target must expose at least one operation.");
             }
 
+            if (descriptor.AvailableInteractions.Count
+                > InteractionSnapshotLimits.MaxAvailableInteractionsPerTarget)
+            {
+                throw new InvalidOperationException(
+                    string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "A registered interaction target must expose at most {0} operations.",
+                        InteractionSnapshotLimits.MaxAvailableInteractionsPerTarget));
+            }
+
             var identities = new HashSet<CommandIdentity>();
             foreach (var interaction in descriptor.AvailableInteractions)
             {
                 InteractionContract.RequireIdentifier(
                     interaction.WireName,
                     nameof(descriptor));
+                RequireBoundedLength(
+                    interaction.WireName,
+                    InteractionSnapshotLimits.MaxInteractionNameChars,
+                    "interaction wire name");
                 if (interaction.Version < 1)
                 {
                     throw new InvalidOperationException(
                         "Descriptor command versions must be positive.");
+                }
+
+                if (interaction.Arguments.Arguments.Count
+                    > InteractionSnapshotLimits.MaxArgumentsPerInteraction)
+                {
+                    throw new InvalidOperationException(
+                        string.Format(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            "An interaction must declare at most {0} arguments.",
+                            InteractionSnapshotLimits.MaxArgumentsPerInteraction));
+                }
+
+                foreach (var argument in interaction.Arguments.Arguments)
+                {
+                    RequireBoundedLength(
+                        argument.Name,
+                        InteractionSnapshotLimits.MaxArgumentNameChars,
+                        "argument name");
                 }
 
                 var identity = new CommandIdentity(

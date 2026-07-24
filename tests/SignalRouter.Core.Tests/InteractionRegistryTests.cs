@@ -215,6 +215,153 @@ public sealed class InteractionRegistryTests
         Assert.That(registry.Revision, Is.EqualTo(1));
     }
 
+    [Test]
+    public void RegistrationRejectsAnOverlongLabel()
+    {
+        var registry = Registry();
+        var target = new TestTarget(
+            "menu.start",
+            new InteractionDescriptor(
+                "menu.start",
+                null,
+                "button",
+                new string('x', InteractionSnapshotLimits.MaxLabelChars + 1),
+                null,
+                true,
+                true,
+                new[] { Click() }),
+            true,
+            false);
+
+        NUnitCompat.ThatThrows(
+            () => registry.Register(target, true),
+            Throws.TypeOf<InvalidOperationException>());
+        Assert.That(registry.Revision, Is.Zero);
+    }
+
+    [Test]
+    public void RegistrationAcceptsALabelAtTheMaximumLength()
+    {
+        var registry = Registry();
+        var target = new TestTarget(
+            "menu.start",
+            new InteractionDescriptor(
+                "menu.start",
+                null,
+                "button",
+                new string('x', InteractionSnapshotLimits.MaxLabelChars),
+                null,
+                true,
+                true,
+                new[] { Click() }),
+            true,
+            false);
+
+        using var registration = registry.Register(target, true);
+
+        Assert.That(registry.Revision, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void RegistrationRejectsAnOverlongStringValue()
+    {
+        var registry = Registry();
+        var target = new TestTarget(
+            "menu.start",
+            new InteractionDescriptor(
+                "menu.start",
+                null,
+                "button",
+                "Start",
+                InteractionValue.FromString(
+                    new string('x', InteractionSnapshotLimits.MaxValueChars + 1)),
+                true,
+                true,
+                new[] { Click() }),
+            true,
+            false);
+
+        NUnitCompat.ThatThrows(
+            () => registry.Register(target, true),
+            Throws.TypeOf<InvalidOperationException>());
+    }
+
+    [Test]
+    public void RegistrationRejectsTooManyInteractions()
+    {
+        var registry = Registry();
+        var interactions = Enumerable
+            .Range(0, InteractionSnapshotLimits.MaxAvailableInteractionsPerTarget + 1)
+            .Select(_ => Click())
+            .ToArray();
+        var target = new TestTarget(
+            "menu.start",
+            new InteractionDescriptor(
+                "menu.start",
+                null,
+                "button",
+                "Start",
+                null,
+                true,
+                true,
+                interactions),
+            true,
+            false);
+
+        NUnitCompat.ThatThrows(
+            () => registry.Register(target, true),
+            Throws.TypeOf<InvalidOperationException>());
+    }
+
+    [Test]
+    public void RegistrationRejectsTooManyArguments()
+    {
+        var registry = Registry();
+        var arguments = Enumerable
+            .Range(0, InteractionSnapshotLimits.MaxArgumentsPerInteraction + 1)
+            .Select(index => new InteractionArgumentDefinition(
+                "arg" + index,
+                InteractionArgumentType.String,
+                false,
+                false))
+            .ToArray();
+        var interaction = new AvailableInteraction(
+            "click",
+            1,
+            new InteractionArgumentSchema(arguments));
+        var target = new TestTarget(
+            "menu.start",
+            new InteractionDescriptor(
+                "menu.start",
+                null,
+                "button",
+                "Start",
+                null,
+                true,
+                true,
+                new[] { interaction }),
+            true,
+            false);
+
+        NUnitCompat.ThatThrows(
+            () => registry.Register(target, true),
+            Throws.TypeOf<InvalidOperationException>());
+    }
+
+    [Test]
+    public void RegistrationRejectsTargetsBeyondTheSnapshotCap()
+    {
+        var registry = Registry();
+        for (var index = 0; index < InteractionSnapshotLimits.MaxSnapshotTargets; index++)
+        {
+            registry.Register(Target("t" + index, Click()), true);
+        }
+
+        NUnitCompat.ThatThrows(
+            () => registry.Register(Target("overflow", Click()), true),
+            Throws.TypeOf<InvalidOperationException>());
+    }
+
     private static InteractionRegistry Registry()
     {
         return new InteractionRegistry(
