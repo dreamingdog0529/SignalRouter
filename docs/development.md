@@ -15,10 +15,14 @@
 > PlayMode), and the MCP host process (`SignalRouter.McpHost`: stdio MCP tools over a
 > Kestrel loopback WebSocket endpoint — execute_interaction, get_interaction_result,
 > get_ui_tree, list_interactions, wait_for) are implemented and verified. The
-> recording and replay tools (start_recording, stop_recording, replay_recording)
-> have their wire contract and host surface implemented and tested; the Unity
-> runtime-side session supervisor that recreates the runtime with a recorder and runs
-> the strict replayer is the remaining sub-item before the protocol v1.0 freeze.
+> recording and replay tools (start_recording, stop_recording, replay_recording,
+> get_operation_result) are live: the Unity session supervisor attaches a recorder to
+> the live runtime under a maintenance lease (no epoch change) and verifies replay on
+> an application-supplied isolated runtime, proven end-to-end over a live loopback
+> socket by the PlayMode record→execute→stop→replay test. **Protocol v1.0 is frozen
+> (ADR 0007).** Remaining roadmap: item 9 (security — authToken validation, timing-safe
+> comparison, redaction, release-build gating) and item 10 (package build, CI wiring of
+> the Unity tests, user documentation).
 
 ## Prerequisites
 

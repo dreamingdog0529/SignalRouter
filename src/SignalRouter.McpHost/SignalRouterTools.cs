@@ -118,12 +118,61 @@ public sealed class SignalRouterTools
         return ToolReports.FromWaitResult(condition, result);
     }
 
-    // The recording and replay tools (start_recording, stop_recording,
-    // replay_recording) are intentionally not registered on the live MCP
-    // surface yet: their wire contract and the HostBridge control methods that
-    // back them are complete and tested, but the Unity runtime-side supervisor
-    // that recreates the runtime with a recorder does not exist yet, so an
-    // exposed tool could only ever answer "pending". They are wired and exposed
-    // together with that runtime implementation, which also freezes protocol
-    // v1.0 (ADR 0007, item 8d).
+    [McpServerTool(Name = "start_recording")]
+    [Description(
+        "Starts recording the connected runtime's interactions to an artifact. "
+        + "Returns status \"recording_started\" with a recordingHandle to replay "
+        + "later, or a refusal. If the tool times out first, the response reports "
+        + "status \"pending\" with an operationId to reconcile via get_operation_result.")]
+    public async Task<string> StartRecording(
+        [Description("Optional agent-facing label for the recording; never a filename.")]
+        string? label = null,
+        CancellationToken cancellationToken = default)
+    {
+        var report = await bridge.StartRecordingAsync(label, cancellationToken)
+            .ConfigureAwait(false);
+        return ToolReports.FromOperationReport(report);
+    }
+
+    [McpServerTool(Name = "stop_recording")]
+    [Description(
+        "Stops the active recording and finalizes its artifact. Returns status "
+        + "\"recording_stopped\" with the recordingHandle and entryCount, or a "
+        + "refusal when no recording is active.")]
+    public async Task<string> StopRecording(CancellationToken cancellationToken = default)
+    {
+        var report = await bridge.StopRecordingAsync(cancellationToken).ConfigureAwait(false);
+        return ToolReports.FromOperationReport(report);
+    }
+
+    [McpServerTool(Name = "replay_recording")]
+    [Description(
+        "Replays a recording on an isolated runtime and reports whether it "
+        + "reproduced. Returns status \"replayed\" with outcomeKind "
+        + "(completed/diverged/stopped), or a refusal. Replay must be configured on "
+        + "the runtime; live interaction is paused for the duration.")]
+    public async Task<string> ReplayRecording(
+        [Description("The recordingHandle from start_recording/stop_recording.")]
+        string recordingHandle,
+        CancellationToken cancellationToken = default)
+    {
+        var report = await bridge.ReplayRecordingAsync(recordingHandle, cancellationToken)
+            .ConfigureAwait(false);
+        return ToolReports.FromOperationReport(report);
+    }
+
+    [McpServerTool(Name = "get_operation_result")]
+    [Description(
+        "Reconciles a recording or replay operation by the operationId a pending "
+        + "response returned: answers the terminal outcome, an in-progress status, "
+        + "or outcome_unknown.")]
+    public async Task<string> GetOperationResult(
+        [Description("The operationId returned by a pending control-operation response.")]
+        string operationId,
+        CancellationToken cancellationToken = default)
+    {
+        var report = await bridge.QueryControlOperationAsync(operationId, cancellationToken)
+            .ConfigureAwait(false);
+        return ToolReports.FromOperationReport(report);
+    }
 }

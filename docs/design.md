@@ -1041,12 +1041,23 @@ The MVP is complete only when all of the following are demonstrated in automated
 These items do not change the accepted architecture, but they must be resolved and tested
 before their respective components are considered stable:
 
-- the MCP host target .NET version;
-- default artifact-root location;
+- the MCP host target .NET version — resolved: net10.0 (`Microsoft.NET.Sdk.Web`,
+  Kestrel loopback; `HttpListener` WebSocket accept is Windows-only);
+- default artifact-root location — resolved: `Application.persistentDataPath +
+  "/SignalRouter/artifacts"`, configurable on the session supervisor;
 - state-snapshot size limits;
 - retention limits for idempotency and completed-result caches (the protocol request
   ledger's defaults are resolved: capacity 256, terminal retention 10 minutes —
   ADR 0007).
+
+Recording and replay control (item 8d) resolved: recording attaches a recorder to the
+live dispatcher under a maintenance lease — no runtime recreation, no epoch change; a
+recording is an epoch-internal slice. Replay is an opt-in that pauses the live runtime
+and verifies on an isolated runtime the application builds via
+`IInteractionReplayEnvironmentFactory` (an in-process runtime cannot isolate shared
+static/singleton state, so the factory must supply replay-only stage/probe/schema
+instances with no global side effects). Recovery is a session-independent runtime
+operation ledger with single-flight and a `get_control_operation_result` query.
 
 Decisions that change public compatibility, failure semantics, persistent schemas, or the
 security boundary require an Architecture Decision Record and a corresponding test-plan
