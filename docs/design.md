@@ -890,9 +890,13 @@ External interaction control is a privileged capability. The MVP applies the fol
 defaults:
 
 - WebSocket endpoints bind only to `127.0.0.1` and `::1`.
-- Each runtime launch uses a cryptographically random 256-bit authentication token.
+- Each `SignalRouter.McpHost` instance uses a cryptographically random 256-bit
+  authentication token, published to the runtime through an owner-only discovery
+  descriptor and validated in the handshake ([ADR 0008](adr/0008-security-model.md)).
 - Token comparison is timing-safe.
-- The bridge and MCP control surface are disabled by default in release builds.
+- The Unity bridge is disabled by default in release players (gated at `StartBridge()`);
+  the MCP host is a separate developer tool absent from a shipped player, so it is off
+  unless an operator wires it up rather than compile-gated (ADR 0008).
 - Commands, targets, and state probes require explicit agent-visible registration.
 - The protocol does not accept arbitrary .NET type names, reflection calls, C# code, or
   unrestricted filesystem paths.
@@ -903,6 +907,13 @@ defaults:
 - Authentication failures and policy rejections are recorded without echoing credentials.
 
 Remote binding is not an MVP configuration option.
+
+The MVP defends a single-user, single-machine boundary. A malicious process running as
+the same OS user, and a rogue host impersonating the real one, are explicit non-goals:
+host authentication (mutual auth) requires a `welcome` change that the frozen protocol
+v1.0 cannot carry, so it is deferred to the next protocol major. [ADR 0008](adr/0008-security-model.md)
+records the full threat model, the discovery-descriptor lifecycle, the resource bounds,
+and the release-gating posture.
 
 ## 20. Source and package layout
 
@@ -1035,6 +1046,7 @@ The MVP is complete only when all of the following are demonstrated in automated
 | D17 | Recording schema v1 is strict JSON Lines with per-probe state hash maps, full stage arrays, application-code-only fault codes, deterministic catalog-floor secret keys, newline write-commit truncation recovery, and fail-fast recorder poisoning (ADR 0005) |
 | D18 | Strict replay runs under an exclusive dispatcher lease with sanitized hash-level divergence reports; stage progress is compared for faulted results only, pre-start cancellations replay via a synthetic cancelled token, and outcome-unknown entries, mid-execution cancellations, and requested continuations stop the replay (ADR 0006) |
 | D19 | Protocol envelope v1 is a single-object JSON envelope with strict major gating and lower-minor-wins negotiation, per-direction size limits, ignore-unknown-member forward compatibility, submitter-assigned request identity backed by a bounded fingerprinting ledger, epoch preservation across reconnects, hello-payload auth-token placement, and recording-projection-equivalent sanitized results in a wire-owned type (ADR 0007) |
+| D20 | The MVP security boundary is single-user/single-machine; a same-user malicious process and a rogue host are explicit non-goals (host auth needs a `welcome` change the frozen v1.0 cannot carry). The host mints one 256-bit token per host instance, publishes it through an owner-only discovery descriptor, and validates it in the handshake with a fixed `unauthorized`; agent snapshots are bounded by per-field and cardinality caps with parent-graph validation; the Unity bridge is release-gated at `StartBridge()` and the host is off-by-absence rather than compile-gated (ADR 0008) |
 
 ## 25. Remaining implementation-level decisions
 
@@ -1045,7 +1057,9 @@ before their respective components are considered stable:
   Kestrel loopback; `HttpListener` WebSocket accept is Windows-only);
 - default artifact-root location — resolved: `Application.persistentDataPath +
   "/SignalRouter/artifacts"`, configurable on the session supervisor;
-- state-snapshot size limits;
+- state-snapshot size limits — resolved: per-field and cardinality caps on the flat
+  agent target array, parent-graph validation, and an aggregate serialized-byte guard,
+  enforced at registration and capture and re-validated on receive (ADR 0008);
 - retention limits for idempotency and completed-result caches (the protocol request
   ledger's defaults are resolved: capacity 256, terminal retention 10 minutes —
   ADR 0007).
