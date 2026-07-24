@@ -1154,7 +1154,10 @@ namespace SignalRouter.Protocol
                     "Probe version must be positive.");
             }
 
-            ProtocolContract.RequireJsonObject(
+            // Re-validates the untrusted runtime snapshot against the resource bounds
+            // (counts, field lengths, parent graph) in addition to the depth budget, so
+            // a peer cannot exceed the caps the runtime enforces at capture (ADR 0008).
+            ProtocolSnapshotBounds.Validate(
                 snapshotJson,
                 ProtocolLimits.SnapshotMaxDepth,
                 nameof(snapshotJson));
