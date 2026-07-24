@@ -564,7 +564,7 @@ public sealed class HostBridge : IDisposable
 
         ActiveConnection? connection;
         TaskCompletionSource<ControlOperationResultMessage> query;
-        ProtocolMessage message;
+        GetControlOperationResultMessage? message = null;
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
@@ -573,24 +573,48 @@ public sealed class HostBridge : IDisposable
                 return HostOperationReport.Disconnected();
             }
 
-            message = new GetControlOperationResultMessage(
-                options.MessageIdSource(),
-                sessionEpoch,
-                operationId);
-            query = new TaskCompletionSource<ControlOperationResultMessage>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-            pendingQueries[operationId] = query;
+            // Coalesce concurrent queries for the same operation onto one waiter,
+            // so a single control_operation_result reaches every caller instead of
+            // the last registration alone (Codex review, item 8d). Only the owner —
+            // the caller that created the waiter — sends the query and clears it.
+            if (pendingQueries.TryGetValue(operationId, out var existing))
+            {
+                query = existing;
+            }
+            else
+            {
+                query = new TaskCompletionSource<ControlOperationResultMessage>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                pendingQueries[operationId] = query;
+                message = new GetControlOperationResultMessage(
+                    options.MessageIdSource(),
+                    sessionEpoch,
+                    operationId);
+            }
+
             connection = ready;
         }
 
-        await TrySendAsync(connection, message, cancellationToken).ConfigureAwait(false);
+        var isOwner = message != null;
+        if (isOwner)
+        {
+            await TrySendAsync(connection, message!, cancellationToken).ConfigureAwait(false);
+        }
 
         var completed = await Task.WhenAny(
             query.Task,
             Task.Delay(options.ToolTimeout, cancellationToken)).ConfigureAwait(false);
-        lock (gate)
+
+        if (isOwner)
         {
-            pendingQueries.Remove(operationId);
+            lock (gate)
+            {
+                if (pendingQueries.TryGetValue(operationId, out var current)
+                    && ReferenceEquals(current, query))
+                {
+                    pendingQueries.Remove(operationId);
+                }
+            }
         }
 
         if (!ReferenceEquals(completed, query.Task))
@@ -846,8 +870,15 @@ public sealed class HostBridge : IDisposable
             }
         }
 
-        if (operation != null)
+        if (operation != null
+            && string.Equals(operation.Message.SessionEpoch, epoch, StringComparison.Ordinal))
         {
+            // Resend only on a SAME-epoch reconnect (a transient drop). The
+            // retained message is stamped with its original epoch; resending it
+            // after an epoch change would be rejected as session_epoch_mismatch and
+            // close the fresh connection. Across an epoch change the operation's
+            // acknowledgment arrives on the new epoch through the surviving
+            // pendingOperations entry, or a query reconciles it.
             var now = options.Clock();
             var window = connection.Session!.RecoveryWindow;
             if (operation.FirstSentAt == null || now - operation.FirstSentAt.Value < window)
@@ -1046,12 +1077,34 @@ public sealed class HostBridge : IDisposable
     private void CompleteControlQuery(ControlOperationResultMessage result)
     {
         TaskCompletionSource<ControlOperationResultMessage>? query;
+        HostControlOperationKind? trackedKind;
         lock (gate)
         {
             pendingQueries.TryGetValue(result.OperationId, out query);
+            trackedKind = pendingOperations.TryGetValue(result.OperationId, out var op)
+                ? op.Kind
+                : (HostControlOperationKind?)null;
         }
 
-        query?.TrySetResult(result);
+        if (query != null)
+        {
+            // A waiting query resolves the operation via QueryControlOperationAsync.
+            query.TrySetResult(result);
+            return;
+        }
+
+        // Unsolicited terminal result (no waiter): resolve the tracked operation so
+        // single-flight does not block forever (Codex review, item 8d).
+        if (trackedKind == null)
+        {
+            return;
+        }
+
+        var report = MapControlResult(result, trackedKind);
+        if (report != null && IsTerminalState(result.State))
+        {
+            ClearResolvedOperation(result.OperationId, report);
+        }
     }
 
     // Maps a queried control_operation_result to a host report and, when the
@@ -1059,52 +1112,106 @@ public sealed class HostBridge : IDisposable
     // control operations can proceed.
     private HostOperationReport ResolveQueryResult(ControlOperationResultMessage result)
     {
-        if (string.Equals(
-                result.State,
-                ProtocolControlOperationStates.Completed,
-                StringComparison.Ordinal))
+        HostControlOperationKind? trackedKind;
+        lock (gate)
         {
-            HostOperationReport report;
-            if (result.OutcomeKind != null)
-            {
-                report = HostOperationReport.Replayed(
-                    result.OperationId,
-                    result.OutcomeKind,
-                    result.NewSessionEpoch,
-                    result.Detail);
-            }
-            else if (result.EntryCount != null)
-            {
-                report = HostOperationReport.RecordingStopped(
-                    result.OperationId,
-                    result.RecordingHandle!,
-                    result.EntryCount.Value,
-                    result.NewSessionEpoch);
-            }
-            else
-            {
-                report = HostOperationReport.RecordingStarted(
-                    result.OperationId,
-                    result.RecordingHandle!,
-                    result.NewSessionEpoch);
-            }
-
-            ClearResolvedOperation(result.OperationId, report);
-            return report;
+            trackedKind = pendingOperations.TryGetValue(result.OperationId, out var op)
+                ? op.Kind
+                : (HostControlOperationKind?)null;
         }
 
+        var report = MapControlResult(result, trackedKind);
+        if (report == null)
+        {
+            // The terminal result's shape does not match the operation the host is
+            // tracking; do not resolve it on a mismatched answer.
+            return HostOperationReport.Pending(result.OperationId);
+        }
+
+        if (IsTerminalState(result.State))
+        {
+            ClearResolvedOperation(result.OperationId, report);
+        }
+
+        return report;
+    }
+
+    // Maps a control result to a host report. Non-terminal states report pending.
+    // For a terminal result, the shape is authoritative (the wire enforces exactly
+    // one operation shape); when the operation is still tracked, the shape must
+    // also match its kind, else the result is a mismatch (null) and must not
+    // resolve it.
+    private static HostOperationReport? MapControlResult(
+        ControlOperationResultMessage result,
+        HostControlOperationKind? expectedKind)
+    {
         if (string.Equals(
                 result.State,
                 ProtocolControlOperationStates.Refused,
                 StringComparison.Ordinal))
         {
-            var refused = HostOperationReport.RefusedDetail(result.OperationId, result.Detail);
-            ClearResolvedOperation(result.OperationId, refused);
-            return refused;
+            // A refusal can terminate any control operation.
+            return HostOperationReport.RefusedDetail(result.OperationId, result.Detail);
         }
 
-        // pending / in_progress: still running, the slot stays claimed.
-        return HostOperationReport.Pending(result.OperationId);
+        if (!string.Equals(
+                result.State,
+                ProtocolControlOperationStates.Completed,
+                StringComparison.Ordinal))
+        {
+            // pending / in_progress: still running.
+            return HostOperationReport.Pending(result.OperationId);
+        }
+
+        HostControlOperationKind shapeKind;
+        HostOperationReport report;
+        if (result.OutcomeKind != null)
+        {
+            shapeKind = HostControlOperationKind.ReplayRecording;
+            report = HostOperationReport.Replayed(
+                result.OperationId,
+                result.OutcomeKind,
+                result.NewSessionEpoch,
+                result.Detail);
+        }
+        else if (result.EntryCount != null)
+        {
+            shapeKind = HostControlOperationKind.StopRecording;
+            report = HostOperationReport.RecordingStopped(
+                result.OperationId,
+                result.RecordingHandle!,
+                result.EntryCount.Value,
+                result.NewSessionEpoch);
+        }
+        else
+        {
+            shapeKind = HostControlOperationKind.StartRecording;
+            report = HostOperationReport.RecordingStarted(
+                result.OperationId,
+                result.RecordingHandle!,
+                result.NewSessionEpoch);
+        }
+
+        if (expectedKind != null && expectedKind.Value != shapeKind)
+        {
+            // A replay-shaped result for a tracked start operation, etc. — reject
+            // it rather than complete the wrong operation (Codex review).
+            return null;
+        }
+
+        return report;
+    }
+
+    private static bool IsTerminalState(string state)
+    {
+        return string.Equals(
+                state,
+                ProtocolControlOperationStates.Completed,
+                StringComparison.Ordinal)
+            || string.Equals(
+                state,
+                ProtocolControlOperationStates.Refused,
+                StringComparison.Ordinal);
     }
 
     private void ClearResolvedOperation(string operationId, HostOperationReport report)

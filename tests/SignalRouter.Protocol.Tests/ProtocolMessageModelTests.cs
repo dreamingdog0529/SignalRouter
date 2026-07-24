@@ -335,6 +335,29 @@ public sealed class ProtocolMessageModelTests
     }
 
     [Test]
+    public void ControlOperationResultRequiresExactlyOneTerminalShape()
+    {
+        // Completed with no payload is ambiguous.
+        NUnitCompat.Throws<ArgumentException>(() => _ = new ControlOperationResultMessage(
+            "m-1", Epoch, "op-1", ProtocolControlOperationStates.Completed, Epoch));
+        // Completed carrying both a handle and a replay outcome is contradictory.
+        NUnitCompat.Throws<ArgumentException>(() => _ = new ControlOperationResultMessage(
+            "m-1", Epoch, "op-1", ProtocolControlOperationStates.Completed, Epoch,
+            recordingHandle: "rec-0", outcomeKind: ProtocolReplayOutcomes.Completed));
+        // A completed recording result must not carry a detail.
+        NUnitCompat.Throws<ArgumentException>(() => _ = new ControlOperationResultMessage(
+            "m-1", Epoch, "op-1", ProtocolControlOperationStates.Completed, Epoch,
+            recordingHandle: "rec-0", detail: "should not be here"));
+        // Refused carrying success fields is contradictory.
+        NUnitCompat.Throws<ArgumentException>(() => _ = new ControlOperationResultMessage(
+            "m-1", Epoch, "op-1", ProtocolControlOperationStates.Refused, Epoch,
+            recordingHandle: "rec-0", detail: "err"));
+        // Refused with no detail carries nothing to act on.
+        NUnitCompat.Throws<ArgumentException>(() => _ = new ControlOperationResultMessage(
+            "m-1", Epoch, "op-1", ProtocolControlOperationStates.Refused, Epoch));
+    }
+
+    [Test]
     public void RegistrySnapshotValidatesItsPayload()
     {
         var snapshot = new RegistrySnapshotMessage(

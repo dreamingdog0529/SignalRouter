@@ -1041,6 +1041,55 @@ namespace SignalRouter.Protocol
                     nameof(detail));
             }
 
+            // A terminal result must carry exactly one operation shape, so the
+            // host can map it unambiguously and never report, say, a recording
+            // start with a null handle (Codex review, item 8d):
+            //   completed start  : recordingHandle only
+            //   completed stop   : recordingHandle + entryCount
+            //   completed replay : outcomeKind (+ optional detail)
+            //   refused          : detail only
+            if (string.Equals(state, ProtocolControlOperationStates.Refused, StringComparison.Ordinal))
+            {
+                if (recordingHandle != null
+                    || entryCount != null
+                    || outcomeKind != null
+                    || detail == null)
+                {
+                    throw new ArgumentException(
+                        "A refused control operation result must carry only a detail.",
+                        nameof(state));
+                }
+            }
+            else if (string.Equals(state, ProtocolControlOperationStates.Completed, StringComparison.Ordinal))
+            {
+                if (outcomeKind != null)
+                {
+                    if (recordingHandle != null || entryCount != null)
+                    {
+                        throw new ArgumentException(
+                            "A completed replay result must carry only an outcome kind "
+                            + "and optional detail.",
+                            nameof(state));
+                    }
+                }
+                else if (recordingHandle != null)
+                {
+                    if (detail != null)
+                    {
+                        throw new ArgumentException(
+                            "A completed recording result must not carry a detail.",
+                            nameof(state));
+                    }
+                }
+                else
+                {
+                    throw new ArgumentException(
+                        "A completed control operation result must carry a recording "
+                        + "handle or a replay outcome.",
+                        nameof(state));
+                }
+            }
+
             OperationId = operationId;
             State = state;
             NewSessionEpoch = newSessionEpoch;

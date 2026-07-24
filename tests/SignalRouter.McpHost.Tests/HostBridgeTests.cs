@@ -477,6 +477,46 @@ public sealed class HostBridgeTests
         firstPeer.Dispose();
     }
 
+    [Test]
+    public async Task AnUnsolicitedTerminalResultUnblocksATimedOutOperation()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromMilliseconds(200));
+        using var peer = await harness.ConnectRuntimeAsync();
+        await peer.PerformHandshakeAsync();
+
+        var startTask = harness.Bridge.StartRecordingAsync("a", CancellationToken.None);
+        var start = (StartRecordingMessage)await peer.ReceiveAsync();
+        var pending = await startTask;
+        Assert.That(pending.Status, Is.EqualTo("pending"));
+
+        // The runtime delivers the terminal result unsolicited (no query pending).
+        // It must still clear the single-flight slot.
+        await peer.SendAsync(new ControlOperationResultMessage(
+            peer.NextId(),
+            Epoch,
+            start.OperationId,
+            ProtocolControlOperationStates.Completed,
+            Epoch,
+            recordingHandle: Handle));
+
+        // A later control operation is admitted (the slot was freed). Poll because
+        // the unsolicited result is processed asynchronously on the receive loop.
+        HostOperationReport next = HostOperationReport.Disconnected();
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            next = await harness.Bridge.StopRecordingAsync(CancellationToken.None);
+            if (next.Status != "refused")
+            {
+                break;
+            }
+
+            await Task.Delay(10);
+        }
+
+        Assert.That(next.Status, Is.Not.EqualTo("refused"));
+    }
+
     private static ProtocolInteractionOutcome SucceededOutcome(string requestId)
     {
         return new ProtocolInteractionOutcome(
