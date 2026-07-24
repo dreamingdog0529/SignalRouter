@@ -448,6 +448,28 @@ namespace SignalRouter.Protocol
                         RequireString(payload, ProtocolSchema.NewSessionEpochProperty),
                         OptionalString(payload, ProtocolSchema.DetailProperty),
                         protocol);
+                case ProtocolMessageTypes.GetControlOperationResult:
+                    RequireAbsentEnvelopeField(requestId);
+                    RequireAbsentEnvelopeField(inReplyTo);
+                    return new GetControlOperationResultMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequireString(payload, ProtocolSchema.OperationIdProperty),
+                        protocol);
+                case ProtocolMessageTypes.ControlOperationResult:
+                    RequireAbsentEnvelopeField(requestId);
+                    RequireAbsentEnvelopeField(inReplyTo);
+                    return new ControlOperationResultMessage(
+                        messageId,
+                        RequirePresent(sessionEpoch),
+                        RequireString(payload, ProtocolSchema.OperationIdProperty),
+                        RequireString(payload, ProtocolSchema.StateProperty),
+                        RequireString(payload, ProtocolSchema.NewSessionEpochProperty),
+                        OptionalString(payload, ProtocolSchema.RecordingHandleProperty),
+                        OptionalLong(payload, ProtocolSchema.EntryCountProperty),
+                        OptionalString(payload, ProtocolSchema.OutcomeKindProperty),
+                        OptionalString(payload, ProtocolSchema.DetailProperty),
+                        protocol);
                 default:
                     return null;
             }

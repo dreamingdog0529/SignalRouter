@@ -253,6 +253,7 @@ namespace SignalRouter.Protocol
                 case StartRecordingMessage _:
                 case StopRecordingMessage _:
                 case ReplayRecordingMessage _:
+                case GetControlOperationResultMessage _:
                     return Role == ProtocolConnectionRole.Runtime;
                 case InteractionAcceptedMessage _:
                 case InteractionResultMessage _:
@@ -262,6 +263,7 @@ namespace SignalRouter.Protocol
                 case RecordingStartedMessage _:
                 case RecordingStoppedMessage _:
                 case ReplayReportMessage _:
+                case ControlOperationResultMessage _:
                     return Role == ProtocolConnectionRole.Host;
                 default:
                     return false;

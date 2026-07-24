@@ -228,6 +228,48 @@ namespace SignalRouter.Protocol
                     }
 
                     return;
+                case GetControlOperationResultMessage getControlResult:
+                    writer.WriteString(
+                        ProtocolSchema.OperationIdProperty,
+                        getControlResult.OperationId);
+                    return;
+                case ControlOperationResultMessage controlResult:
+                    writer.WriteString(
+                        ProtocolSchema.OperationIdProperty,
+                        controlResult.OperationId);
+                    writer.WriteString(
+                        ProtocolSchema.StateProperty,
+                        controlResult.State);
+                    writer.WriteString(
+                        ProtocolSchema.NewSessionEpochProperty,
+                        controlResult.NewSessionEpoch);
+                    if (controlResult.RecordingHandle != null)
+                    {
+                        writer.WriteString(
+                            ProtocolSchema.RecordingHandleProperty,
+                            controlResult.RecordingHandle);
+                    }
+
+                    if (controlResult.EntryCount != null)
+                    {
+                        writer.WriteNumber(
+                            ProtocolSchema.EntryCountProperty,
+                            controlResult.EntryCount.Value);
+                    }
+
+                    if (controlResult.OutcomeKind != null)
+                    {
+                        writer.WriteString(
+                            ProtocolSchema.OutcomeKindProperty,
+                            controlResult.OutcomeKind);
+                    }
+
+                    if (controlResult.Detail != null)
+                    {
+                        writer.WriteString(ProtocolSchema.DetailProperty, controlResult.Detail);
+                    }
+
+                    return;
                 default:
                     throw new ArgumentException(
                         "The message type '" + message.Type + "' has no v1 payload writer.",

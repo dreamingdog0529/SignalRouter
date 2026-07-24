@@ -333,6 +333,58 @@ public sealed class ProtocolMessageRoundTripTests
     }
 
     [Test]
+    public void ControlOperationQueryAndPendingResultRoundTrip()
+    {
+        var query = (GetControlOperationResultMessage)RoundTrip(
+            new GetControlOperationResultMessage("m-7", Epoch, "op-9"));
+        var pending = (ControlOperationResultMessage)RoundTrip(
+            new ControlOperationResultMessage(
+                "m-8",
+                Epoch,
+                "op-9",
+                ProtocolControlOperationStates.InProgress,
+                Epoch));
+
+        Assert.That(query.OperationId, Is.EqualTo("op-9"));
+        Assert.That(pending.State, Is.EqualTo(ProtocolControlOperationStates.InProgress));
+        Assert.That(pending.RecordingHandle, Is.Null);
+        Assert.That(pending.EntryCount, Is.Null);
+        Assert.That(pending.OutcomeKind, Is.Null);
+        Assert.That(pending.Detail, Is.Null);
+        Assert.That(pending.NewSessionEpoch, Is.EqualTo(Epoch));
+    }
+
+    [Test]
+    public void ControlOperationTerminalResultsRoundTripEachOperationShape()
+    {
+        var handle = "rec-20260724t0100-1a2b3c4d";
+        var started = (ControlOperationResultMessage)RoundTrip(
+            new ControlOperationResultMessage(
+                "m-9", Epoch, "op-1", ProtocolControlOperationStates.Completed, Epoch,
+                recordingHandle: handle));
+        var stopped = (ControlOperationResultMessage)RoundTrip(
+            new ControlOperationResultMessage(
+                "m-10", Epoch, "op-2", ProtocolControlOperationStates.Completed, Epoch,
+                recordingHandle: handle, entryCount: 5));
+        var replayed = (ControlOperationResultMessage)RoundTrip(
+            new ControlOperationResultMessage(
+                "m-11", Epoch, "op-3", ProtocolControlOperationStates.Completed, Epoch,
+                outcomeKind: ProtocolReplayOutcomes.Diverged, detail: "diverged at 2"));
+        var refused = (ControlOperationResultMessage)RoundTrip(
+            new ControlOperationResultMessage(
+                "m-12", Epoch, "op-4", ProtocolControlOperationStates.Refused, Epoch,
+                detail: "recording_unavailable: no active recording"));
+
+        Assert.That(started.RecordingHandle, Is.EqualTo(handle));
+        Assert.That(started.EntryCount, Is.Null);
+        Assert.That(stopped.EntryCount, Is.EqualTo(5));
+        Assert.That(replayed.OutcomeKind, Is.EqualTo(ProtocolReplayOutcomes.Diverged));
+        Assert.That(replayed.Detail, Is.EqualTo("diverged at 2"));
+        Assert.That(refused.State, Is.EqualTo(ProtocolControlOperationStates.Refused));
+        Assert.That(refused.Detail, Is.EqualTo("recording_unavailable: no active recording"));
+    }
+
+    [Test]
     public void RegistrySnapshotRoundTripsWithByteExactSnapshot()
     {
         var snapshotJson = "{\"sessionEpoch\":\"epoch-1\",\"revision\":7,\"targets\":[{\"id\":\"a\"}]}";
