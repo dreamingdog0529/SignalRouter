@@ -137,7 +137,7 @@ namespace SignalRouter
             }
             catch (InteractionCommandException exception)
             {
-                var identity = AssignIdentity(chainQueue: false, out _);
+                var identity = AssignIdentity(chainQueue: false, out _, out _);
                 return Rejected(
                     identity,
                     command.TargetId,
@@ -149,7 +149,7 @@ namespace SignalRouter
 
             if (currentScope.Value != null)
             {
-                var identity = AssignIdentity(chainQueue: false, out _);
+                var identity = AssignIdentity(chainQueue: false, out _, out _);
                 return Rejected(
                     identity,
                     command.TargetId,
@@ -183,6 +183,14 @@ namespace SignalRouter
                 if (replayLease != null)
                 {
                     throw ReplayLeaseRejection();
+                }
+
+                // A cache hit never reaches AssignIdentity's maintenance guard, so
+                // serving one while the recorder is being swapped would admit a
+                // result the exclusive-admission contract forbids.
+                if (maintenanceLease != null)
+                {
+                    throw MaintenanceLeaseRejection();
                 }
             }
 
@@ -284,7 +292,7 @@ namespace SignalRouter
             catch (InteractionCommandException exception)
             {
                 return CompletedSubmission(Rejected(
-                    AssignIdentity(chainQueue: false, out _, null, options.RequestId),
+                    AssignIdentity(chainQueue: false, out _, out _, null, options.RequestId),
                     command.TargetId,
                     typeof(TCommand).Name,
                     1,
@@ -295,7 +303,7 @@ namespace SignalRouter
             if (currentScope.Value != null)
             {
                 return CompletedSubmission(Rejected(
-                    AssignIdentity(chainQueue: false, out _, null, options.RequestId),
+                    AssignIdentity(chainQueue: false, out _, out _, null, options.RequestId),
                     command.TargetId,
                     commandName,
                     commandVersion,
@@ -323,11 +331,13 @@ namespace SignalRouter
             var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             RequestIdentity request;
             QueueSlot queueSlot;
+            InteractionRecorder? dispatchRecorder;
             try
             {
                 request = AssignIdentity(
                     chainQueue: true,
                     out queueSlot,
+                    out dispatchRecorder,
                     payload,
                     options.RequestId,
                     cancellation);
@@ -348,6 +358,7 @@ namespace SignalRouter
                 commandVersion,
                 request,
                 queueSlot,
+                dispatchRecorder,
                 callerContext,
                 started,
                 cancellation);
@@ -367,6 +378,7 @@ namespace SignalRouter
             int commandVersion,
             RequestIdentity request,
             QueueSlot queueSlot,
+            InteractionRecorder? dispatchRecorder,
             SynchronizationContext? callerContext,
             TaskCompletionSource<bool> started,
             CancellationTokenSource cancellation)
@@ -390,19 +402,22 @@ namespace SignalRouter
                     commandVersion,
                     request,
                     queueSlot,
+                    dispatchRecorder,
                     callerContext,
                     started,
                     cancellation.Token).ConfigureAwait(false);
             }
             finally
             {
+                CancellationTokenRegistration maintenanceRegistration;
                 lock (gate)
                 {
                     activeDispatches--;
                     activeSubmissions.Remove(request.RequestId);
-                    TryCompletePendingMaintenanceLocked();
+                    maintenanceRegistration = TryCompletePendingMaintenanceLocked();
                 }
 
+                maintenanceRegistration.Dispose();
                 cancellation.Dispose();
             }
         }
@@ -437,7 +452,7 @@ namespace SignalRouter
             }
 
             return CompletedSubmission(Rejected(
-                AssignIdentity(chainQueue: false, out _, null, options.RequestId),
+                AssignIdentity(chainQueue: false, out _, out _, null, options.RequestId),
                 targetId,
                 commandName,
                 commandVersion,
@@ -499,6 +514,7 @@ namespace SignalRouter
         public void Dispose()
         {
             TaskCompletionSource<InteractionMaintenanceLease>? pendingMaintenance = null;
+            CancellationTokenRegistration maintenanceRegistration = default;
             lock (gate)
             {
                 if (disposed)
@@ -511,14 +527,16 @@ namespace SignalRouter
                 {
                     pendingMaintenance = maintenanceAcquire;
                     maintenanceAcquire = null;
-                    maintenanceAcquireRegistration.Dispose();
+                    maintenanceRegistration = maintenanceAcquireRegistration;
                     maintenanceAcquireRegistration = default;
                 }
             }
 
-            // A caller awaiting a maintenance lease must observe disposal rather
-            // than hang forever; RunContinuationsAsynchronously keeps its
+            // Dispose the registration and fault the waiter outside the gate: a
+            // caller awaiting a maintenance lease must observe disposal rather than
+            // hang forever, and RunContinuationsAsynchronously keeps its
             // continuation off this thread.
+            maintenanceRegistration.Dispose();
             pendingMaintenance?.TrySetException(
                 new ObjectDisposedException(nameof(InteractionDispatcher)));
 
@@ -575,6 +593,19 @@ namespace SignalRouter
                         "Replay requires an exclusive idle dispatcher; dispatches or "
                         + "continuations are still in flight, or another lease (replay "
                         + "or maintenance) is held.");
+                }
+
+                // The replayer checks Recorder before acquiring, but a maintenance
+                // lease could have attached one and released between that check and
+                // this grant. Re-verify under the gate so replay can never run with a
+                // live recorder appending to (and faulting) the recording.
+                if (recorder != null)
+                {
+                    throw new InteractionReplayException(
+                        InteractionReplayError.RecorderAttached,
+                        "Replay requires a recorder-free dispatcher: a recorder would "
+                        + "append request and terminal events for every replayed entry "
+                        + "and its failure semantics would mix into verification.");
                 }
 
                 var lease = new InteractionReplayLease(this);
@@ -725,43 +756,52 @@ namespace SignalRouter
         private void CancelMaintenanceAcquire()
         {
             TaskCompletionSource<InteractionMaintenanceLease>? pending = null;
+            CancellationTokenRegistration registration = default;
             lock (gate)
             {
                 if (maintenanceAcquire != null)
                 {
                     pending = maintenanceAcquire;
                     maintenanceAcquire = null;
-                    maintenanceAcquireRegistration.Dispose();
+                    registration = maintenanceAcquireRegistration;
                     maintenanceAcquireRegistration = default;
                 }
             }
 
-            // RunContinuationsAsynchronously keeps waiter continuations off this
-            // (possibly cancellation-callback) thread; safe to complete here.
+            // Disposing this registration from within its own callback returns
+            // immediately, but do it outside the gate for consistency with the
+            // grant path — never dispose a registration while holding the lock its
+            // callback contends for. RunContinuationsAsynchronously keeps waiter
+            // continuations off this thread.
+            registration.Dispose();
             pending?.TrySetCanceled();
         }
 
         // Called under the gate at every counter decrement: promotes a pending
         // acquisition to a held lease the instant the dispatcher becomes idle.
         // Grant and future-rejection are one locked step, so a dispatch cannot
-        // slip in between "idle observed" and "lease held".
-        private void TryCompletePendingMaintenanceLocked()
+        // slip in between "idle observed" and "lease held". Returns the token
+        // registration the caller must dispose OUTSIDE the gate — disposing it
+        // here could deadlock against a cancellation callback that is blocked
+        // entering the gate this method holds.
+        private CancellationTokenRegistration TryCompletePendingMaintenanceLocked()
         {
             if (maintenanceAcquire == null || !IsIdleLocked())
             {
-                return;
+                return default;
             }
 
             var lease = new InteractionMaintenanceLease(this);
             maintenanceLease = lease;
             var pending = maintenanceAcquire;
             maintenanceAcquire = null;
-            maintenanceAcquireRegistration.Dispose();
+            var registration = maintenanceAcquireRegistration;
             maintenanceAcquireRegistration = default;
 
             // The TCS was created with RunContinuationsAsynchronously, so setting
             // the result here does not run waiter continuations under the gate.
             pending.SetResult(lease);
+            return registration;
         }
 
         internal void AttachRecorder(InteractionMaintenanceLease lease, InteractionRecorder recorder)
@@ -859,11 +899,14 @@ namespace SignalRouter
             }
             finally
             {
+                CancellationTokenRegistration maintenanceRegistration;
                 lock (gate)
                 {
                     activeDispatches--;
-                    TryCompletePendingMaintenanceLocked();
+                    maintenanceRegistration = TryCompletePendingMaintenanceLocked();
                 }
+
+                maintenanceRegistration.Dispose();
             }
         }
 
@@ -895,7 +938,11 @@ namespace SignalRouter
                     InteractionRecordingRedaction.SerializeArguments(entry, command));
             }
 
-            var request = AssignIdentity(chainQueue: true, out var queueSlot, payload);
+            var request = AssignIdentity(
+                chainQueue: true,
+                out var queueSlot,
+                out var dispatchRecorder,
+                payload);
             return await ExecuteAdmittedAsync(
                 command,
                 options,
@@ -904,6 +951,7 @@ namespace SignalRouter
                 commandVersion,
                 request,
                 queueSlot,
+                dispatchRecorder,
                 callerContext,
                 null,
                 cancellationToken).ConfigureAwait(false);
@@ -921,6 +969,7 @@ namespace SignalRouter
             int commandVersion,
             RequestIdentity request,
             QueueSlot queueSlot,
+            InteractionRecorder? dispatchRecorder,
             SynchronizationContext? callerContext,
             TaskCompletionSource<bool>? started,
             CancellationToken cancellationToken)
@@ -935,29 +984,33 @@ namespace SignalRouter
                 if (!await TryAwaitPredecessorAsync(queueSlot.Predecessor, cancellationToken)
                     .ConfigureAwait(false))
                 {
-                    return RecordCompleted(CancelledBeforeStart(
-                        request,
-                        command.TargetId,
-                        commandName,
-                        commandVersion,
-                        options.Origin));
+                    return RecordCompleted(
+                        CancelledBeforeStart(
+                            request,
+                            command.TargetId,
+                            commandName,
+                            commandVersion,
+                            options.Origin),
+                        dispatchRecorder);
                 }
 
                 predecessorObserved = true;
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    return RecordCompleted(CancelledBeforeStart(
-                        request,
-                        command.TargetId,
-                        commandName,
-                        commandVersion,
-                        options.Origin));
+                    return RecordCompleted(
+                        CancelledBeforeStart(
+                            request,
+                            command.TargetId,
+                            commandName,
+                            commandVersion,
+                            options.Origin),
+                        dispatchRecorder);
                 }
 
                 // A recorder poisoned by an earlier append failure must not let
                 // already-queued work execute stages unrecorded: recording is a
                 // guarantee (§15.1), so this dispatch fails before any side effect.
-                recorder?.ThrowIfFaulted();
+                dispatchRecorder?.ThrowIfFaulted();
 
                 if (callerContext != null)
                 {
@@ -1079,7 +1132,7 @@ namespace SignalRouter
                 // try so a failed append still releases the queue slot below.
                 try
                 {
-                    RecordCompleted(result);
+                    RecordCompleted(result, dispatchRecorder);
                 }
                 catch
                 {
@@ -1178,6 +1231,7 @@ namespace SignalRouter
         private RequestIdentity AssignIdentity(
             bool chainQueue,
             out QueueSlot queueSlot,
+            out InteractionRecorder? capturedRecorder,
             RecordingRequestPayload? payload = null,
             string? externalRequestId = null,
             CancellationTokenSource? submissionCancellation = null)
@@ -1186,6 +1240,7 @@ namespace SignalRouter
             string requestId;
             Task predecessor;
             TaskCompletionSource<bool>? tail = null;
+            InteractionRecorder? activeRecorder = null;
             lock (gate)
             {
                 if (disposed)
@@ -1230,16 +1285,28 @@ namespace SignalRouter
                 sequence = checked(++nextSequence);
                 requestId = externalRequestId ?? Guid.NewGuid().ToString("N");
 
-                // The request event is appended under the enqueue lock — the only
-                // place the §15.1 sequence-order guarantee holds under concurrent
-                // enqueue — and before the queue-tail swap, so a failed append
-                // leaves the FIFO chain untouched instead of stranding successors
-                // behind a tail that will never complete. Durability before the
-                // first stage follows because the line is flushed at enqueue and
-                // stages only run after dequeue.
-                if (payload != null)
+                // Bind this dispatch to the recorder present at admission, read
+                // under the gate. A recording requires both a serialized payload
+                // (captured before the gate) and a currently-attached recorder;
+                // when a maintenance lease detached one in the window after the
+                // payload was built, or attached one after, the dispatch is simply
+                // not recorded — keeping its request and terminal events all-or-
+                // nothing on the same recorder. From here until the queue slot
+                // releases, queueTail stays incomplete, so maintenance cannot swap
+                // the recorder mid-dispatch and the captured reference stays live
+                // for the terminal append.
+                if (payload != null && recorder != null)
                 {
-                    recorder!.AppendRequested(
+                    activeRecorder = recorder;
+
+                    // The request event is appended under the enqueue lock — the
+                    // only place the §15.1 sequence-order guarantee holds under
+                    // concurrent enqueue — and before the queue-tail swap, so a
+                    // failed append leaves the FIFO chain untouched instead of
+                    // stranding successors behind a tail that will never complete.
+                    // Durability before the first stage follows because the line is
+                    // flushed at enqueue and stages only run after dequeue.
+                    activeRecorder.AppendRequested(
                         sequence,
                         requestId,
                         payload.Origin,
@@ -1267,19 +1334,22 @@ namespace SignalRouter
             }
 
             queueSlot = new QueueSlot(predecessor, tail);
+            capturedRecorder = activeRecorder;
             return new RequestIdentity(sequence, requestId);
         }
 
-        private InteractionResult RecordCompleted(InteractionResult result)
+        private static InteractionResult RecordCompleted(
+            InteractionResult result,
+            InteractionRecorder? dispatchRecorder)
         {
-            if (recorder == null)
+            if (dispatchRecorder == null)
             {
                 return result;
             }
 
             try
             {
-                recorder.AppendCompleted(result);
+                dispatchRecorder.AppendCompleted(result);
             }
             catch (Exception exception) when (
                 !(exception is InteractionInvariantViolationException))
@@ -1783,11 +1853,14 @@ namespace SignalRouter
 
         private void OnContinuationDispatched()
         {
+            CancellationTokenRegistration maintenanceRegistration;
             lock (gate)
             {
                 pendingContinuations--;
-                TryCompletePendingMaintenanceLocked();
+                maintenanceRegistration = TryCompletePendingMaintenanceLocked();
             }
+
+            maintenanceRegistration.Dispose();
         }
 
         private sealed class IdempotencyCache

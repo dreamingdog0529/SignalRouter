@@ -781,6 +781,46 @@ public sealed class InteractionDispatcherTests
         }
     }
 
+    [Test]
+    public async Task AcquiringAReplayLeaseWithAnAttachedRecorderThrows()
+    {
+        using var harness = new Harness();
+        using var stream = new MemoryStream();
+        using var recorder = new InteractionRecorder(
+            stream,
+            new InteractionRecorderOptions("session-1", "build-1"),
+            leaveOpen: true);
+
+        using (var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync())
+        {
+            lease.AttachRecorder(recorder);
+        }
+
+        // The recorder outlives the maintenance lease, so a replay attempt must be
+        // refused even though no lease is held — replay requires a recorder-free
+        // dispatcher.
+        NUnitCompat.Throws<InteractionReplayException>(
+            () => harness.Dispatcher.AcquireReplayLease());
+    }
+
+    [Test]
+    public async Task AnIdempotencyCacheHitIsRejectedWhileTheMaintenanceLeaseIsHeld()
+    {
+        using var harness = new Harness();
+        harness.Register("menu.start");
+        var options = new InteractionDispatchOptions(
+            InteractionOrigin.Test,
+            idempotencyKey: "idem-1");
+        await harness.Dispatcher.DispatchAsync(new ClickCommand("menu.start"), options);
+
+        using var lease = await harness.Dispatcher.AcquireMaintenanceLeaseAsync();
+
+        NUnitCompat.ThrowsAsync<InvalidOperationException>(
+            async () => await harness.Dispatcher.DispatchAsync(
+                new ClickCommand("menu.start"),
+                options));
+    }
+
     private static InteractionDispatchOptions Options(
         InteractionOrigin origin = InteractionOrigin.Test)
     {
