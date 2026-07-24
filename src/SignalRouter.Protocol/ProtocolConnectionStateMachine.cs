@@ -111,10 +111,19 @@ namespace SignalRouter.Protocol
         private readonly HostHelloAuthenticationPolicy? hostAuthentication;
         private HelloMessage? sentHello;
 
+        // Preserves the original two-argument CLR signature so an assembly-only
+        // upgrade of a consumer compiled against it does not break.
+        public ProtocolConnectionStateMachine(
+            ProtocolConnectionRole role,
+            ProtocolPeerOptions localOptions)
+            : this(role, localOptions, null)
+        {
+        }
+
         public ProtocolConnectionStateMachine(
             ProtocolConnectionRole role,
             ProtocolPeerOptions localOptions,
-            HostHelloAuthenticationPolicy? hostAuthentication = null)
+            HostHelloAuthenticationPolicy? hostAuthentication)
         {
             ProtocolContract.RequireDefinedEnum(role, nameof(role));
             this.localOptions = localOptions

@@ -118,11 +118,19 @@ namespace SignalRouter.Protocol
     {
         // Host side: evaluates a received hello against the host's own
         // declaration. An accepted decision carries the session the welcome
-        // must reflect.
+        // must reflect. This two-argument overload preserves the original CLR
+        // signature so an assembly-only upgrade does not break existing binaries.
+        public static ProtocolHandshakeDecision EvaluateHello(
+            ProtocolPeerOptions local,
+            HelloMessage hello)
+        {
+            return EvaluateHello(local, hello, null);
+        }
+
         public static ProtocolHandshakeDecision EvaluateHello(
             ProtocolPeerOptions local,
             HelloMessage hello,
-            HostHelloAuthenticationPolicy? hostAuthentication = null)
+            HostHelloAuthenticationPolicy? hostAuthentication)
         {
             if (local == null)
             {
