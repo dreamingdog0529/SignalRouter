@@ -121,7 +121,8 @@ namespace SignalRouter.Protocol
         // must reflect.
         public static ProtocolHandshakeDecision EvaluateHello(
             ProtocolPeerOptions local,
-            HelloMessage hello)
+            HelloMessage hello,
+            HostHelloAuthenticationPolicy? hostAuthentication = null)
         {
             if (local == null)
             {
@@ -131,6 +132,19 @@ namespace SignalRouter.Protocol
             if (hello == null)
             {
                 throw new ArgumentNullException(nameof(hello));
+            }
+
+            // Authentication is evaluated on the typed hello BEFORE the version
+            // check, so a bad token plus an incompatible major still answers
+            // unauthorized rather than protocol_version_incompatible. JSON-type and
+            // envelope-schema violations were already malformed_message at the
+            // reader, before a typed hello existed (ADR 0008). The error message
+            // never echoes the token.
+            if (hostAuthentication != null && !hostAuthentication.Verify(hello.AuthToken))
+            {
+                return ProtocolHandshakeDecision.Reject(
+                    ProtocolErrorCodes.Unauthorized,
+                    "The runtime did not present a valid authentication token.");
             }
 
             if (!hello.Protocol.IsMajorCompatibleWith(ProtocolVersion.Current))
