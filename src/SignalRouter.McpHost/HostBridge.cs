@@ -166,6 +166,11 @@ public sealed class HostOperationReport
     public static HostOperationReport Pending(string operationId)
         => new("pending", operationId, null, null, null, null, null);
 
+    // The operation's outcome cannot be known — the runtime session that owned it
+    // is gone (an unexpected epoch change), so no answer can be invented.
+    public static HostOperationReport OutcomeUnknown(string operationId, string reason)
+        => new("outcome_unknown", operationId, null, null, null, null, reason);
+
     public static HostOperationReport Disconnected()
         => new("disconnected", string.Empty, null, null, null, null, null);
 }
@@ -622,6 +627,14 @@ public sealed class HostBridge : IDisposable
             return HostOperationReport.Pending(operationId);
         }
 
+        if (query.Task.IsCanceled)
+        {
+            // The waiter was released by an unexpected epoch transition — the
+            // operation and its runtime ledger are gone. Report that rather than
+            // leaking a cancellation the caller never requested.
+            return HostOperationReport.OutcomeUnknown(operationId, "session_lost");
+        }
+
         return ResolveQueryResult(await query.Task.ConfigureAwait(false));
     }
 
@@ -786,6 +799,8 @@ public sealed class HostBridge : IDisposable
     {
         List<PendingExecute>? lost = null;
         List<TaskCompletionSource<ProtocolMessage>>? orphanedReplies = null;
+        List<PendingOperation>? lostOperations = null;
+        List<TaskCompletionSource<ControlOperationResultMessage>>? orphanedQueries = null;
         lock (gate)
         {
             if (sessionEpoch != null
@@ -796,6 +811,19 @@ public sealed class HostBridge : IDisposable
                 orphanedReplies = new List<TaskCompletionSource<ProtocolMessage>>(
                     pendingReplies.Values);
                 pendingReplies.Clear();
+
+                // Control operations never change the session epoch in v1 (recording
+                // attaches in place; replay runs on an isolated runtime). An
+                // unexpected epoch change therefore means the runtime was recreated
+                // out from under a pending operation, whose runtime-side ledger is
+                // gone: its outcome is unknowable and inventing one is forbidden
+                // (§8, §13.3). Release every pending operation and outstanding query.
+                lostOperations = new List<PendingOperation>(pendingOperations.Values);
+                pendingOperations.Clear();
+                controlMessageToOperation.Clear();
+                orphanedQueries = new List<TaskCompletionSource<ControlOperationResultMessage>>(
+                    pendingQueries.Values);
+                pendingQueries.Clear();
             }
 
             sessionEpoch = newEpoch;
@@ -815,6 +843,23 @@ public sealed class HostBridge : IDisposable
             foreach (var reply in orphanedReplies)
             {
                 reply.TrySetCanceled();
+            }
+        }
+
+        if (lostOperations != null)
+        {
+            foreach (var operation in lostOperations)
+            {
+                operation.Completion.TrySetResult(
+                    HostOperationReport.OutcomeUnknown(operation.OperationId, "session_lost"));
+            }
+        }
+
+        if (orphanedQueries != null)
+        {
+            foreach (var query in orphanedQueries)
+            {
+                query.TrySetCanceled();
             }
         }
     }
