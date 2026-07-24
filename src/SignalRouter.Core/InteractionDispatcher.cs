@@ -894,8 +894,20 @@ namespace SignalRouter
             // The active-dispatch count brackets the whole dispatch including its
             // continuation drain, so a replay lease cannot be acquired in the window
             // after the queue tail is released but before continuations are posted.
+            //
+            // The maintenance barrier is checked here — atomically with the count
+            // increment and BEFORE ExecuteDispatchAsync serializes arguments through
+            // the application command codec. Rejecting only at AssignIdentity would
+            // let a new external dispatch bump activeDispatches and then block in its
+            // codec, starving the drain the acquisition waits on.
             lock (gate)
             {
+                if (maintenanceLease != null
+                    || (maintenanceAcquire != null && !dispatchingContinuation))
+                {
+                    throw MaintenanceLeaseRejection();
+                }
+
                 activeDispatches++;
             }
 

@@ -627,6 +627,14 @@ public sealed class HostBridge : IDisposable
             return HostOperationReport.Pending(operationId);
         }
 
+        if (query.Task.IsCanceled)
+        {
+            // The waiter was released by an unexpected epoch transition — the
+            // operation and its runtime ledger are gone. Report that rather than
+            // leaking a cancellation the caller never requested.
+            return HostOperationReport.OutcomeUnknown(operationId, "session_lost");
+        }
+
         return ResolveQueryResult(await query.Task.ConfigureAwait(false));
     }
 
