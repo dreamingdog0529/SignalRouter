@@ -36,6 +36,7 @@ namespace SignalRouter.Unity
         private readonly System.Random jitter = new();
         private readonly System.Collections.Generic.List<Waiter> waiters = new();
         private InteractionRuntime? runtime;
+        private InteractionSessionSupervisor? supervisor;
         private ProtocolRequestLedger? ledger;
         private SemanticUiStateProbe? agentViewProbe;
         private ProtocolPeerOptions? peerOptions;
@@ -73,6 +74,11 @@ namespace SignalRouter.Unity
             var owner = runtime != null ? runtime : GetComponent<InteractionRuntime>();
             runtime = owner;
             owner.RequireMainThread();
+
+            // Resolved on the main thread and cached: CreateSessionOptions runs off
+            // the main thread (after the connect await), where GetComponent is
+            // illegal. An absent supervisor leaves control operations refused.
+            supervisor ??= GetComponent<InteractionSessionSupervisor>();
             if (IsRunning)
             {
                 throw new InvalidOperationException("The bridge is already running.");
@@ -289,6 +295,7 @@ namespace SignalRouter.Unity
 
         private RuntimeBridgeSessionOptions CreateSessionOptions()
         {
+            var owner = supervisor;
             return new RuntimeBridgeSessionOptions(
                 ledger!,
                 peerOptions!,
@@ -296,7 +303,11 @@ namespace SignalRouter.Unity
                 SubmitFromWire,
                 requestId => runtime!.Dispatcher.TryCancel(requestId),
                 CaptureAgentSnapshot,
-                BeginWait);
+                BeginWait,
+                null,
+                null,
+                owner != null ? owner.BeginControlOperation : null,
+                owner != null ? owner.QueryControlOperation : null);
         }
 
         // Runs on the main thread (the session posts). Raw arguments cross the
@@ -304,6 +315,15 @@ namespace SignalRouter.Unity
         // as a JsonElement whose document lives elsewhere.
         private InteractionSubmission SubmitFromWire(ExecuteInteractionMessage message)
         {
+            // A control transition closes admission; the session turns this throw
+            // into a runtime_busy answer and abandons the ledger reservation, so the
+            // host can honestly resend once the transition completes.
+            if (supervisor != null && !supervisor.IsAdmitting)
+            {
+                throw new InvalidOperationException(
+                    "The runtime is transitioning and cannot admit new interactions.");
+            }
+
             var options = new InteractionSubmissionOptions(
                 message.RequestId!,
                 InteractionOrigin.Agent,
