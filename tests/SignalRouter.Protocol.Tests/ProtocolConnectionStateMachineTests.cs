@@ -120,6 +120,10 @@ public sealed class ProtocolConnectionStateMachineTests
         Assert.That(
             runtime.OnMessageReceived(new PingMessage("m-5", Epoch)).Verdict,
             Is.EqualTo(ProtocolConnectionVerdict.Accept));
+        Assert.That(
+            runtime.OnMessageReceived(
+                new GetControlOperationResultMessage("m-6", Epoch, "op-1")).Verdict,
+            Is.EqualTo(ProtocolConnectionVerdict.Accept));
     }
 
     [Test]
@@ -156,6 +160,14 @@ public sealed class ProtocolConnectionStateMachineTests
                 "m-1",
                 1,
                 "{}")).Verdict,
+            Is.EqualTo(ProtocolConnectionVerdict.Accept));
+        Assert.That(
+            host.OnMessageReceived(new ControlOperationResultMessage(
+                "m-5",
+                Epoch,
+                "op-1",
+                ProtocolControlOperationStates.InProgress,
+                Epoch)).Verdict,
             Is.EqualTo(ProtocolConnectionVerdict.Accept));
     }
 

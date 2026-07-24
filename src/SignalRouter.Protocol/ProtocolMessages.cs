@@ -919,6 +919,165 @@ namespace SignalRouter.Protocol
         }
     }
 
+    // Host → runtime. Queries a control operation by its host-assigned ID so a
+    // host that timed out waiting for the acknowledgment, or reconnected after a
+    // drop, can reconcile the operation's outcome without re-running it (item 8d
+    // control-operation recovery). The runtime answers from its operation ledger
+    // with a control_operation_result. Correlated by payload operationId, like
+    // the other control messages.
+    public sealed class GetControlOperationResultMessage : ProtocolMessage
+    {
+        public GetControlOperationResultMessage(
+            string messageId,
+            string sessionEpoch,
+            string operationId,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                null)
+        {
+            ProtocolContract.RequireIdentifier(operationId, nameof(operationId));
+            OperationId = operationId;
+        }
+
+        public string OperationId { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.GetControlOperationResult; }
+        }
+    }
+
+    // Runtime → host. The operation ledger's answer to a query (or an unsolicited
+    // late result). Non-terminal states (pending/in_progress) carry no result
+    // payload — the host keeps waiting; terminal states (completed/refused) carry
+    // the fields of whichever operation ran: a recordingHandle (start/stop), an
+    // entryCount (stop), an outcomeKind and detail (replay), or a detail error
+    // (refused). newSessionEpoch is always the runtime's current epoch and must
+    // equal the envelope epoch, so a stale result can never be re-stamped onto a
+    // newer session (Codex review, item 8d).
+    public sealed class ControlOperationResultMessage : ProtocolMessage
+    {
+        public ControlOperationResultMessage(
+            string messageId,
+            string sessionEpoch,
+            string operationId,
+            string state,
+            string newSessionEpoch,
+            string? recordingHandle = null,
+            long? entryCount = null,
+            string? outcomeKind = null,
+            string? detail = null,
+            ProtocolVersion? protocol = null)
+            : base(
+                protocol,
+                messageId,
+                ProtocolContract.RequireIdentifierValue(sessionEpoch, nameof(sessionEpoch)),
+                null,
+                null)
+        {
+            ProtocolContract.RequireIdentifier(operationId, nameof(operationId));
+            if (!IsKnownState(state))
+            {
+                throw new ArgumentException(
+                    "The control operation state is not part of protocol v1.",
+                    nameof(state));
+            }
+
+            RecordingEpochContract.Require(newSessionEpoch, sessionEpoch);
+
+            var terminal = string.Equals(
+                    state,
+                    ProtocolControlOperationStates.Completed,
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    state,
+                    ProtocolControlOperationStates.Refused,
+                    StringComparison.Ordinal);
+            if (!terminal
+                && (recordingHandle != null
+                    || entryCount != null
+                    || outcomeKind != null
+                    || detail != null))
+            {
+                // A still-running operation has no result to disclose; carrying a
+                // payload would let the host act on a non-terminal answer.
+                throw new ArgumentException(
+                    "A non-terminal control operation result must not carry a payload.",
+                    nameof(state));
+            }
+
+            if (recordingHandle != null)
+            {
+                RecordingHandles.Require(recordingHandle, nameof(recordingHandle));
+            }
+
+            if (entryCount != null && entryCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(entryCount),
+                    entryCount,
+                    "The entry count must be non-negative.");
+            }
+
+            if (outcomeKind != null
+                && !string.Equals(outcomeKind, ProtocolReplayOutcomes.Completed, StringComparison.Ordinal)
+                && !string.Equals(outcomeKind, ProtocolReplayOutcomes.Diverged, StringComparison.Ordinal)
+                && !string.Equals(outcomeKind, ProtocolReplayOutcomes.Stopped, StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "The replay outcome kind is not part of protocol v1.",
+                    nameof(outcomeKind));
+            }
+
+            if (detail != null)
+            {
+                ProtocolContract.RequireText(
+                    detail,
+                    ProtocolLimits.MaxErrorMessageChars,
+                    nameof(detail));
+            }
+
+            OperationId = operationId;
+            State = state;
+            NewSessionEpoch = newSessionEpoch;
+            RecordingHandle = recordingHandle;
+            EntryCount = entryCount;
+            OutcomeKind = outcomeKind;
+            Detail = detail;
+        }
+
+        public string OperationId { get; }
+
+        public string State { get; }
+
+        public string NewSessionEpoch { get; }
+
+        public string? RecordingHandle { get; }
+
+        public long? EntryCount { get; }
+
+        public string? OutcomeKind { get; }
+
+        public string? Detail { get; }
+
+        public override string Type
+        {
+            get { return ProtocolMessageTypes.ControlOperationResult; }
+        }
+
+        private static bool IsKnownState(string state)
+        {
+            return string.Equals(state, ProtocolControlOperationStates.Pending, StringComparison.Ordinal)
+                || string.Equals(state, ProtocolControlOperationStates.InProgress, StringComparison.Ordinal)
+                || string.Equals(state, ProtocolControlOperationStates.Completed, StringComparison.Ordinal)
+                || string.Equals(state, ProtocolControlOperationStates.Refused, StringComparison.Ordinal);
+        }
+    }
+
     // Runtime → host. Carries the canonical semantic-ui snapshot document
     // (agent view) verbatim, plus the probe schema version that governs its
     // shape (design §13, §16).

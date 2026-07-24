@@ -85,6 +85,8 @@ namespace SignalRouter.Protocol
         public const string RecordingStopped = "recording_stopped";
         public const string ReplayRecording = "replay_recording";
         public const string ReplayReport = "replay_report";
+        public const string GetControlOperationResult = "get_control_operation_result";
+        public const string ControlOperationResult = "control_operation_result";
     }
 
     // The terminal outcome kinds of a strict replay (design §16.1, ADR 0006),
@@ -94,6 +96,20 @@ namespace SignalRouter.Protocol
         public const string Completed = "completed";
         public const string Diverged = "diverged";
         public const string Stopped = "stopped";
+    }
+
+    // The lifecycle states of a host-assigned control operation (start/stop/replay
+    // recording), projected onto the wire so a host that timed out or reconnected
+    // can query the operation by ID and reconcile without re-running it (design
+    // §18.3, item 8d control-operation recovery). Pending/InProgress are non-
+    // terminal (keep waiting); Completed/Refused are terminal and carry the
+    // operation's result payload.
+    public static class ProtocolControlOperationStates
+    {
+        public const string Pending = "pending";
+        public const string InProgress = "in_progress";
+        public const string Completed = "completed";
+        public const string Refused = "refused";
     }
 
     // The bounded wait conditions of the wait_for message (design §18.2,
@@ -124,6 +140,7 @@ namespace SignalRouter.Protocol
         public const string CapacityExhausted = "capacity_exhausted";
         public const string RuntimeBusy = "runtime_busy";
         public const string RecordingUnavailable = "recording_unavailable";
+        public const string ControlInProgress = "control_in_progress";
     }
 
     // Pre-item-9 defaults; the security pass (design §19, §25) finalizes the
