@@ -13,6 +13,9 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="SignalRouter.Protocol.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../SignalRouter.Core/SignalRouter.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
