@@ -430,6 +430,38 @@ public sealed class ProtocolMessageModelTests
             Is.Not.Null);
     }
 
+    [Test]
+    public void TheSnapshotByteCeilingStaysBelowTheReceiveLimit()
+    {
+        // The capture-side byte ceiling must fire before the wire receive limit, so an
+        // over-cap snapshot fails fast at capture rather than only when the envelope is
+        // encoded, and a full envelope still fits (ADR 0008).
+        Assert.That(
+            InteractionSnapshotLimits.MaxSnapshotBytes,
+            Is.LessThan(ProtocolLimits.DefaultMaxReceiveMessageBytes));
+    }
+
+    [Test]
+    public void ARealisticFullSizeSnapshotPassesReceiveValidation()
+    {
+        var builder = new StringBuilder();
+        for (var index = 0; index < InteractionSnapshotLimits.MaxSnapshotTargets; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            builder
+                .Append("{\"id\":\"screen.section.control.").Append(index)
+                .Append("\",\"parentId\":null,\"role\":\"button\",\"label\":\"Realistic label ")
+                .Append(index)
+                .Append("\",\"availableInteractions\":[{\"wireName\":\"click\",\"arguments\":[]}]}");
+        }
+
+        NUnitCompat.ThatThrows(() => _ = Snapshot(builder.ToString()), Throws.Nothing);
+    }
+
     private static RegistrySnapshotMessage Snapshot(string targetsInner)
     {
         return new RegistrySnapshotMessage(

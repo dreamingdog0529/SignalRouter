@@ -423,6 +423,39 @@ public sealed class InteractionRegistryTests
         Assert.That(snapshot.Targets, Has.Count.EqualTo(2));
     }
 
+    [Test]
+    public void ARealisticFullSizeUiCapturesWithinTheByteCeiling()
+    {
+        // Benchmark for the caps (ADR 0008): a realistic UI populated to the target cap
+        // — modest labels, a short state value, one interaction each — must capture
+        // successfully and stay within the byte ceiling with headroom, proving the
+        // ceiling rejects only genuinely oversized snapshots, not real screens.
+        var registry = Registry();
+        for (var index = 0; index < InteractionSnapshotLimits.MaxSnapshotTargets; index++)
+        {
+            var target = new TestTarget(
+                "screen.section.control." + index,
+                new InteractionDescriptor(
+                    "screen.section.control." + index,
+                    null,
+                    "button",
+                    "Realistic control label " + index,
+                    InteractionValue.FromString("state-" + index),
+                    true,
+                    true,
+                    new[] { Click() }),
+                true,
+                false);
+            registry.Register(target, true);
+        }
+
+        var snapshot = new SemanticUiStateProbe(registry).Capture();
+
+        Assert.That(
+            snapshot.Utf8Json.Length,
+            Is.LessThanOrEqualTo(InteractionSnapshotLimits.MaxSnapshotBytes));
+    }
+
     private static TestTarget TargetWithParent(string id, string? parentId)
     {
         return new TestTarget(
