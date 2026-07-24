@@ -26,16 +26,23 @@ internal sealed class HostDiscoveryStore
         EnsureOwnerOnlyDirectory(location.DirectoryPath);
 
         var tempPath = location.FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        var moved = false;
         try
         {
             WriteOwnerOnlyFile(tempPath, descriptorJson);
             VerifyOwnerOnly(tempPath);
             File.Move(tempPath, location.FilePath, overwrite: true);
+            moved = true;
             VerifyOwnerOnly(location.FilePath);
         }
         catch
         {
-            TryDelete(tempPath);
+            // Fail closed transactionally: before the move the half-written temp file
+            // is the only artifact; after it the (possibly unverifiable) final file is.
+            // A verification failure on the moved file must not leave that descriptor
+            // in place, or a token could be served from a path we could not confirm is
+            // owner-only.
+            TryDelete(moved ? location.FilePath : tempPath);
             throw;
         }
     }
@@ -93,8 +100,20 @@ internal sealed class HostDiscoveryStore
             FileMode.Open,
             FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        return reader.ReadToEnd();
+
+        // Bound the read. A valid descriptor is well under MaxDescriptorBytes; reading
+        // one byte past that cap lets an oversize or corrupt file parse-reject (and so
+        // never match this instance) without loading an unbounded amount into memory.
+        var cap = HostDiscoveryDescriptor.MaxDescriptorBytes + 1;
+        var buffer = new byte[cap];
+        var total = 0;
+        int read;
+        while (total < cap && (read = stream.Read(buffer, total, cap - total)) > 0)
+        {
+            total += read;
+        }
+
+        return Encoding.UTF8.GetString(buffer, 0, total);
     }
 
     private static void WriteOwnerOnlyFile(string path, string json)

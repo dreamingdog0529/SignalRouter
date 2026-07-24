@@ -89,6 +89,26 @@ public sealed class HostDiscoveryStoreTests
     }
 
     [Test]
+    public void DeleteIfOwnedByLeavesAnOversizeFileInPlace()
+    {
+        var store = new HostDiscoveryStore();
+        var owner = Guid.NewGuid();
+        store.Publish(location, Descriptor(owner));
+        // Pad the file past the descriptor size cap. The bounded read must not attempt
+        // to load the whole file, and an oversize file no longer parses as a
+        // descriptor, so it names no instance and is left untouched. Deleting as the
+        // real owner means retention can only be due to the oversize rejection, not an
+        // instance-id mismatch.
+        File.AppendAllText(
+            location.FilePath,
+            new string(' ', HostDiscoveryDescriptor.MaxDescriptorBytes));
+
+        store.DeleteIfOwnedBy(location, owner);
+
+        Assert.That(File.Exists(location.FilePath), Is.True);
+    }
+
+    [Test]
     public void DeleteIfOwnedByToleratesAMissingDescriptor()
     {
         // No descriptor was published; deleting must be a tolerated no-op.
