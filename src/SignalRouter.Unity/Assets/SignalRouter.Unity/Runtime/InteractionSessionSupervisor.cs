@@ -26,6 +26,8 @@ namespace SignalRouter.Unity
     [AddComponentMenu("SignalRouter/Interaction Session Supervisor")]
     public sealed class InteractionSessionSupervisor : MonoBehaviour
     {
+        private const int MaxOperations = 256;
+
         private readonly Dictionary<string, LedgerEntry> ledger = new(StringComparer.Ordinal);
         private readonly List<TaskCompletionSource<bool>> frameWaiters = new();
         private InteractionRuntime? runtime;
@@ -62,6 +64,28 @@ namespace SignalRouter.Unity
         }
 
         private void Update()
+        {
+            ReleaseFrameWaiters();
+        }
+
+        private void OnDisable()
+        {
+            // Update stops firing once disabled, so any replay teardown waiting on a
+            // frame would hang — and with it the live maintenance lease and
+            // admission. Release the waiters so the operation can finish and reopen
+            // the runtime even as the component goes down.
+            ReleaseFrameWaiters();
+        }
+
+        private void OnDestroy()
+        {
+            // A recording still attached when the component is torn down would leave
+            // its artifact file open until finalization; close it now.
+            currentRecorder?.Dispose();
+            currentRecorder = null;
+        }
+
+        private void ReleaseFrameWaiters()
         {
             if (frameWaiters.Count == 0)
             {
@@ -115,13 +139,35 @@ namespace SignalRouter.Unity
             if (activeOperationId != null)
             {
                 // Single-flight: one control operation at a time. Store the refusal
-                // so a lost-refusal resend re-refuses instead of executing.
+                // so a lost-refusal resend re-refuses instead of executing — but not
+                // past the ledger capacity, so a flood of unique ids cannot grow
+                // memory without bound.
+                if (ledger.Count >= MaxOperations)
+                {
+                    complete(RuntimeControlAck.Refused(
+                        request.OperationId,
+                        ProtocolErrorCodes.CapacityExhausted,
+                        "The control operation ledger is full."));
+                    return;
+                }
+
                 var refusal = RuntimeControlAck.Refused(
                     request.OperationId,
                     ProtocolErrorCodes.ControlInProgress,
                     "Another control operation is in progress.");
                 Record(request, fingerprint, LedgerState.Refused, refusal, null);
                 complete(refusal);
+                return;
+            }
+
+            if (ledger.Count >= MaxOperations)
+            {
+                // A hostile or buggy peer could otherwise flood unique operation ids
+                // and grow the ledger without bound while one operation runs.
+                complete(RuntimeControlAck.Refused(
+                    request.OperationId,
+                    ProtocolErrorCodes.CapacityExhausted,
+                    "The control operation ledger is full."));
                 return;
             }
 
@@ -136,8 +182,11 @@ namespace SignalRouter.Unity
 
             // Close admission synchronously, before the async work starts, so a
             // wire execute queued right behind this control message is refused
-            // rather than admitted ahead of the transition.
+            // rather than admitted ahead of the transition. Suppression additionally
+            // makes the uGUI adapters no-op, so a human click or text commit during
+            // the transition does not fault against the maintenance barrier.
             isAdmitting = false;
+            runtime!.BeginSuppression();
             _ = RunOperationAsync(request);
         }
 
@@ -188,15 +237,19 @@ namespace SignalRouter.Unity
                         break;
                 }
             }
-            catch (Exception exception)
+            catch (Exception)
             {
+                // An application factory or recorder may put a path or credential in
+                // its exception message; never forward that. The refusal carries a
+                // stable, non-secret detail (§16.1, §19).
                 ack = RuntimeControlAck.Refused(
                     request.OperationId,
                     ProtocolErrorCodes.RecordingUnavailable,
-                    Sanitize(exception.Message));
+                    "The control operation failed.");
             }
             finally
             {
+                runtime!.EndSuppression();
                 isAdmitting = true;
             }
 
@@ -217,16 +270,26 @@ namespace SignalRouter.Unity
             // lease window — the interval the whole runtime is quiesced — to just
             // the attach.
             var (handle, recorder) = CreateRecording();
-            var lease = await runtime!.Dispatcher
-                .AcquireMaintenanceLeaseAsync(runtime.LifetimeToken)
-                .ConfigureAwait(true);
             try
             {
-                lease.AttachRecorder(recorder);
+                var lease = await runtime!.Dispatcher
+                    .AcquireMaintenanceLeaseAsync(runtime.LifetimeToken)
+                    .ConfigureAwait(true);
+                try
+                {
+                    lease.AttachRecorder(recorder);
+                }
+                finally
+                {
+                    lease.Dispose();
+                }
             }
-            finally
+            catch
             {
-                lease.Dispose();
+                // The file was already created; close it so it is not left locked
+                // when the lease is cancelled or the attach is rejected.
+                recorder.Dispose();
+                throw;
             }
 
             currentRecorder = recorder;
@@ -316,7 +379,11 @@ namespace SignalRouter.Unity
                 try
                 {
                     var report = await InteractionReplayer
-                        .ReplayAsync(recording, environment.Runtime.Dispatcher)
+                        .ReplayAsync(
+                            recording,
+                            environment.Runtime.Dispatcher,
+                            environment.SecretResolver,
+                            runtime.LifetimeToken)
                         .AsTask()
                         .ConfigureAwait(true);
                     return RuntimeControlAck.ReplayReport(

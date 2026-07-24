@@ -281,6 +281,8 @@ namespace SignalRouter.Tests
 
                 public InteractionRuntime Runtime { get; }
 
+                public IInteractionSecretResolver? SecretResolver => null;
+
                 public void Dispose()
                 {
                     captureCount();

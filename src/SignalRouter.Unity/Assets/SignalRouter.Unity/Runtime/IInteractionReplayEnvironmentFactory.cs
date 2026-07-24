@@ -33,5 +33,11 @@ namespace SignalRouter.Unity
     public interface IInteractionReplayEnvironment : IDisposable
     {
         InteractionRuntime Runtime { get; }
+
+        // Resolves secrets a recording redacted, so a recording with sensitive
+        // arguments can be replayed. Null when the environment supplies none — a
+        // recording that carries secret markers is then refused rather than
+        // verified (§16, §19).
+        IInteractionSecretResolver? SecretResolver { get; }
     }
 }
