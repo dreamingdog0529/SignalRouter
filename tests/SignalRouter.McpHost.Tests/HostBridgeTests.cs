@@ -269,65 +269,77 @@ public sealed class HostBridgeTests
     }
 
     [Test]
-    public async Task StartRecordingCorrelatesItsReplyAcrossTheEpochChange()
+    public async Task StartRecordingCorrelatesItsReplyOnTheSameEpoch()
     {
         using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
-        var firstPeer = await harness.ConnectRuntimeAsync();
-        await firstPeer.PerformHandshakeAsync();
+        using var peer = await harness.ConnectRuntimeAsync();
+        await peer.PerformHandshakeAsync();
 
         var startTask = harness.Bridge.StartRecordingAsync("smoke", CancellationToken.None);
-        var start = (StartRecordingMessage)await firstPeer.ReceiveAsync();
+        var start = (StartRecordingMessage)await peer.ReceiveAsync();
         Assert.That(start.Label, Is.EqualTo("smoke"));
 
-        // Recording recreates the runtime: the old connection drops and the
-        // runtime reconnects under a new epoch, then answers by operationId.
-        firstPeer.Drop();
-        await harness.WaitForDisconnectAsync();
-        using var recordingPeer = await harness.ConnectRuntimeAsync("epoch-rec");
-        await recordingPeer.PerformHandshakeAsync();
-        await recordingPeer.SendAsync(new RecordingStartedMessage(
-            recordingPeer.NextId(),
-            "epoch-rec",
+        // Recording attaches in place: the epoch does not change and the
+        // acknowledgment arrives on the same session, correlated by operationId.
+        await peer.SendAsync(new RecordingStartedMessage(
+            peer.NextId(),
+            Epoch,
             start.OperationId,
-            "rec-20260724t0100-1a2b3c4d",
-            "epoch-rec"));
+            Handle,
+            Epoch));
 
         var report = await startTask;
         Assert.That(report.Status, Is.EqualTo("recording_started"));
-        Assert.That(report.RecordingHandle, Is.EqualTo("rec-20260724t0100-1a2b3c4d"));
-        Assert.That(report.NewSessionEpoch, Is.EqualTo("epoch-rec"));
-        firstPeer.Dispose();
+        Assert.That(report.RecordingHandle, Is.EqualTo(Handle));
+        Assert.That(report.NewSessionEpoch, Is.EqualTo(Epoch));
     }
 
     [Test]
     public async Task ReplayReturnsTheSanitizedOutcome()
     {
         using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
-        var firstPeer = await harness.ConnectRuntimeAsync();
-        await firstPeer.PerformHandshakeAsync();
+        using var peer = await harness.ConnectRuntimeAsync();
+        await peer.PerformHandshakeAsync();
 
-        var replayTask = harness.Bridge.ReplayRecordingAsync(
-            "rec-20260724t0100-1a2b3c4d",
-            CancellationToken.None);
-        var replay = (ReplayRecordingMessage)await firstPeer.ReceiveAsync();
-        Assert.That(replay.RecordingHandle, Is.EqualTo("rec-20260724t0100-1a2b3c4d"));
+        var replayTask = harness.Bridge.ReplayRecordingAsync(Handle, CancellationToken.None);
+        var replay = (ReplayRecordingMessage)await peer.ReceiveAsync();
+        Assert.That(replay.RecordingHandle, Is.EqualTo(Handle));
 
-        firstPeer.Drop();
-        await harness.WaitForDisconnectAsync();
-        using var livePeer = await harness.ConnectRuntimeAsync("epoch-live");
-        await livePeer.PerformHandshakeAsync();
-        await livePeer.SendAsync(new ReplayReportMessage(
-            livePeer.NextId(),
-            "epoch-live",
+        // Replay runs on an isolated runtime; the live epoch is unchanged and the
+        // report comes back on the same session.
+        await peer.SendAsync(new ReplayReportMessage(
+            peer.NextId(),
+            Epoch,
             replay.OperationId,
             ProtocolReplayOutcomes.Diverged,
-            "epoch-live",
+            Epoch,
             "status mismatch at sequence 2"));
 
         var report = await replayTask;
         Assert.That(report.Status, Is.EqualTo("replayed"));
         Assert.That(report.OutcomeKind, Is.EqualTo(ProtocolReplayOutcomes.Diverged));
         Assert.That(report.Detail, Is.EqualTo("status mismatch at sequence 2"));
+    }
+
+    [Test]
+    public async Task AnUnexpectedEpochChangeReleasesAPendingControlOperation()
+    {
+        using var harness = new HostHarness(toolTimeout: TimeSpan.FromSeconds(20));
+        var firstPeer = await harness.ConnectRuntimeAsync();
+        await firstPeer.PerformHandshakeAsync();
+
+        var startTask = harness.Bridge.StartRecordingAsync("smoke", CancellationToken.None);
+        _ = (StartRecordingMessage)await firstPeer.ReceiveAsync();
+
+        // Control operations never change the epoch in v1. If one does, the runtime
+        // was recreated out from under the operation: its outcome is unknowable.
+        firstPeer.Drop();
+        await harness.WaitForDisconnectAsync();
+        using var newPeer = await harness.ConnectRuntimeAsync("epoch-other");
+        await newPeer.PerformHandshakeAsync();
+
+        var report = await startTask;
+        Assert.That(report.Status, Is.EqualTo("outcome_unknown"));
         firstPeer.Dispose();
     }
 

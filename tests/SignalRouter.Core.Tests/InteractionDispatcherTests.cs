@@ -640,6 +640,34 @@ public sealed class InteractionDispatcherTests
     }
 
     [Test]
+    public async Task NewDispatchesAreRejectedWhileAMaintenanceLeaseIsBeingAcquired()
+    {
+        using var harness = new Harness();
+        var blocker = harness.Register("menu.first", gate: true);
+        harness.Register("menu.second");
+
+        var inflight = harness.Dispatcher.DispatchAsync(
+            new ClickCommand("menu.first"),
+            Options()).AsTask();
+        await blocker.Started.Task;
+
+        // Acquisition is pending while the gated dispatch drains. A new external
+        // dispatch during that window is rejected so it cannot starve the drain.
+        var acquire = harness.Dispatcher.AcquireMaintenanceLeaseAsync();
+        Assert.That(acquire.IsCompleted, Is.False);
+
+        NUnitCompat.ThrowsAsync<InvalidOperationException>(
+            async () => await harness.Dispatcher.DispatchAsync(
+                new ClickCommand("menu.second"),
+                Options()));
+
+        blocker.Release();
+        await inflight;
+        using var lease = await acquire;
+        Assert.That(lease, Is.Not.Null);
+    }
+
+    [Test]
     public async Task AttachingARecorderWhoseSessionDiffersFromTheEpochThrows()
     {
         using var harness = new Harness();

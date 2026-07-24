@@ -65,6 +65,16 @@ namespace SignalRouter
         private TaskCompletionSource<InteractionMaintenanceLease>? maintenanceAcquire;
         private CancellationTokenRegistration maintenanceAcquireRegistration;
 
+        // True on the thread running a continuation's synchronous re-entry into the
+        // queue. A maintenance acquisition rejects NEW external admissions from the
+        // moment it starts (so a direct dispatcher caller cannot starve the drain),
+        // but must let in-flight interactions finish — including the continuations
+        // they enqueued — or the dispatcher would never reach idle. This marker
+        // distinguishes the two at AssignIdentity. Set only across the synchronous
+        // prefix of a continuation dispatch, which is where AssignIdentity runs.
+        [ThreadStatic]
+        private static bool dispatchingContinuation;
+
         public InteractionDispatcher(
             InteractionCommandCatalog catalog,
             InteractionRegistry registry,
@@ -186,9 +196,11 @@ namespace SignalRouter
                 }
 
                 // A cache hit never reaches AssignIdentity's maintenance guard, so
-                // serving one while the recorder is being swapped would admit a
-                // result the exclusive-admission contract forbids.
-                if (maintenanceLease != null)
+                // serving one while the recorder is being swapped (or while a swap
+                // is being acquired) would admit a result the exclusive-admission
+                // contract forbids. Idempotency keys are an external-caller feature
+                // — continuations never carry one — so this closes on acquisition.
+                if (maintenanceLease != null || maintenanceAcquire != null)
                 {
                     throw MaintenanceLeaseRejection();
                 }
@@ -1259,12 +1271,16 @@ namespace SignalRouter
                     throw ReplayLeaseRejection();
                 }
 
-                // A held maintenance lease means the dispatcher is idle by
-                // construction and its recorder is being swapped; no dispatch may
-                // enter until the lease is released. This is a guard — the caller
-                // closes admission above before acquiring — so reaching it is a
-                // programming error, hence fail-fast (design §16.2).
-                if (maintenanceLease != null)
+                // Maintenance closes admission the moment acquisition BEGINS, not
+                // only once the lease is held: otherwise a caller dispatching
+                // directly on the dispatcher (bypassing the transport gate) could
+                // feed the drain forever and starve the acquisition. In-flight
+                // interactions must still finish, so the continuations they enqueue
+                // are the one exception — they re-enter to complete already-admitted
+                // work, and rejecting them would strand the drain and drop their
+                // side effects (design §16.2).
+                if (maintenanceLease != null
+                    || (maintenanceAcquire != null && !dispatchingContinuation))
                 {
                     throw MaintenanceLeaseRejection();
                 }
@@ -1840,12 +1856,18 @@ namespace SignalRouter
                 // propagate to here. The pending count is released only after the
                 // synchronous part of the dispatch has chained the queue tail, so the
                 // idleness predicate never has a gap between "posted" and "enqueued".
+                var previous = dispatchingContinuation;
+                dispatchingContinuation = true;
                 try
                 {
+                    // continuation(dispatcher) runs the dispatch's synchronous prefix
+                    // — including AssignIdentity, which reads dispatchingContinuation
+                    // — before its first await suspends and returns the ValueTask.
                     _ = continuation(dispatcher);
                 }
                 finally
                 {
+                    dispatchingContinuation = previous;
                     dispatcher.OnContinuationDispatched();
                 }
             }
