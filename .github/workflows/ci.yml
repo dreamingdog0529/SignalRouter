@@ -37,3 +37,30 @@ jobs:
 
       - name: Test
         run: dotnet test ./SignalRouter.slnx --no-build
+
+  # The descriptor store applies owner-only permissions per OS (ADR 0008): Unix
+  # 0700/0600 is covered by build-and-test on ubuntu, and this job covers the
+  # Windows inheritance-disabled DACL path on a real Windows runner.
+  build-and-test-windows:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      # bash is available on the Windows runner, so the same cross-platform
+      # feed-directory step works here.
+      - name: Create local package feed directory
+        shell: bash
+        run: mkdir -p ../.local-feed
+
+      - name: Build
+        run: dotnet build ./SignalRouter.slnx
+
+      - name: Test
+        run: dotnet test ./SignalRouter.slnx --no-build
