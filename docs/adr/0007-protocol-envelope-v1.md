@@ -19,9 +19,10 @@ exactly-once semantics without saying what it forgets; and §13.3 described the 
 epoch as changing on reconnect, which would break result recovery — the one thing the
 epoch exists to scope.
 
-**Draft status:** protocol v1.0 is an internal draft until the MCP host (roadmap
-item 8) ships against it. Message additions and payload extensions before that point
-are ordinary edits to this ADR, not new majors.
+**Status:** protocol v1.0 is **frozen** as of item 8d — the MCP host and the Unity
+runtime-side recording/replay supervisor ship against it, proven end to end by the
+PlayMode record→execute→stop→replay test. Further message additions or payload
+changes now require a new protocol major, not an edit to this ADR.
 
 ## Decision
 
@@ -157,10 +158,13 @@ item-8 envelope addition.
 `cancel_interaction` (a disconnect cancels nothing per §8, so recovery needs explicit
 cancellation plus result queries), and `get_registry_snapshot`/`registry_snapshot`
 (the canonical semantic-ui agent-view document, verbatim, with its probe version; the
-host projects `get_ui_tree` and `list_interactions` from it). `wait_for` and the
-recording/replay operations are deferred to item 8 for co-design with host semantics;
-recordings will be addressed by logical artifact handles, not raw paths, keeping §19's
-path policy in item 9.
+host projects `get_ui_tree` and `list_interactions` from it). `wait_for`/`wait_result`
+bound the frame-polled conditions. The recording/replay control set —
+`start_recording`/`recording_started`, `stop_recording`/`recording_stopped`,
+`replay_recording`/`replay_report`, and `get_control_operation_result`/
+`control_operation_result` — is correlated by a host-assigned operationId and
+addresses recordings by logical `rec-<utcstamp>-<8char>` handles, not raw paths
+(keeping §19's path policy in item 9).
 
 ### Forward compatibility and decoding
 
@@ -216,34 +220,52 @@ property-level diffs) would be additive minor-version work.
   transport around decided contracts instead of deciding them mid-implementation.
 - **Negative.** Hosts must generate unique request IDs or see conflicts; resends must
   repeat bytes verbatim.
-- **Open items (item 8).** The Unity runtime-side recording/replay supervisor (8d
-  runtime) — recreating the runtime under a new epoch with a recorder, rebinding the
-  UI adapters, running the strict replayer against a transport-invisible runtime, and
-  driving the operationId control plane across the reconnect. Its wire contract and
-  host tools are done (see below); the runtime implementation lands with the PlayMode
-  record→execute→stop→replay proof and lifts the draft status / freezes v1.0.
-  Resolved in 8a: the Core split-phase submission API with `cancel_interaction`
-  dispatch wiring, and the default ledger capacity and retention (§25). Resolved in
-  8b: transport framing, the reconnect loop, and the query-first recovery contract
-  (recovery window, `interaction_status`, `runtime_busy`, resendable cancel intent).
-  Resolved in 8c: `wait_for`/`wait_result` (bounded frame-polled conditions: idle,
-  target_present, target_absent; a timeout answers satisfied=false), the MCP host
-  process (Kestrel loopback, one runtime connection, stdio tools projecting wire
-  payloads, caller-owned request IDs echoed on every response shape including
-  tool-timeout pending answers). Resolved in 8d (wire + host): the recording/replay
-  messages with `rec-<utcstamp>-<8char>` filename-stem handles (no host path map, no
-  traversal), the operationId control plane that survives the epoch change these
-  operations cause, and the host tools (start_recording, stop_recording,
-  replay_recording) with cross-epoch operation correlation. Item 9: `authToken`
-  validation, timing-safe comparison, `unauthorized`, final limits.
+- **Item 8, resolved.** Resolved in 8a: the Core split-phase submission API with
+  `cancel_interaction` dispatch wiring, and the default ledger capacity and retention
+  (§25). Resolved in 8b: transport framing, the reconnect loop, and the query-first
+  recovery contract (recovery window, `interaction_status`, `runtime_busy`, resendable
+  cancel intent). Resolved in 8c: `wait_for`/`wait_result` (bounded frame-polled
+  conditions: idle, target_present, target_absent; a timeout answers satisfied=false),
+  the MCP host process (Kestrel loopback, one runtime connection, stdio tools
+  projecting wire payloads, caller-owned request IDs echoed on every response shape
+  including tool-timeout pending answers).
+
+  **Recording and replay control, resolved in 8d.** The design here changed from the
+  original "recreate the runtime under a new epoch" sketch, which review showed could
+  not isolate replay's side effects and had no sound cross-reconnect recovery.
+  **Control operations do not change the session epoch in v1.** Recording attaches a
+  recorder to the *live* dispatcher under a maintenance lease (Core exclusive-idle
+  admission barrier) and detaches it on stop — a recording is therefore an
+  epoch-internal slice, not a whole session. Replay is an explicit opt-in that pauses
+  the live runtime and verifies on an *isolated* runtime the application builds
+  (`IInteractionReplayEnvironmentFactory`), because an in-process runtime cannot
+  isolate shared static/singleton state. Recovery is a session-independent runtime
+  **operation ledger**: every terminal outcome (including refusals) is retained within
+  the recovery window so a same-epoch reconnect resend or a `get_control_operation_result`
+  query still finds it; a resend for an in-flight operation swaps its responder onto
+  the live session. `control_in_progress` enforces single-flight; the host keeps a
+  timed-out operation tracked (no lost late results). Handles are
+  `rec-<utcstamp>-<8char>` filename stems (no host path map, no traversal). Messages:
+  start/stop/replay_recording and their acknowledgments, plus
+  `get_control_operation_result`/`control_operation_result`. Tools: `start_recording`,
+  `stop_recording`, `replay_recording`, `get_operation_result`. Proven end to end by
+  the PlayMode record→execute→stop→replay test — which **freezes v1.0**.
+
+- **Deferred (item 9).** `authToken` validation, timing-safe comparison,
+  `unauthorized`, final limits; replaying a recording that carries secret markers
+  requires a secret resolver the environment supplies (refused otherwise); durable
+  cross-process operation recovery (in-process reconnect is covered by the ledger).
 
 ## Implementation
 
 - `ProtocolSchema.cs` — property names, message types, error codes, limits.
 - `ProtocolVersion.cs` / `ProtocolHandshake.cs` — strict version parsing; pure hello
   and welcome evaluation with per-direction limits and capability intersection.
-- `ProtocolMessages.cs` / `ProtocolInteractionOutcome.cs` — the twelve v1 message
-  types and the sanitized wire outcome projection.
+- `ProtocolMessages.cs` / `ProtocolInteractionOutcome.cs` — the v1 message types
+  (handshake, interaction, wait, recording/replay control, and operation query) and
+  the sanitized wire outcome projection.
+- `Transport/RuntimeControlOperation.cs` — the runtime-side control request/ack/query
+  value types the session maps onto the wire.
 - `ProtocolMessageWriter.cs` / `ProtocolMessageReader.cs` — deterministic encoding
   under a write-time size bound; verdict-based decoding with duplicate-member
   rejection and identifier-validated error references.
