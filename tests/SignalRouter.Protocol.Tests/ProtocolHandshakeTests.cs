@@ -169,6 +169,69 @@ public sealed class ProtocolHandshakeTests
     }
 
     [Test]
+    public void AuthenticationAcceptsTheMatchingToken()
+    {
+        var policy = HostHelloAuthenticationPolicy.FromHex(ValidToken);
+        var hello = CreateHello(authToken: ValidToken);
+
+        var decision = ProtocolHandshake.EvaluateHello(CreateOptions(), hello, policy);
+
+        Assert.That(decision.Accepted, Is.True);
+    }
+
+    [Test]
+    public void AuthenticationRejectsMissingWrongAndMalformedTokens()
+    {
+        var policy = HostHelloAuthenticationPolicy.FromHex(ValidToken);
+        var wrong = "0000000000000000000000000000000000000000000000000000000000000000";
+
+        Assert.That(
+            ProtocolHandshake.EvaluateHello(CreateOptions(), CreateHello(authToken: null), policy)
+                .ErrorCode,
+            Is.EqualTo(ProtocolErrorCodes.Unauthorized));
+        Assert.That(
+            ProtocolHandshake.EvaluateHello(CreateOptions(), CreateHello(authToken: wrong), policy)
+                .ErrorCode,
+            Is.EqualTo(ProtocolErrorCodes.Unauthorized));
+        // Wrong length and non-hex both decode to null → unauthorized.
+        Assert.That(
+            ProtocolHandshake.EvaluateHello(CreateOptions(), CreateHello(authToken: "abc"), policy)
+                .ErrorCode,
+            Is.EqualTo(ProtocolErrorCodes.Unauthorized));
+        Assert.That(
+            ProtocolHandshake.EvaluateHello(
+                    CreateOptions(),
+                    CreateHello(authToken: ValidToken.ToUpperInvariant()),
+                    policy)
+                .ErrorCode,
+            Is.EqualTo(ProtocolErrorCodes.Unauthorized));
+    }
+
+    [Test]
+    public void AuthenticationIsEvaluatedBeforeTheVersionCheck()
+    {
+        // A bad token on an incompatible major answers unauthorized, not
+        // protocol_version_incompatible (ADR 0008).
+        var policy = HostHelloAuthenticationPolicy.FromHex(ValidToken);
+        var hello = CreateHello(
+            authToken: null,
+            protocol: new ProtocolVersion(ProtocolVersion.CurrentMajor + 1, 0));
+
+        var decision = ProtocolHandshake.EvaluateHello(CreateOptions(), hello, policy);
+
+        Assert.That(decision.ErrorCode, Is.EqualTo(ProtocolErrorCodes.Unauthorized));
+    }
+
+    [Test]
+    public void WithoutAPolicyTheTokenIsIgnored()
+    {
+        // Non-enforcing default: a token-less hello still negotiates (v1 behavior).
+        var decision = ProtocolHandshake.EvaluateHello(CreateOptions(), CreateHello(authToken: null));
+
+        Assert.That(decision.Accepted, Is.True);
+    }
+
+    [Test]
     public void EvaluationIsPure()
     {
         var local = CreateOptions();
@@ -197,7 +260,8 @@ public sealed class ProtocolHandshakeTests
     internal static HelloMessage CreateHello(
         IEnumerable<string>? capabilities = null,
         int maxReceiveMessageBytes = ProtocolLimits.DefaultMaxReceiveMessageBytes,
-        ProtocolVersion? protocol = null)
+        ProtocolVersion? protocol = null,
+        string? authToken = null)
     {
         return new HelloMessage(
             "hello-1",
@@ -205,9 +269,13 @@ public sealed class ProtocolHandshakeTests
             "SignalRouter.Unity 0.1.0",
             capabilities ?? Array.Empty<string>(),
             maxReceiveMessageBytes,
-            null,
+            authToken,
             protocol: protocol);
     }
+
+    // A fixed valid 64-character lower-case hex token for the auth tests.
+    internal const string ValidToken =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     internal static WelcomeMessage CreateWelcome(
         HelloMessage hello,

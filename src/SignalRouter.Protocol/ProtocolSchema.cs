@@ -141,6 +141,7 @@ namespace SignalRouter.Protocol
         public const string RuntimeBusy = "runtime_busy";
         public const string RecordingUnavailable = "recording_unavailable";
         public const string ControlInProgress = "control_in_progress";
+        public const string Unauthorized = "unauthorized";
     }
 
     // Pre-item-9 defaults; the security pass (design §19, §25) finalizes the

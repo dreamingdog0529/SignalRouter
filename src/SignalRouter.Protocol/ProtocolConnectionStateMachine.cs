@@ -33,22 +33,46 @@ namespace SignalRouter.Protocol
         private ProtocolConnectionDecision(
             ProtocolConnectionVerdict verdict,
             string? errorCode,
-            string? errorMessage)
+            string? errorMessage,
+            string? peerHandshakeErrorCode)
         {
             Verdict = verdict;
             ErrorCode = errorCode;
             ErrorMessage = errorMessage;
+            PeerHandshakeErrorCode = peerHandshakeErrorCode;
         }
 
         public ProtocolConnectionVerdict Verdict { get; }
 
+        // The error THIS side sends back to the peer (for a Reject/RejectAndClose).
         public string? ErrorCode { get; }
 
         public string? ErrorMessage { get; }
 
+        // The error code the PEER sent to abort the handshake, surfaced to the
+        // owner without ever being echoed back (that would reflect the peer's
+        // error at the peer). Set only when a handshake ErrorMessage answered the
+        // hello this side sent; null otherwise (ADR 0008).
+        public string? PeerHandshakeErrorCode { get; }
+
         internal static ProtocolConnectionDecision Accept()
         {
-            return new ProtocolConnectionDecision(ProtocolConnectionVerdict.Accept, null, null);
+            return new ProtocolConnectionDecision(
+                ProtocolConnectionVerdict.Accept,
+                null,
+                null,
+                null);
+        }
+
+        // The peer aborted the handshake with an ErrorMessage: close locally,
+        // send nothing back (verdict Accept), but preserve the peer's code.
+        internal static ProtocolConnectionDecision AcceptClosedByPeer(string? peerHandshakeErrorCode)
+        {
+            return new ProtocolConnectionDecision(
+                ProtocolConnectionVerdict.Accept,
+                null,
+                null,
+                peerHandshakeErrorCode);
         }
 
         internal static ProtocolConnectionDecision Reject(string errorCode, string errorMessage)
@@ -56,7 +80,8 @@ namespace SignalRouter.Protocol
             return new ProtocolConnectionDecision(
                 ProtocolConnectionVerdict.Reject,
                 errorCode,
-                errorMessage);
+                errorMessage,
+                null);
         }
 
         internal static ProtocolConnectionDecision RejectAndClose(
@@ -66,7 +91,8 @@ namespace SignalRouter.Protocol
             return new ProtocolConnectionDecision(
                 ProtocolConnectionVerdict.RejectAndClose,
                 errorCode,
-                errorMessage);
+                errorMessage,
+                null);
         }
     }
 
@@ -82,15 +108,36 @@ namespace SignalRouter.Protocol
     public sealed class ProtocolConnectionStateMachine
     {
         private readonly ProtocolPeerOptions localOptions;
+        private readonly HostHelloAuthenticationPolicy? hostAuthentication;
         private HelloMessage? sentHello;
 
+        // Preserves the original two-argument CLR signature so an assembly-only
+        // upgrade of a consumer compiled against it does not break.
         public ProtocolConnectionStateMachine(
             ProtocolConnectionRole role,
             ProtocolPeerOptions localOptions)
+            : this(role, localOptions, null)
+        {
+        }
+
+        public ProtocolConnectionStateMachine(
+            ProtocolConnectionRole role,
+            ProtocolPeerOptions localOptions,
+            HostHelloAuthenticationPolicy? hostAuthentication)
         {
             ProtocolContract.RequireDefinedEnum(role, nameof(role));
             this.localOptions = localOptions
                 ?? throw new ArgumentNullException(nameof(localOptions));
+            // Host-only: enforcing hello authentication requires the host role. A
+            // policy supplied to a runtime-role machine is a wiring error.
+            if (hostAuthentication != null && role != ProtocolConnectionRole.Host)
+            {
+                throw new ArgumentException(
+                    "Only a host-role connection authenticates the hello.",
+                    nameof(hostAuthentication));
+            }
+
+            this.hostAuthentication = hostAuthentication;
             Role = role;
             Phase = ProtocolConnectionPhase.Handshaking;
         }
@@ -154,7 +201,10 @@ namespace SignalRouter.Protocol
             switch (message)
             {
                 case HelloMessage hello when Role == ProtocolConnectionRole.Host:
-                    var helloDecision = ProtocolHandshake.EvaluateHello(localOptions, hello);
+                    var helloDecision = ProtocolHandshake.EvaluateHello(
+                        localOptions,
+                        hello,
+                        hostAuthentication);
                     return CompleteHandshake(helloDecision);
                 case WelcomeMessage welcome when Role == ProtocolConnectionRole.Runtime:
                     if (sentHello == null)
@@ -169,10 +219,21 @@ namespace SignalRouter.Protocol
 
                     var welcomeDecision = ProtocolHandshake.EvaluateWelcome(sentHello, welcome);
                     return CompleteHandshake(welcomeDecision);
-                case ErrorMessage _:
+                case ErrorMessage error:
                     // The peer aborted the handshake; take its word and close.
+                    // Surface the peer's code as a distinct outcome (never the
+                    // outbound ErrorCode, which would reflect it back), and only
+                    // when it answers the hello this runtime actually sent — an
+                    // unsolicited or mismatched error carries no trusted code
+                    // (ADR 0008).
                     Phase = ProtocolConnectionPhase.Closed;
-                    return ProtocolConnectionDecision.Accept();
+                    var peerCode = Role == ProtocolConnectionRole.Runtime
+                        && sentHello != null
+                        && error.InReplyTo != null
+                        && string.Equals(error.InReplyTo, sentHello.MessageId, StringComparison.Ordinal)
+                            ? error.Code
+                            : null;
+                    return ProtocolConnectionDecision.AcceptClosedByPeer(peerCode);
                 case HelloMessage _:
                 case WelcomeMessage _:
                     Phase = ProtocolConnectionPhase.Closed;

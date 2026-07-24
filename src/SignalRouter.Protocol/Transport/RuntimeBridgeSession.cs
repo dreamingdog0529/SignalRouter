@@ -141,6 +141,7 @@ namespace SignalRouter.Protocol.Transport
         private readonly SemaphoreSlim sendGate = new SemaphoreSlim(1, 1);
         private readonly CancellationTokenSource loopCancellation;
         private ProtocolSession? session;
+        private string? handshakeErrorCode;
 
         public RuntimeBridgeSession(
             IProtocolChannel channel,
@@ -158,6 +159,16 @@ namespace SignalRouter.Protocol.Transport
         public ProtocolSession? Session
         {
             get { return session; }
+        }
+
+        // The error code the host returned to abort the handshake (e.g.
+        // "unauthorized"), readable after RunAsync completes. Null when the
+        // connection ended for any other reason — a generic disconnect, a send or
+        // post failure, cancellation, or a successful session that later closed.
+        // RunAsync still completes normally in every case (ADR 0008).
+        public string? HandshakeErrorCode
+        {
+            get { return handshakeErrorCode; }
         }
 
         // Drives the connection to completion: handshake, then the receive
@@ -236,6 +247,9 @@ namespace SignalRouter.Protocol.Transport
             if (decision.Verdict != ProtocolConnectionVerdict.Accept
                 || machine.Phase != ProtocolConnectionPhase.Ready)
             {
+                // Record a peer-sent handshake failure (e.g. unauthorized) for the
+                // owner to read after RunAsync; never echo it back.
+                handshakeErrorCode = decision.PeerHandshakeErrorCode;
                 if (decision.ErrorCode != null)
                 {
                     await TrySendErrorAsync(

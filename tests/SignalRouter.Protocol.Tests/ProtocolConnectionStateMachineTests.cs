@@ -270,6 +270,89 @@ public sealed class ProtocolConnectionStateMachineTests
         NUnitCompat.Throws<InvalidOperationException>(() => runtime.OnHelloSent(hello));
     }
 
+    [Test]
+    public void HostWithAPolicyRejectsAndClosesAnUnauthenticatedHello()
+    {
+        var host = new ProtocolConnectionStateMachine(
+            ProtocolConnectionRole.Host,
+            ProtocolHandshakeTests.CreateOptions(),
+            HostHelloAuthenticationPolicy.FromHex(ProtocolHandshakeTests.ValidToken));
+
+        var decision = host.OnMessageReceived(ProtocolHandshakeTests.CreateHello(authToken: null));
+
+        Assert.That(decision.Verdict, Is.EqualTo(ProtocolConnectionVerdict.RejectAndClose));
+        Assert.That(decision.ErrorCode, Is.EqualTo(ProtocolErrorCodes.Unauthorized));
+        Assert.That(host.Phase, Is.EqualTo(ProtocolConnectionPhase.Closed));
+    }
+
+    [Test]
+    public void AnAuthenticationPolicyOnARuntimeMachineFailsFast()
+    {
+        NUnitCompat.Throws<ArgumentException>(() => new ProtocolConnectionStateMachine(
+            ProtocolConnectionRole.Runtime,
+            ProtocolHandshakeTests.CreateOptions("SignalRouter.Unity 0.1.0"),
+            HostHelloAuthenticationPolicy.FromHex(ProtocolHandshakeTests.ValidToken)));
+    }
+
+    [Test]
+    public void APeerHandshakeErrorIsSurfacedButNeverReflected()
+    {
+        var runtime = CreateRuntime();
+        var hello = ProtocolHandshakeTests.CreateHello();
+        runtime.OnHelloSent(hello);
+
+        var decision = runtime.OnMessageReceived(new ErrorMessage(
+            "m-err",
+            ProtocolErrorCodes.Unauthorized,
+            "The runtime did not present a valid authentication token.",
+            null,
+            null,
+            hello.MessageId));
+
+        // Accept with no outbound error (no reflection), but the peer's code is
+        // surfaced as a distinct field, and the connection closes.
+        Assert.That(decision.Verdict, Is.EqualTo(ProtocolConnectionVerdict.Accept));
+        Assert.That(decision.ErrorCode, Is.Null);
+        Assert.That(decision.PeerHandshakeErrorCode, Is.EqualTo(ProtocolErrorCodes.Unauthorized));
+        Assert.That(runtime.Phase, Is.EqualTo(ProtocolConnectionPhase.Closed));
+    }
+
+    [Test]
+    public void AnUnsolicitedOrMismatchedHandshakeErrorCarriesNoTrustedCode()
+    {
+        var runtime = CreateRuntime();
+        var hello = ProtocolHandshakeTests.CreateHello();
+        runtime.OnHelloSent(hello);
+
+        // inReplyTo does not match the hello this runtime sent.
+        var mismatched = runtime.OnMessageReceived(new ErrorMessage(
+            "m-err",
+            ProtocolErrorCodes.Unauthorized,
+            "unrelated",
+            null,
+            null,
+            "some-other-hello"));
+
+        Assert.That(mismatched.PeerHandshakeErrorCode, Is.Null);
+        Assert.That(mismatched.Verdict, Is.EqualTo(ProtocolConnectionVerdict.Accept));
+    }
+
+    [Test]
+    public void TheHostSideDoesNotSurfaceAPeerHandshakeErrorCode()
+    {
+        var host = CreateHost();
+
+        var decision = host.OnMessageReceived(new ErrorMessage(
+            "m-err",
+            ProtocolErrorCodes.Unauthorized,
+            "unrelated",
+            null,
+            null,
+            "hello-1"));
+
+        Assert.That(decision.PeerHandshakeErrorCode, Is.Null);
+    }
+
     private static ProtocolConnectionStateMachine CreateHost()
     {
         return new ProtocolConnectionStateMachine(
