@@ -72,11 +72,13 @@ Consequences of that boundary, all defense-in-depth on top of loopback-only bind
 - **Generation:** 256 bits from `RandomNumberGenerator`, lower-case hex (64 chars),
   which satisfies the envelope's identifier contract (≤256 chars, control-character-free).
 - **Comparison:** the host decodes the presented hex to 32 bytes and compares against the
-  expected 32 bytes with `CryptographicOperations.FixedTimeEquals`. `FixedTimeEquals`
-  runs in time dependent on length, not contents, only when both inputs share a length;
-  a wrong-length or non-hex token is treated as a mismatch **after** normalizing to a
-  fixed-length comparison so decode failure does not leak timing. Nothing branches on the
-  token value before the fixed-time compare.
+  expected 32 bytes with `CryptographicOperations.FixedTimeEquals`. The guarantee is
+  scoped to **secret-dependent timing**: the compare against the expected token runs in
+  time independent of *which* bytes differ. `FixedTimeEquals` alone does not make the hex
+  decode itself constant-time, but a malformed or wrong-length token's decode time depends
+  only on the attacker's own input, not on the secret, which is sufficient under the
+  same-user/local threat model. A wrong-length or non-hex token is a mismatch; nothing
+  branches on how *close* the value is to the secret.
 
 ### Discovery descriptor
 
@@ -90,63 +92,137 @@ The host publishes a single descriptor object, not a bare token:
 - **Location.** `%LOCALAPPDATA%\SignalRouter\hosts\` on Windows; `$XDG_RUNTIME_DIR/signalrouter/`
   on Unix (owner-only `0700`, session-scoped by spec). If `$XDG_RUNTIME_DIR` is unset,
   the host fails to start with a clear message rather than falling back to a
-  world-readable location.
+  world-readable location. macOS does not guarantee `XDG_RUNTIME_DIR`, so a **macOS host
+  is out of scope for item 9** (the initial supported host is the Windows Editor
+  workflow); this is documented, not silently degraded.
 - **Namespacing.** The file name includes the port (`host-<port>.json`) so a second host
-  on a different `SIGNALROUTER_PORT` does not last-writer-wins the first. The runtime
-  selects by the port it is configured for.
-- **Permissions.** Created with an inheritance-disabled owner-only DACL on Windows and
-  `0600` under the `0700` directory on Unix. If the restrictive ACL cannot be applied,
-  the host **fails closed** (does not publish, does not serve).
-- **Publish ordering.** Written atomically (temp file + rename) **only after** Kestrel
-  binds successfully. A bind failure leaves no descriptor.
-- **Teardown.** On exit the host deletes the descriptor **only if** its `instanceId`
-  still matches, so it never removes a successor's file.
+  on a different `SIGNALROUTER_PORT` does not last-writer-wins the first. This is a
+  **credential rendezvous keyed on a pre-shared port**, not port discovery: the runtime
+  selects by the port it is configured for. Two Editors that pick the *same* port read the
+  same token, so accidental cross-wiring is only prevented when each Editor uses a distinct
+  port.
+- **`startedAt` and liveness.** `startedAt` is the host's **OS process start time**, not
+  the publish time, so that with `pid` it forms a stale-descriptor heuristic. The runtime
+  treats a descriptor as stale when no live process has that pid **and** matching start
+  time (guarding against pid reuse), tolerating `Process` lookup exceptions
+  (`HasExited`/`StartTime` can throw on exit or permission errors). PID + start time is a
+  liveness heuristic, **not** proof of host identity.
+- **Permissions.** The `hosts` **directory**, the **temp file**, and the final file are all
+  created owner-only: an inheritance-disabled owner-only DACL on Windows (applied at
+  creation via `FileSystemAclExtensions`, not after the fact) and `0700` dir / `0600` file
+  on Unix (`Directory.CreateDirectory(path, UnixFileMode)`, `FileStreamOptions.UnixCreateMode`).
+  An existing directory's permissions are re-verified. The token is written only into an
+  already-restricted file, and the final permissions are re-verified after the rename. If
+  any of this cannot be guaranteed, the host **fails closed** (does not publish, does not
+  serve).
+- **Atomic publish.** Written to a random-named temp file in the same directory
+  (`CreateNew`), permissions applied, token written, then `File.Move(temp, final, overwrite:
+  true)`. The reader opens with `FileShare.ReadWrite | FileShare.Delete` and briefly, so it
+  never blocks a rename and never observes a partial file. Same-volume rename plus a
+  real-OS test that the reader never sees partial JSON pins the guarantee.
+- **Lifecycle and cleanup (TOCTOU).** `WaitForShutdownAsync` calls `StopAsync`, which
+  releases the port to a successor — so deleting the descriptor *after* shutdown can race a
+  successor that rebinds the port and republishes, and an `instanceId` check-then-delete is
+  **not** atomic. The descriptor is therefore deleted in **`ApplicationStopping`, while the
+  port is still held**; publish and the stopping callback are serialized under one
+  lifecycle lock; publishing after stopping has begun is forbidden; a publish failure
+  triggers immediate shutdown; and a **readiness gate** withholds `welcome` until publish
+  succeeds.
+- **Strict reader.** The runtime does not trust the descriptor's endpoint. It validates:
+  `schemaVersion == 1`, exactly 64 lower-case hex for `token`, a canonical GUID
+  `instanceId`, `pid > 0`, a strict UTC `startedAt`, `host` is literally `127.0.0.1` or
+  `::1`, the endpoint's port equals the selector port, no userinfo/query/fragment, path is
+  `/`, a descriptor size cap, and rejects duplicate JSON members. A descriptor that fails
+  any check is ignored (a rate-limited diagnostic), never connected to — otherwise a
+  corrupted file could send the token to a foreign endpoint.
 - **Runtime consumption.** The Unity bridge reads the descriptor for its configured port,
-  re-reading endpoint **and** token on every connection attempt (today both are captured
-  once). **No fixed-port fallback:** an absent or stale descriptor means "not connected",
-  not "connect to 8017 anyway". A descriptor whose `pid`/`startedAt` no longer
-  corresponds to a live host is treated as stale and ignored.
+  re-reading endpoint **and** token on every connection attempt. **No fixed-port fallback:**
+  an absent, stale, or invalid descriptor means "not connected", not "connect to 8017
+  anyway". "Invalidating" a descriptor on the runtime side means discarding the in-memory
+  snapshot and re-reading; the runtime never deletes the host-owned file.
 
 ### Handshake validation and failure handling
 
-- **Where.** The host validates the token as a policy step **after** decoding the typed
-  `hello` and **before** the Ready transition, the epoch update, and sending `welcome`.
-  `HelloMessage.authToken` stays **optional** in the schema and reader — the token-less
-  hello remains a valid v1 message on the wire; only host policy requires it.
-- **Uniform failure.** Missing, malformed, mismatched, and stale tokens all produce the
-  same fixed `unauthorized` error on the wire. A new `unauthorized` protocol error code
-  is added (this is the item-9 completion ADR 0007 anticipated, not a v1 envelope
-  change). The token, the hello, and any exception detail are never logged; failures are
-  aggregated / rate-limited so a flood cannot amplify into unbounded log volume.
-- **Runtime reaction.** Handshake failure is surfaced to the runtime owner as a
-  **structured** failure code, not a swallowed close. On `unauthorized` the bridge
-  invalidates and re-reads the descriptor and suppresses reconnect until the descriptor
-  changes or normal backoff elapses. It **never** stops permanently: a host token
-  rotation must be recoverable, and a rogue host answering `unauthorized` must not be
-  able to wedge the bridge into a permanent stop (a denial-of-service).
-- **Admission isolation (anti-DoS).** The host today reserves its single `active` runtime
-  slot *before* authentication and waits up to 10 s for the hello, so a flood of
-  unauthenticated sockets can starve the legitimate runtime with `runtime_busy`. The
-  pending-handshake stage is separated from the authenticated-runtime slot: unauthenticated
-  connections occupy only a bounded, short-lived handshake stage and never the runtime
-  slot.
+- **Host-only required policy.** The expected token lives on a **host-only, required**
+  authentication policy, not on the shared `ProtocolPeerOptions` (which both roles use to
+  declare themselves). A nullable auth field on the shared type would turn a production
+  wiring omission into a silent auth-off; instead the host holds the expected 32 bytes
+  (defensive copy) in a dedicated policy that `HostBridgeOptions` requires, failing fast at
+  startup on a null or wrong-length token.
+- **Order and boundary.** The token is validated on the **typed** `hello`, **before** the
+  version check, so a bad token plus an incompatible major still answers `unauthorized`
+  rather than `protocol_version_incompatible`. Only a **successfully decoded** `authToken`
+  string that is missing, wrong-length, non-hex, or mismatched maps to `unauthorized`; a
+  JSON-type or envelope-schema violation is a `malformed_message` from the reader, *before*
+  a typed hello exists. `HelloMessage.authToken` stays **optional** in the schema and
+  reader — the token-less hello remains a valid v1 message; only host policy requires it.
+  A new `unauthorized` protocol error code is added (the item-9 completion ADR 0007
+  anticipated, not a v1 envelope change). The token, the hello, and any exception detail
+  are never logged; failures are rate-limited so a flood cannot amplify into unbounded log
+  volume.
+- **Runtime surfacing (no error reflection).** A handshake `ErrorMessage` from the host
+  must **not** be routed through the connection decision's outbound `ErrorCode` — that
+  field means "an error *I* send back", so reusing it would reflect the host's
+  `unauthorized` back at the host. The peer's failure is surfaced as a **separate typed
+  outcome** (a `PeerHandshakeErrorCode` / "close, send nothing" verdict), accepted only
+  when the `ErrorMessage.inReplyTo` matches the hello this runtime sent. `RuntimeBridgeSession`
+  keeps **normal completion** (teardown still looks identical to a peer disconnect for
+  send/post/generic-close failures); it additionally exposes an immutable termination
+  outcome readable after `RunAsync` completes. The bridge special-cases **only** a code of
+  exactly `unauthorized`; every other termination is a generic disconnect. On `unauthorized`
+  the bridge discards its in-memory descriptor snapshot and re-reads, and suppresses
+  reconnect until the descriptor changes or normal backoff elapses, but **without resetting
+  the reconnect attempt counter** and **never** stopping permanently (a host token rotation
+  must recover, and a rogue host answering `unauthorized` must not wedge the bridge into a
+  DoS stop).
+- **Admission isolation (anti-DoS), three stages.** The host today reserves its single
+  `active` runtime slot *before* authentication and waits `ReplyTimeout` for the hello, so a
+  flood of unauthenticated sockets can starve the legitimate runtime with `runtime_busy`.
+  Because `PerformHandshakeAsync` already flips the machine to Ready, sets the session,
+  runs the epoch transition, and sends `welcome`, the slot claim cannot simply move later;
+  the handshake is split into three stages:
+  1. **Receive-and-validate** — bounded bootstrap receive, decode, auth, and protocol
+     evaluation, producing a *candidate-local* machine/session/hello. It touches neither the
+     epoch, the pending tables, `welcome`, nor the `active`/`ready` slots.
+  2. **Promote** — under the gate, confirm `active == null` and atomically promote the
+     winning candidate; a loser is sent an `inReplyTo`-correlated `runtime_busy` and closed.
+  3. **Commit** — send `welcome` with a **failure-detecting** send, then the epoch
+     transition, then `ready = connection`, then recovery and the receive loop. The global
+     epoch is not changed before the `welcome` send succeeds, and `ready` is not delayed past
+     recovery (which would strand requests made in between).
+
+  Unauthenticated connections occupy only a **bounded, short-lived** handshake stage with
+  its own `HandshakeTimeout` and `MaxPendingHandshakes` (separate settings, not the reused
+  `ReplyTimeout`; concrete values validated on CI and slow devices). When an authenticated
+  runtime already holds the slot, the host returns `runtime_busy` **before reading the
+  auth** to protect the incumbent — so "a wrong token while a runtime is active" is
+  specified to answer `runtime_busy`, not `unauthorized`. A bounded pool caps the worst-case
+  starvation window and resource use; it is not a full availability guarantee over loopback
+  TCP.
+- **Epoch safety.** An `unauthorized` hello's (arbitrary) session epoch must not change the
+  host's `SessionEpoch` or touch any pending execute/reply/control/query state — validation
+  is candidate-local and rejected before any global mutation.
 
 ### v1.0 compatibility
 
 This is a deployment-behavior change, not a wire-schema break, and completes the v1.0
-contract ADR 0007 promised. The compatibility matrix:
+contract ADR 0007 promised. The matrix must be read at **two levels** — the wire handshake
+and the actual deployment — because they diverge:
 
-| Runtime | Host | Result |
-|---|---|---|
-| new (sends token) | new (validates) | authenticated |
-| old (no token) | new (validates) | **`unauthorized`** — intended; documented |
-| new (sends token) | old (ignores token) | connects (token carried opaquely, as in v1) |
-| old (no token) | old (ignores) | connects (pre-item-9 behavior) |
+| Runtime | Host | Wire handshake | Deployment result |
+|---|---|---|---|
+| new (sends token) | new (validates + publishes descriptor) | authenticated | connects |
+| old (no token) | new (validates) | `unauthorized` | rejected — intended |
+| new (needs descriptor) | old (no descriptor) | would carry token opaquely | **cannot connect** — old host publishes no descriptor and the new runtime has no fixed-port fallback |
+| old (no token) | old (ignores) | connects | connects (pre-item-9) |
 
-No capability negotiation or minor bump gates this: a downgrade path would let an
-attacker downgrade too, defeating the requirement. If a token-less development mode is
-ever needed it must be an explicit, default-off, warn-on-use insecure flag — never an
-automatic fallback after an auth failure.
+The naive "new runtime + old host connects" holds only at the wire level; at the
+deployment level the new runtime never reaches an old host, because it will not connect to
+a fixed port without a valid descriptor. This is therefore a **matched-version rollout**,
+documented as such. Adding an automatic fixed-port fallback would be a downgrade path (and
+lets an attacker force it), so it is prohibited. If a token-less development mode is ever
+needed it must be an explicit, default-off, warn-on-use insecure flag — never an automatic
+fallback after an auth failure.
 
 ### Resource bounds
 
@@ -232,19 +308,35 @@ history cap.
 
 ## Implementation order
 
-Four PRs, in this order (server enforcement must not merge ahead of the client change
-that keeps old runtimes working):
+Authentication is large enough to land as its own **sequence of sub-PRs**, ordered so that
+every intermediate merge is releasable and no merge enforces auth before the runtime can
+present a token. Enforcement flips on **last**:
 
-1. **This ADR** plus the §19 / §25 amendments, the compatibility matrix, and the test
-   plan (docs only).
-2. **Resource bounds** — the per-field and cardinality caps, parent-graph validation, the
-   aggregate-byte guard, host-side re-validation, and the benchmark.
-3. **Authentication** — token generation, the discovery descriptor and its ACL, runtime
-   re-read, host validation with `unauthorized`, structured handshake-failure surfacing,
-   descriptor invalidation/backoff, and admission isolation, landed end to end (internal
-   commits are fine; a server-only merge that breaks old runtimes is not).
-4. **Release gating** — the Unity `StartBridge()` release policy and the documented host
-   activation posture.
+1. **This ADR** plus the §19 / §25 amendments, the two-level compatibility matrix, the
+   descriptor-lifecycle and cleanup ordering, the malformed/auth boundary, and the test
+   plan (docs only). *(Resource bounds shipped separately as the PR after the original ADR.)*
+2. **Additive Protocol** — the `unauthorized` code, the host-only authentication policy and
+   verifier (guarded so nothing enforces until a host wires it), the peer-handshake-failure
+   typed outcome, and the error-reflection-prevention tests.
+3. **Descriptor contract / store / resolver** — the strict parser, the OS paths, the
+   owner-only ACL/mode creation, the process-liveness inspector, and Unix/Windows real-OS
+   integration tests (a `windows-latest` CI job for DACL; the existing `ubuntu-latest` job
+   for `0700`/`0600`).
+4. **Host descriptor lifecycle** — token generation, secure publish, the readiness gate,
+   and shutdown-before-port-release cleanup. Auth is **not yet enforced** (no policy wired),
+   so old runtimes still connect.
+5. **Unity descriptor-only connection** — the `endpointUrl` → port-selector migration,
+   per-attempt descriptor re-read, token send, and stale/invalid/no-descriptor tests.
+6. **Host handshake refactor + enforcement** — the three-stage
+   receive-validate / promote / commit split, the bounded pending-handshake stage, atomic
+   promotion, Origin rejection, rate-limited auth diagnostics, and end-to-end auth tests.
+   This is the merge that turns authentication on, after the runtime (step 5) already sends
+   a token.
+
+Intermediate sub-PRs are assembly order within the effort; only the matched runtime+host
+pair after the final merge is the finished configuration. A later **release-gating** PR
+(item 9's last piece) adds the Unity `StartBridge()` release policy and documents the host
+activation posture.
 
 ## Consequences
 
