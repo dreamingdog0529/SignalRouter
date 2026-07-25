@@ -26,7 +26,17 @@ CI verification case is a separate, condition-gated step
 An artifact consists of:
 
 - a **manifest** — E1 header plus the closure material E7 references;
-- the **evidence stream** — append-only ReplayEvidence cuts in `LogicalOrder`;
+- the **evidence stream** — append-only ReplayEvidence cuts, each carrying its
+  artifact-local **`EvidenceSequence`** (the monotonic append position,
+  [semantic-model.md](semantic-model.md) §4). Interaction cuts (E2/E3/E4) additionally
+  carry their interaction's `LogicalOrder`. Stream order is constrained **per cut
+  kind**: E2 cuts appear in `LogicalOrder` (admission order is append order); one
+  interaction's E2 → E3 → E4 appear in that order; and, because mutation execution is
+  serialized ([kernel-execution.md](kernel-execution.md) §4), the E3/E4 cuts of
+  different interactions also appear in their interactions' `LogicalOrder`. Cross-kind
+  interleaving is normal — a queued interaction's E2 legitimately precedes an active
+  interaction's E3/E4. Non-interaction cuts (E1, E5, E6, E7, E8) have no `LogicalOrder`
+  and are positioned by `EvidenceSequence` alone;
 - the optional **timeline stream** — TimelineTrack events (§3);
 - the **blob set** — the `StateStore` materializations pinned by the evidence.
 

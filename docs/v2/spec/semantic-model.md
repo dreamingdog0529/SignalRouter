@@ -132,6 +132,7 @@ v2 replaces v1's single session epoch with distinct identifiers, each with one m
 | `ViewContractId@version` | The projection rules producing an observation view | Versioned contract |
 | `ViewSequence` | Delta ordering within one view subscription | Per subscription |
 | `LogicalOrder` | Total admission order of mutation interactions | Per incarnation |
+| `EvidenceSequence` | Monotonic append position of a ReplayEvidence cut within one recording artifact ([recording-replay.md](recording-replay.md) §2) | Per artifact |
 | `RequestId` | One submitted request, assigned by the caller before dispatch | Deduplicated within incarnation + retention window |
 | `OperationId` | A long-running operation (wait, recording, replay) | Until resolved + retention |
 | `ContentId` | Content address of a materialized observation blob | Artifact-scoped (§5) |
@@ -147,6 +148,10 @@ Rules:
   status is `OutcomeUnknown` after retention ([guarantees.md](guarantees.md) §7).
 - No identifier participates in capability-invocation equality; identity is runtime
   metadata ([kernel-execution.md](kernel-execution.md) §3).
+- **`ViewWatermark` is not a distinct identifier**: it is the role a `SourceRevision`
+  plays as a view-side high-water mark — the highest revision a materialization or
+  delta subscription has fully applied ([observation-state.md](observation-state.md)
+  §4). Evidence cuts that record a watermark (E3, E8) record a `SourceRevision`.
 
 ## 5. `ContentId` — the artifact contract
 

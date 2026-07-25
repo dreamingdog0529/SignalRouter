@@ -64,6 +64,11 @@ An admitted mutation interaction terminates in exactly one of:
 | `OutcomeUnknown` | The runtime cannot prove which of the above occurred |
 
 `Rejected` MUST imply `effectPermitted = false` (no E3 cut was appended, §5.3).
+One exception widens `Faulted`: a **pre-effect evidence failure** — the runtime is
+alive but cannot make the E3 permit durable (§5.3) — terminates the interaction
+`Faulted` with `effectPermitted = false`, zero effects, and the reserved fault code
+`EvidenceUnavailable` (§3.5). This is the "pre-effect evidence failure" of §6.1's
+first shape; apart from it, `Faulted` implies an effect was permitted.
 An interaction whose effect window overlapped a contamination interval (§5.5) additionally
 carries `contaminated = true` regardless of outcome.
 
@@ -74,7 +79,7 @@ A recording artifact is classified by the reader as exactly one of:
 | Outcome | Definition |
 |---|---|
 | `Completed` | E7 present with `Completed`, closure verification passes, no unresolved commitments |
-| `Incomplete(reason)` | E7 present and durable, declaring why the contract was not fully met (e.g. `SizeLimit`, `ExternalMutation`, `SinkFault`) |
+| `Incomplete(reason)` | E7 present and durable, declaring why the contract was not fully met (canonical codes: §3.5) |
 | `Interrupted` | E7 absent; the reader infers interruption. Never self-declared |
 | `OpenFailed` | E1 (or its base snapshot) never became durable; no artifact exists |
 
@@ -91,7 +96,7 @@ Every comparison performed under a `ReplayComparisonProfile`
 |---|---|
 | `Equal` | Typed exact comparison over the profile's field set matched |
 | `Diverged` | The comparison was evaluable and did not match |
-| `Incomparable(reason)` | The comparison cannot be evaluated: unsupported profile version, incompleteness where the profile requires completeness, unknown mandatory extension, missing migration, contamination, cancellation timing |
+| `Incomparable(reason)` | The comparison cannot be evaluated: unsupported profile version, incompleteness where the profile requires completeness, unknown mandatory extension, missing migration, contamination, cancellation timing (canonical codes: §3.5) |
 
 A replay run stops at the first non-`Equal` comparison and reports it; `Incomparable`
 MUST NOT be reported as `Diverged`. A live assertion's `Unevaluable(reason)` outcome
@@ -103,6 +108,85 @@ MUST NOT be reported as `Diverged`. A live assertion's `Unevaluable(reason)` out
 Any status query (gateway → runtime, client → gateway) answers exactly one of
 `Pending`, `Terminal(outcome)`, `RuntimeUnavailable`, or `OutcomeUnknown`. Fabricating a
 terminal for an unreachable runtime is prohibited ([protocol-topology.md](protocol-topology.md) §6).
+
+### 3.5 Canonical reason codes
+
+Reason codes are stable, case-sensitive identifiers compared ordinally, never
+normalized. The codes below are reserved: the described condition MUST answer with the
+listed code, and no other meaning may be attached to it. The vocabularies are **open**
+(§10): implementations and applications may carry additional codes, and a reader
+encountering an unknown code MUST present it verbatim and MUST NOT branch execution on
+a meaning it does not know.
+
+**`Rejected(reason)`** ([kernel-execution.md](kernel-execution.md) §3, §5):
+
+| Code | Condition |
+|---|---|
+| `RequestIdConflict` | Duplicate `RequestId` with a different semantic fingerprint |
+| `CapacityExhausted` | Mutation-lane or `RecoveryIndex` capacity refused the admission (§8) |
+| `ReentrantDispatch` | Nested submission from inside an effect handler |
+
+Rejection causes that exist in prose but carry no reserved code yet (authorization
+refusal, capability unavailability, precondition failure, incarnation mismatch,
+unkeyed-target refusal at admission) remain unnamed here deliberately: naming them is
+a separate normative decision that must weigh the exposure rules of
+[security-resources.md](security-resources.md) §4 (a rejection code must not become an
+existence oracle for hidden targets). They are expected to be reserved alongside the
+kernel implementation.
+
+**`Incomplete(reason)`** (§3.2, §5, §7):
+
+| Code | Condition |
+|---|---|
+| `SizeLimit` | The recording reached a configured capacity bound (§8) |
+| `ExternalMutation` | An E5 barrier terminated the artifact per the open policy (§5.5) |
+| `SinkFault` | The recording sink faulted while the artifact was still writable (§7) |
+| `ContractChanged` | A capability, state-source, or predicate contract was registered during the active recording (§5.1) |
+| `UnkeyedTarget` | A permitted invocation resolved to a node without an `AuthorKey` under the strict open policy (§5.2) |
+| `IncarnationChanged` | The runtime incarnation changed while the artifact was writable (§7) |
+
+**`Incomparable(reason)`** (§3.3):
+
+| Code | Condition |
+|---|---|
+| `UnsupportedProfileVersion` | The replayer does not support the pinned profile version |
+| `Incompleteness` | The view is incomplete in a region the profile requires ([observation-state.md](observation-state.md) §3) |
+| `UnknownMandatoryExtension` | The artifact carries an unknown extension the profile marks mandatory |
+| `MissingMigration` | No projection exists onto a common comparison profile ([semantic-model.md](semantic-model.md) §5) |
+| `Contamination` | The position lies at or beyond a contamination interval (§5.5) |
+| `CancellationTiming` | A `DuringEffect` cancellation, or a `Cancelled` terminal with `phase = AfterEffect` (§5.7) |
+| `TemporalPredicate` | A temporal predicate without interval evidence (§5.6) |
+| `PredicateFault` | A recorded E6 resolution of `Faulted` (§5.6) |
+
+Additionally, **every `Unevaluable` reason code is a valid `Incomparable` reason
+code**: the §3.3 mapping of a live `Unevaluable(reason)` to replay-side
+`Incomparable(reason)` preserves the reason verbatim.
+
+**`Unevaluable(reason)`** ([verification.md](verification.md) §2.3). The vocabulary
+deliberately mirrors the `CompletenessMap` reasons of
+[observation-state.md](observation-state.md) §3 — an evaluation is unevaluable
+precisely because of a completeness condition on its input:
+
+| Code | Condition |
+|---|---|
+| `Redacted` | A referenced field is withheld by redaction policy |
+| `OutOfScope` | A referenced field is outside the view's scope or exposure policy |
+| `Incompleteness` | A referenced region is incomplete (e.g. `Virtualized`, `BudgetTruncated`) |
+| `UnsupportedContract` | The predicate or source contract version is not supported |
+| `SourceUnavailable` | A referenced state source produced no document |
+| `Stale` | A sampled source's document is older than its freshness bound |
+
+**Fault codes** (`Faulted`, §5.4) are an open, application/adapter-defined vocabulary
+of stable codes — never exception types, messages, or stacks. Two codes are reserved:
+`CompletionPostconditionNotSatisfied` (a capability-contract postcondition terminated
+the interaction, with stable detail `False | TimedOut | Unknown`;
+[verification.md](verification.md) §3.4) and `EvidenceUnavailable` (pre-effect
+evidence failure, §3.1).
+
+Non-taxonomy terms, for clarity: `NotAdmitted` (§7) describes the submitter-visible
+condition "no admission happened" and is not a sixth interaction outcome; `Failed`
+(§3.2) is the answer of the recording *control operation*, not an artifact state;
+`HumanIntentBlocked` (§8) is a trace marker, not an outcome.
 
 ## 4. Determinism tiers
 
@@ -201,13 +285,24 @@ fix current observation revision (SourceRevision / ViewWatermark)
 ### 5.4 E4 `TerminalCut`
 
 One per interaction that reaches a provable terminal while the recording is active.
-Contains: terminal outcome (§3.1), the completion evidence required by the bound
-`CompletionProfileId` (e.g. `Applied`, `FrameCommitted`, `PostconditionSatisfied`,
-`AdapterAcknowledged`), the stable application fault code for `Faulted` (never exception
-type/message/stack), the after record-view `ContentId`, the final evaluation of any
-capability postcondition (including `TimedOut` / `False` / `Unknown` when that
-contributed to the terminal), `CancellationEvidence` when cancellation was involved
-(§5.7), and the ordered `ContinuationCommitment[]` (§5.8).
+Contains: the `RequestId`, the terminal outcome (§3.1), the completion evidence
+required by the bound `CompletionProfileId` (e.g. `Applied`, `FrameCommitted`,
+`PostconditionSatisfied`, `AdapterAcknowledged`), the stable application fault code for
+`Faulted` (never exception type/message/stack), the after record-view `ContentId`, the
+final evaluation of any capability postcondition (including `TimedOut` / `False` /
+`Unknown` when that contributed to the terminal), `CancellationEvidence` when
+cancellation was involved (§5.7), and the ordered `ContinuationCommitment[]` (§5.8).
+
+Field presence follows the terminal: the after record-view `ContentId` is present in
+**every** E4. For an effect-permitted terminal it is the fresh after-effect
+materialization; for a zero-effect terminal (§6.1 first shape) it records the
+observation state the terminal was decided against — not the admission state, since
+interactions executed while this one was queued may have advanced the revision. Blob
+reuse is permitted under the §5.3 conditions; the cut is always fresh. This keeps
+`afterRequestId` bindings ([verification.md](verification.md) §3.2) and R4's
+after-semantics comparison valid for every terminal. The completion evidence is the
+**evidence itself** — the material the bound profile demands — not merely the profile
+reference, and is required exactly for `Succeeded`.
 
 ### 5.5 E5 `ExternalMutationBarrier`
 
@@ -215,9 +310,11 @@ Appended when an `ObservedExternal` effect ([adapter-conformance.md](adapter-con
 — including a state-source mutation whose causation is external to the controlled work
 ([observation-state.md](observation-state.md) §7) — intersects the recording. E5 records
 a **contamination interval**, not a point:
-`lastKnownCleanCut .. firstObservedCut`, plus the `SourceRevision` at detection, a source
-hint, and the `RequestId`s of any interactions whose effect window overlaps the interval
-(marked `contaminated`).
+`lastKnownCleanCut .. firstObservedCut` — both endpoints are `EvidenceSequence`
+positions in this artifact's evidence stream
+([recording-replay.md](recording-replay.md) §2) — plus the `SourceRevision` at
+detection, a source hint, and the `RequestId`s of any interactions whose effect window
+overlaps the interval (marked `contaminated`).
 
 Strict replay MUST pre-scan the artifact and stop **before permitting the effect** of the
 first contaminated interaction — not upon reaching E5's position in the stream.
@@ -241,8 +338,10 @@ E4 (§5.4).
 Replay semantics: only a `Satisfied` resolution of a snapshot-local pure predicate is
 re-executed — the replayer re-evaluates the predicate at that position and requires it to
 become true; it does not require bytewise equality with the recorded witness. `TimedOut`,
-`Cancelled`, and `Unknown` resolutions stop strict replay before execution of the wait
-(timing is out of tier, §4). Temporal predicates (e.g. "remains true for N frames")
+`Cancelled`, `Faulted`, and `Unknown` resolutions stop strict replay before execution of
+the wait (`TimedOut`/`Cancelled`/`Unknown` because timing is out of tier, §4; `Faulted`
+because a predicate-evaluation fault is an infrastructure condition, not a reproducible
+observation — the stop reports `Incomparable(PredicateFault)`, §3.5). Temporal predicates (e.g. "remains true for N frames")
 require interval evidence, which v2 defers; a recording containing one is
 `Incomparable(TemporalPredicate)` under strict replay.
 
@@ -257,7 +356,13 @@ and the `effectPermitted` / `effectStarted` flags.
 
 Replay: `BeforeEffect` cancellations are replayed deterministically with a synthetic
 pre-cancelled token; `DuringEffect` cancellations stop strict replay as
-`Incomparable(CancellationTiming)`.
+`Incomparable(CancellationTiming)`. `AfterEffect` splits on the terminal it is attached
+to: evidence on a non-`Cancelled` terminal (a cancel that arrived too late to matter)
+replays as a normal terminal, with the `CancellationEvidence` excluded from strict
+comparison as timing metadata (§4) — a live run that observes no cancellation still
+compares `Equal`; a terminal that is itself `Cancelled` with `phase = AfterEffect`
+(cancellation terminated post-effect work) stops strict replay as
+`Incomparable(CancellationTiming)`, like `DuringEffect`.
 
 ### 5.8 Continuations
 
@@ -279,8 +384,12 @@ fence are resolved** (as `Cancelled` when nothing else resolves them first, §5.
 final snapshot is materialized and pinned, then E7 is appended. Contains: the close reason (`Completed` or
 `Incomplete(reason)`), the event count, the final checkpoint `ContentId`, and closure
 material the reader can **recompute** — at minimum the event count and the manifest root
-/ reachable-`ContentId` set. A self-declared boolean is not sufficient; readers MUST
-verify closure themselves.
+/ reachable-`ContentId` set. The recomputation targets are defined exactly: the **event
+count** is the number of ReplayEvidence cuts in the artifact, E1 and E7 themselves
+included; the **reachable-`ContentId` set** is every `ContentId` referenced by any
+ReplayEvidence cut (the E1 base snapshot, E3 before views, E4 after views, E6
+witnesses/final observations, E8 evaluated snapshots, and the E7 final checkpoint). A
+self-declared boolean is not sufficient; readers MUST verify closure themselves.
 
 Absence of E7 is meaningful: the reader classifies the artifact `Interrupted` (§3.2).
 
@@ -290,8 +399,9 @@ One per standalone assertion ([verification.md](verification.md) §3) evaluated 
 recording is active. E8 is an **atomic single cut**: it opens no commitment, the close
 fence neither waits for nor cancels it, and it imposes no closure obligation (§6.2 R5).
 
-Contains the full evaluation identification: `RuntimeIncarnationId`, the observation
-revision/watermark, `ViewContractId@version`, the state-source contract table version,
+Contains the full evaluation identification: `RuntimeIncarnationId`, the
+`SourceRevision`/`ViewWatermark` of the evaluated materialization
+([observation-state.md](observation-state.md) §4), `ViewContractId@version`, the state-source contract table version,
 scope and security domain, the evaluated snapshot's `ContentId`, its completeness, the
 predicate contract ID/version with redacted operands (secret operands as secret
 references), stable clause IDs with expected/actual evaluations, the outcome
@@ -322,7 +432,11 @@ replay, answers `Incomparable(reason)` (§3.3).
 - **R1 (shape completeness):** every admitted interaction inside a `Completed` artifact
   MUST have one of the first two shapes, and every `PredicateArmed` MUST have a matching
   `PredicateResolved`. Any other shape — including an unmatched armed predicate —
-  forces the artifact to close as `Incomplete` or be read as `Interrupted`.
+  forces the artifact to close as `Incomplete` or be read as `Interrupted`. R1 also
+  fails on structurally invalid evidence: duplicate cuts for one `RequestId` (a second
+  E2, E3, or E4), an E3 or E4 whose `RequestId` has no preceding E2, interaction cuts
+  out of order (E4 before E3 where both exist, or either before E2), or a
+  `PredicateResolved` without a matching `PredicateArmed`.
 - **R2 (control lane):** control-lane operations (cancel requests, queries) are not
   ReplayEvidence; their influence surfaces only through `CancellationEvidence` in E4.
 - **R3 (continuations):** as §5.8; unresolved commitments block `Completed`.
@@ -347,6 +461,12 @@ replay, answers `Incomparable(reason)` (§3.3).
 | E1 present, E7 with `Incomplete(reason)` | `Incomplete(reason)` |
 | E1 present, no E7 | `Interrupted` |
 | E7 present but closure verification fails | `Interrupted` (tampered or torn; never `Completed`) |
+
+Classification precedence: reader verification overrides the writer's self-declaration.
+An E7 declaring `Completed` over evidence that violates R1 or R3 reads `Interrupted`
+(the declaration is untrustworthy), and an E7 declaring `Incomplete(reason)` whose
+closure verification fails also reads `Interrupted`. `Incomplete(reason)` is honored
+only when E7 is durable **and** its closure material verifies.
 
 ## 7. Failure matrix
 
@@ -428,3 +548,10 @@ untrusted artifacts is refused ([security-resources.md](security-resources.md) �
 This spec is versioned with the v2 set. Any change that alters an outcome taxonomy, a
 cut's durability rule, a terminal shape, or the failure matrix is a breaking change to
 recorded artifacts and requires a new recording schema major version plus an ADR.
+
+Reason-code vocabularies (§3.5) are the one deliberately open surface: **reserving an
+additional code** for a previously unnamed condition is a minor revision of this spec —
+readers MUST present unknown codes rather than reject them, so new codes do not break
+recorded artifacts. **Renaming or removing a reserved code, or changing the condition
+it names**, alters an outcome taxonomy and falls under the breaking rule above
+([adr 0009](../adr/0009-evidence-ordering-and-open-reason-vocabularies.md)).
