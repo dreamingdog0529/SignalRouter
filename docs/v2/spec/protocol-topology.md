@@ -122,10 +122,13 @@ MCP tools are projections of the split-phase protocol:
 
 | Tool | Maps to |
 |---|---|
-| `observe` (tree/snapshot read, paginated, pinned) | view snapshot pull |
-| `invoke` | submit + bounded wait convenience; on timeout returns `pending` with `requestId` |
+| `observe` (tree/snapshot read, paginated, pinned; includes `sources/<key>` scopes) | view snapshot pull |
+| `invoke` (optional caller expectation) | submit + bounded wait convenience; on timeout returns `pending` with `requestId`; an expectation returns a separate verification result ([verification.md](verification.md) §3.4) |
 | `get_result` | query |
 | `wait_for` | predicate operation (armed/resolved) |
+| `assert_state` (single and atomic batch) | predicate evaluation on a pinned snapshot ([verification.md](verification.md) §3) |
+| `validate_predicate` | catalog type-check without evaluation ([verification.md](verification.md) §4) |
+| `get_catalog` | visible sources/schemas, node attribute vocabulary, operators, registered predicates ([verification.md](verification.md) §4) |
 | `cancel` | explicit kernel cancel request |
 | `start_recording` / `stop_recording` / `replay_recording` / `get_operation_result` | control operations |
 | `inspect_state` (read-only timeline) | state timeline query ([observation-state.md](observation-state.md) §8) |
@@ -143,6 +146,10 @@ Rules:
   including the failure vocabulary of §6.
 - Tool payloads are bounded and exposure-filtered per
   [security-resources.md](security-resources.md) §4–5.
+- The CI verification runner is **not** a gateway capability: `Verification.Cli` is a
+  separate logical module that drives the host and runtime directly (no MCP client),
+  and the gateway keeps projection-only responsibilities even when shipped in the same
+  executable ([verification.md](verification.md) §6.1).
 
 ## 8. Protocol versioning
 
