@@ -44,6 +44,7 @@ Codec leaves (own the only serializer dependencies; independently versioned)
 Infrastructure leaves
   ├─ Transport.WebSocket      ← first ILocalDuplexChannel
   ├─ Gateway.Mcp              ← the external gateway executable
+  ├─ Verification.Cli         ← CI verification runner (non-gateway; may share the executable)
   └─ Adapter.Unity            ← first engine adapter (+ its engine-version pins)
 ```
 
@@ -77,6 +78,12 @@ typed comparison → first non-Equal stops with a structured report.
 **Recovery:** gateway restart → re-discover, re-authenticate → `query(requestId)`
 against the runtime; runtime crash → new incarnation, stranded work answers
 `OutcomeUnknown` after retention. No second ledger exists anywhere.
+
+**Verification:** agent asserts against pinned snapshots (E8 evidence when recording) →
+artifact seals into a `VerificationCaseManifest` when its conditions hold →
+`Verification.Cli` launches the adapter's headless `VerificationHost`, the runtime
+replays and compares, and the report separates replay fidelity from case verdicts
+([spec/verification.md](spec/verification.md)).
 
 ## 4. Kernel at a glance
 
@@ -121,6 +128,7 @@ independent contracts ([spec/observation-state.md](spec/observation-state.md) §
 | How processes connect, recover, and speak MCP | [spec/protocol-topology.md](spec/protocol-topology.md) |
 | What adapters implement and how support is proven | [spec/adapter-conformance.md](spec/adapter-conformance.md) |
 | What is defended, bounded, and gated | [spec/security-resources.md](spec/security-resources.md) |
+| How expectations are asserted, sealed into cases, and run in CI | [spec/verification.md](spec/verification.md) |
 
 Decision rationale: [adr/0001](adr/0001-single-owner-kernel.md) –
-[adr/0007](adr/0007-codec-and-package-boundaries.md).
+[adr/0008](adr/0008-mcp-verification-surface.md).
