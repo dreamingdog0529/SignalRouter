@@ -77,7 +77,7 @@ enforced fail-fast at its owning boundary:
 | Mailbox | per-class capacity; control sized for worst case, mutation refusal on overflow ([kernel-execution.md](kernel-execution.md) §4) |
 | Observation views | per-field lengths, node cardinality, graph depth/cycle validation, aggregate byte ceilings — enforced at registration, at materialization, and re-validated on receive |
 | Pump | per-pump turn/deadline/materialization budgets ([kernel-execution.md](kernel-execution.md) §6) |
-| `RecoveryIndex` | capacity with non-evictable pendings → admission refusal; terminal retention window ([guarantees.md](guarantees.md) §8) |
+| `RecoveryIndex` | capacity with non-evictable pending entries → admission refusal; terminal retention window ([guarantees.md](guarantees.md) §8) |
 | `RecordingSink` | declared-at-open capacity policy ([guarantees.md](guarantees.md) §8) |
 | `StateStore` | blob size, chain length, total budget, pin-aware GC |
 | `KernelTrace` | ring capacity; loss always permitted, gap-marked |

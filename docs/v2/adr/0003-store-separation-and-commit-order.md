@@ -11,8 +11,8 @@
 The v2 draft began as "journal-first": one always-on event journal from which recording,
 recovery, and a state timeline would all fall out. Review broke that premise: always-on
 diagnostics want cheap/bounded/lossy; recording wants request-durable-before-effect and
-no loss; recovery wants non-evictable pendings with expiring terminals; state snapshots
-want content-addressed retention. One store cannot honor four retention/durability
+no loss; recovery wants non-evictable pending entries with expiring terminals; state
+snapshots want content-addressed retention. One store cannot honor four retention/durability
 semantics, and one persistent schema would re-couple contracts that v1 deliberately
 kept apart (wire-owned vs. recording-owned projections).
 
