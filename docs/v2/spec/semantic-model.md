@@ -128,7 +128,7 @@ v2 replaces v1's single session epoch with distinct identifiers, each with one m
 | Identifier | Meaning | Lifetime |
 |---|---|---|
 | `RuntimeIncarnationId` | One live runtime instance; the namespace of `NodeRef`s and request identity | From runtime creation to teardown (a domain reload creates a new incarnation) |
-| `SourceRevision` | Monotonic revision of the raw node store within an incarnation | Incremented on every observable mutation |
+| `SourceRevision` | Monotonic revision of the **observation store** — the node store plus all revision-bound state-source documents (§8) — within an incarnation | Advanced by every observable mutation of either; there is no separate source-revision namespace |
 | `ViewContractId@version` | The projection rules producing an observation view | Versioned contract |
 | `ViewSequence` | Delta ordering within one view subscription | Per subscription |
 | `LogicalOrder` | Total admission order of mutation interactions | Per incarnation |

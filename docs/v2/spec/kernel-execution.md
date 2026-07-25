@@ -86,8 +86,8 @@ A multiple-producer, single-consumer queue with:
   the publisher with an explicit refusal — a partial document swap never occurs
   ([guarantees.md](guarantees.md) §7).
 - **Atomic publication:** adoption of a revision-bound state-source publication swaps
-  the source's immutable document and allocates the observation revision in one step;
-  observers can never see a torn document or an unrevisioned swap
+  the source's immutable document and advances the shared `SourceRevision` in one
+  step; observers can never see a torn document or an unrevisioned swap
   ([observation-state.md](observation-state.md) §7.1).
 - **Starvation rule:** the pump guarantees that if the mutation lane is idle, queued
   control messages are drained before the turn ends; if a mutation is active, control

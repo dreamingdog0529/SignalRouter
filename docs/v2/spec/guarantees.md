@@ -409,12 +409,14 @@ It does **not** prove application equivalence. Side effects outside the observed
 profile — database writes, audio, network traffic, analytics — are unverified. Specs and
 user documentation MUST NOT use the phrase "application equivalence" for this guarantee.
 
-Replay fidelity is also **not a test verdict**. A replay can be entirely `Equal` while
-the case fails — a required assertion that evaluated `False` at record time and `False`
-again at replay is perfect fidelity and a failed test. Case verdicts
-(`Passed | FailedAssertion | Unevaluable | InfrastructureFailed`) are a separate,
-independently versioned taxonomy defined in [verification.md](verification.md) §6; the
-two axes MUST NOT be merged in any report or tool answer.
+Replay fidelity is also **not a test verdict**. A diagnostic recording that faithfully
+reproduces a `False` assertion is entirely `Equal` and still not a passing test; a
+sealed case whose required assertion re-evaluates `False` is an E8 fidelity divergence
+that the verdict axis reports distinctly as `FailedAssertion`. Case verdicts
+(`Passed | Diverged | FailedAssertion | Unevaluable | InfrastructureFailed`) are a
+separate, independently versioned taxonomy defined in
+[verification.md](verification.md) §6; the two axes MUST NOT be merged in any report or
+tool answer.
 
 Replay artifacts are executable input and sit on a trust boundary: before execution the
 replayer MUST enforce artifact integrity (ContentId verification), size/depth/node-count

@@ -22,10 +22,13 @@ Everything in this spec keeps two orthogonal questions separate
 - **Replay fidelity** — did the replayed run observe what the recording observed?
   Answered per comparison as `Equal | Diverged | Incomparable(reason)`.
 - **Case verdict** — did the scenario meet its expectations? Answered per case as
-  `Passed | FailedAssertion | Unevaluable | InfrastructureFailed` (§6).
+  `Passed | Diverged | FailedAssertion | Unevaluable | InfrastructureFailed` (§6.2).
 
-A required assertion that evaluated `False` at record time and `False` at replay is
-perfect fidelity and a failed case. No tool, report, or schema may merge the axes.
+The axes stay separate because fidelity alone cannot express expectations: a diagnostic
+recording that faithfully reproduces a `False` assertion is fidelity-`Equal` and still
+not a passing test, and a fixture failure is neither axis's `Diverged`. The verdict is
+derived by classifying the run's first non-passing event (§6.2) — never by collapsing
+fidelity outcomes. No tool, report, or schema may merge the axes.
 
 ## 2. Predicate model
 
@@ -110,8 +113,17 @@ The tool answer carries the outcome (§2.3), per-clause expected/actual with cla
 bounded redacted witness paths, and the snapshot identification tuple
 (incarnation, revision, view contract, source table version, scope, `ContentId`,
 completeness). Per-clause structured explanations are diagnostic, not comparison
-material. While a recording is active, each evaluation is committed as one E8 cut
-([guarantees.md](guarantees.md) §5.10).
+material.
+
+While a recording is active, each evaluation is committed as one E8 cut
+([guarantees.md](guarantees.md) §5.10) — but only if the predicate is **evaluable
+within the record view's exposure**: E8 persists the record-domain projection of the
+evaluation, so a predicate referencing agent-visible but record-hidden fields
+([observation-state.md](observation-state.md) §7.2) cannot produce evidence, and the
+record exposure opt-in is never bypassed through assertion evidence. Such an assertion
+is refused during recording with a distinct error, unless the caller marks it
+`diagnosticOnly` — a diagnostic assertion answers the live caller only, produces no E8,
+and can never be a required assertion.
 
 Agent-domain answers never expose record-domain `ContentId`s
 ([observation-state.md](observation-state.md) §5).
@@ -127,9 +139,16 @@ interaction terminal: a capability that completed per its completion profile is
 ```
 
 This is gateway sugar for `invoke` followed by an assertion causally anchored to
-`afterRequestId` (§3.2) — nothing more. Only a postcondition bound into the versioned
-**capability contract** participates in completion semantics; its failure terminates
-the interaction `Faulted(CompletionPostconditionNotSatisfied)` with a stable detail
+`afterRequestId` (§3.2) — nothing more. If the bounded wait elapses first, the answer
+is `pending` with `verification: NotEvaluated`: the expectation is **not** evaluated
+and the state-minimal gateway does not retain it
+([protocol-topology.md](protocol-topology.md) §2). The caller re-asserts after
+`get_result` returns the terminal — `afterRequestId` binding remains correct because
+it references the E4 materialization, not the current state.
+
+Only a postcondition bound into the versioned **capability contract** participates in
+completion semantics; its failure terminates the interaction
+`Faulted(CompletionPostconditionNotSatisfied)` with a stable detail
 (`False | TimedOut | EvaluationUnavailable`) in E4
 ([guarantees.md](guarantees.md) §5.4, [semantic-model.md](semantic-model.md) §2.2).
 
@@ -169,8 +188,12 @@ An artifact may be sealed into a case only if **all** hold:
 
 1. artifact outcome `Completed` with reader-verified closure;
 2. self-contained (or its external `StateStore` dependency resolved and frozen);
-3. strict-eligible: every compared node keyed, no contamination intervals, no
-   `OutcomeUnknown` shapes, no temporal predicates;
+3. strict-eligible under the **full replay pre-scan**, applied to every evidence cut:
+   every compared node keyed; no contamination intervals; no `OutcomeUnknown` shapes;
+   no `DuringEffect` cancellations; no temporal predicates; no E6 resolution other
+   than `Satisfied`; no E8 `Unevaluable` outcomes — anything strict replay would stop
+   at or answer `Incomparable` for ([guarantees.md](guarantees.md) §5) disqualifies
+   sealing, because a case known in advance to be unreplayable is not a test;
 4. every **required** assertion in the artifact evaluated `Satisfied`;
 5. contract preflight succeeds: every capability, state-source, and predicate contract
    pinned in E1 is available at compatible versions.
@@ -215,12 +238,20 @@ conformance and MUST NOT be labeled as such
 
 Three versioned schemas, none collapsed into another:
 
-- **Case verdict** — `Passed` (fidelity all `Equal`, required assertions `Satisfied`),
-  `FailedAssertion` (a required assertion is not `Satisfied`, regardless of fidelity),
-  `Unevaluable` (a required comparison or assertion answered
-  `Incomparable`/`Unevaluable`), `InfrastructureFailed(reason)` (host launch, fixture,
-  artifact integrity, timeout). Each verdict carries the first failing evidence
-  reference and, for divergences, the typed semantic diff.
+- **Case verdict** — the classification of the run's **first non-passing event**,
+  with infrastructure conditions taking precedence over everything:
+
+  | Verdict | First non-passing event |
+  |---|---|
+  | `Passed` | none: every comparison `Equal`, every required assertion evaluably `Satisfied` |
+  | `FailedAssertion` | an E8 comparison for a **required** assertion diverged to an evaluable `False` |
+  | `Diverged` | any other fidelity `Diverged`, on any evidence cut (including non-required E8) |
+  | `Unevaluable` | a fidelity `Incomparable(reason)`, or a required assertion answering `Unevaluable` |
+  | `InfrastructureFailed(reason)` | host launch, fixture, artifact integrity, or timeout failure — preempts all of the above |
+
+  The verdicts are disjoint by construction (one first event, one classification).
+  Each verdict carries the first failing evidence reference and, for divergences, the
+  typed semantic diff.
 - **Batch outcome** — aggregates verdicts and expresses batch-level conditions a
   verdict cannot: empty selection, invalid manifest, engine unavailable, aborted run.
 - **Exit codes** — a stable, documented mapping from batch outcome for CI: success /

@@ -33,7 +33,9 @@ source and the tree — the same moment.
    **atomic E8 `AssertionEvaluated` cut** — no open commitment, ignored by the close
    fence, closure-free (R5).
 3. **Two axes, never merged:** replay fidelity (`Equal | Diverged | Incomparable`)
-   versus case verdict (`Passed | FailedAssertion | Unevaluable | InfrastructureFailed`).
+   versus case verdict
+   (`Passed | Diverged | FailedAssertion | Unevaluable | InfrastructureFailed`,
+   classified from the run's first non-passing event).
    Assertions state expected truth; live `Unevaluable` maps to replay `Incomparable`;
    unreadable fields are never `False` (no boolean oracle).
 4. **Caller expectations never change interaction terminals.** `invoke` with an

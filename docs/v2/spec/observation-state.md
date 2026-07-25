@@ -17,7 +17,7 @@ NOT, SHOULD, and MAY follow RFC 2119.
 An **observation view** is defined by:
 
 - a `ViewContractId@version` — the versioned projection rules: which node kinds,
-  attributes, capability metadata, and state sources (§8) are included, how values are
+  attributes, capability metadata, and state sources (§7) are included, how values are
   normalized, and which redaction policy applies;
 - a **scope** — the subtree/filter it observes, plus the `sources/<StateSourceKey>`
   scopes it includes;
@@ -63,8 +63,8 @@ snapshots are comparable only under the same `ViewContract` (or an explicit migr
 | `Redacted` | Field/value withheld by redaction policy |
 | `OutOfScope` | Outside the view's scope or exposure policy |
 | `BudgetTruncated` | Per-pump or per-view budget cut materialization short |
-| `SourceUnavailable` | A state source produced no document (§8) |
-| `Stale` | A sampled source's document is older than its declared freshness bound (§8) |
+| `SourceUnavailable` | A state source produced no document (§7) |
+| `Stale` | A sampled source's document is older than its declared freshness bound (§7) |
 | `UnsupportedContract` | The source's contract version is not supported by this view contract |
 
 Rules:
@@ -165,7 +165,7 @@ governed by a `StateSourceContractId@version`
 
 | Class | Contract | Strict eligibility |
 |---|---|---|
-| `RevisionBoundStateSource` | The application **publishes** an immutable typed document (with causation) as a kernel message; adoption swaps the document and allocates an observation revision atomically ([kernel-execution.md](kernel-execution.md) §4) | Comparable under strict replay; assertable, including cross-source and node+source predicates |
+| `RevisionBoundStateSource` | The application **publishes** an immutable typed document (with causation) as a kernel message; adoption swaps the document and advances the shared `SourceRevision` atomically ([kernel-execution.md](kernel-execution.md) §4, [semantic-model.md](semantic-model.md) §4) — snapshots, watermarks, and pinned reads therefore identify source documents and node state in one revision order | Comparable under strict replay; assertable, including cross-source and node+source predicates |
 | `SampledStateSource` | The document is read at materialization time (may consult external state); carries a declared freshness bound | Diagnostic only: excluded from strict comparison scope and from cross-source atomic assertions; staleness surfaces as `Stale` completeness |
 
 The distinction exists because strict comparison needs point-in-time consistency:
@@ -199,7 +199,7 @@ sources — or a source and the node tree — describe the same moment.
 Because recording evidence and timeline diagnostics reference `StateStore`
 materializations, a bounded, queryable state history falls out of the same machinery:
 retained snapshots/deltas indexed by `(SourceRevision, LogicalOrder)`, surfaced through
-a read-only inspection tool ([protocol-topology.md](protocol-topology.md) §8). The
+a read-only inspection tool ([protocol-topology.md](protocol-topology.md) §7). The
 timeline inherits the redaction and domain rules of §5 unchanged; retention is bounded
 by the `StateStore` budget ([security-resources.md](security-resources.md) §5). The
 timeline is a diagnostic surface; it carries no replay authority.
