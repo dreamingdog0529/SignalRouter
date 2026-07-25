@@ -4,9 +4,15 @@
     <Project Path="src/SignalRouter.McpHost/SignalRouter.McpHost.csproj" />
     <Project Path="src/SignalRouter.Protocol/SignalRouter.Protocol.csproj" />
   </Folder>
+  <Folder Name="/src/v2/">
+    <Project Path="src/v2/Contracts/SignalRouter.V2.Contracts.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SignalRouter.Core.Tests/SignalRouter.Core.Tests.csproj" />
     <Project Path="tests/SignalRouter.McpHost.Tests/SignalRouter.McpHost.Tests.csproj" />
     <Project Path="tests/SignalRouter.Protocol.Tests/SignalRouter.Protocol.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/v2/">
+    <Project Path="tests/v2/SignalRouter.V2.Contracts.Tests/SignalRouter.V2.Contracts.Tests.csproj" />
   </Folder>
 </Solution>
