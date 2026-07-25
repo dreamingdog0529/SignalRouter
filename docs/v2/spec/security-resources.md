@@ -66,6 +66,14 @@ hosts) MUST re-derive this analysis; the default posture never silently extends.
   ([observation-state.md](observation-state.md) §5).
 - The protocol accepts no type names, no reflection, no code, and no unconstrained
   filesystem paths. Artifact paths are normalized and confined to one configured root.
+  Predicates are declarative ASTs referencing only registered contracts — never code
+  ([verification.md](verification.md) §2).
+- **No boolean oracle:** evaluating a predicate against a field the caller's domain may
+  not read answers `Unevaluable(Redacted/OutOfScope)` or an authorization rejection —
+  never `False` — so comparison outcomes cannot leak hidden values bit by bit
+  ([verification.md](verification.md) §2.3). Secret predicate operands use the same
+  secret-reference mechanism as recorded arguments (§3); no explanation or witness ever
+  contains a secret value.
 
 ## 5. Resource bounds
 
@@ -82,7 +90,9 @@ enforced fail-fast at its owning boundary:
 | `StateStore` | blob size, chain length, total budget, pin-aware GC |
 | `KernelTrace` | ring capacity; loss always permitted, gap-marked |
 | Protocol | per-direction message size, pending-handshake slots separated from authenticated slots, per-session in-flight caps |
-| Timeline | retention budget ([observation-state.md](observation-state.md) §7) |
+| Timeline | retention budget ([observation-state.md](observation-state.md) §8) |
+| Predicates | AST depth/node count, operand sizes, batch size, per-evaluation cost bound, registered-contract count ([verification.md](verification.md) §2) |
+| State sources | per-document byte ceiling, field/collection cardinality per contract, publication rate refusal ([observation-state.md](observation-state.md) §7) |
 
 Exhaustion behavior is the guarantees taxonomy — refuse admission, degrade to
 `Incomplete`, or mark trace gaps — never silent drop, never unbounded growth
@@ -95,8 +105,9 @@ Replay artifacts execute real capabilities and are treated as untrusted input:
 - integrity: manifest closure and `ContentId` verification before execution;
 - structural limits: size, depth, node count, event count, blob bytes — enforced
   before and during the pre-scan;
-- capability allowlist: only contracts registered in the target runtime at compatible
-  versions execute; unknown contracts refuse the artifact;
+- contract allowlist: only capability, state-source, and predicate contracts
+  registered in the target runtime at compatible versions execute or evaluate; unknown
+  contracts refuse the artifact;
 - provenance: by default only artifacts produced by the local installation replay;
   overriding this is an explicit, logged operator decision
   ([recording-replay.md](recording-replay.md) §7).

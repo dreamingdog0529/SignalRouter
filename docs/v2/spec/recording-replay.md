@@ -8,7 +8,7 @@
 
 This spec defines the recording artifact (lanes, commit order, manifest), the
 `ReplayComparisonProfile`, the three replay modes, and the replay trust boundary. The
-evidence cut set (E1–E7), durability rules, terminal shapes, and failure matrix are
+evidence cut set (E1–E8), durability rules, terminal shapes, and failure matrix are
 normative in [guarantees.md](guarantees.md) and are not restated here. The key words
 MUST, MUST NOT, SHOULD, and MAY follow RFC 2119.
 
@@ -17,7 +17,9 @@ MUST, MUST NOT, SHOULD, and MAY follow RFC 2119.
 Recording is a control operation on the live runtime — no runtime recreation, no
 incarnation change, no adapter rebinding. Opening and closing are linearization fences
 on the mutation lane ([guarantees.md](guarantees.md) §5.1, §5.9). A recording is
-identified by an `OperationId` and produces one artifact.
+identified by an `OperationId` and produces one artifact. Promoting an artifact into a
+CI verification case is a separate, condition-gated step
+([verification.md](verification.md) §5).
 
 ## 2. Artifact structure
 
@@ -70,6 +72,8 @@ minimum:
 - redaction policy ID;
 - node matching rules (AuthorKey-based; item-key rules for dynamic collections);
 - the compared field set per node kind and capability;
+- the state sources in strict scope, with per-source compared field sets under their
+  contract's stable paths ([observation-state.md](observation-state.md) §7);
 - collection comparison rules (ordered / set / multiset per field);
 - value normalization rules;
 - completeness requirements ([observation-state.md](observation-state.md) §3);
@@ -87,9 +91,11 @@ answers `Equal | Diverged | Incomparable(reason)` ([guarantees.md](guarantees.md
 
 Per matched node: hierarchy relation (and order where the profile says ordered), role,
 label, value, visibility, enablement, focus, capability contract versions, argument
-schemas, availability/preconditions, and completion profile bindings. Terminal
-comparison covers outcome, fault code, and completion evidence. The comparator
-distinguishes `absent`, `null`, `unknown`, and `redacted` as four different inputs.
+schemas, availability/preconditions, and completion profile bindings. Per in-scope
+state source: the document fields the profile names, compared under the source
+contract's typing and collection rules. Terminal comparison covers outcome, fault
+code, and completion evidence. The comparator distinguishes `absent`, `null`,
+`unknown`, and `redacted` as four different inputs.
 
 ### 5.3 Modes
 
@@ -119,6 +125,11 @@ or environment incompatibility, per policy.
   contract version, resolved secrets), compare at every evidence cut per R4, stop at the
   first non-`Equal` answer with a structured report: the recorded expectation, the
   actual observation, and the semantic diff — all built from recording-safe fields only.
+- E8 assertions are re-evaluated in place against the corresponding materialization,
+  requiring the recorded outcome (`Satisfied` or `False`) to recur; a recorded or
+  replay-side `Unevaluable` answers `Incomparable(reason)`
+  ([guarantees.md](guarantees.md) §5.10). Replay fidelity here says nothing about the
+  case verdict ([verification.md](verification.md) §1).
 - Rejected entries are re-dispatched to verify the same rejection and the zero-effect
   guarantee; `BeforeEffect` cancellations replay with a synthetic pre-cancelled token
   ([guarantees.md](guarantees.md) §5.7).
@@ -130,8 +141,8 @@ A replay artifact is executable input. Before any execution the replayer MUST en
 - artifact integrity: manifest closure and `ContentId` verification;
 - resource limits: size, depth, node count, event count, blob bytes
   ([security-resources.md](security-resources.md) §5);
-- the capability contract allowlist: only contracts registered in the target runtime,
-  at compatible versions, may execute;
+- the contract allowlist: only capability, state-source, and predicate contracts
+  registered in the target runtime, at compatible versions, may execute or evaluate;
 - secret handling: secret references resolve in memory only; unresolvable references
   stop replay before the affected entry;
 - provenance policy: artifacts from untrusted sources are refused by default

@@ -5,7 +5,7 @@
 > **Companion specs:** [semantic-model.md](semantic-model.md) · [kernel-execution.md](kernel-execution.md) ·
 > [observation-state.md](observation-state.md) · [recording-replay.md](recording-replay.md) ·
 > [protocol-topology.md](protocol-topology.md) · [adapter-conformance.md](adapter-conformance.md) ·
-> [security-resources.md](security-resources.md)
+> [security-resources.md](security-resources.md) · [verification.md](verification.md)
 
 This document is the anchor of the v2 specification set. It fixes, before any component
 design, the answers SignalRouter v2 is allowed to give at every failure boundary, the
@@ -21,7 +21,7 @@ Covered here:
 
 - the outcome taxonomies for interactions, recordings, replays, and queries;
 - the determinism tiers v2 does and does not promise;
-- the ReplayEvidence cut set (E1–E7) and its durability rules;
+- the ReplayEvidence cut set (E1–E8) and its durability rules;
 - terminal artifact shapes and the failure matrix;
 - the separation of interaction outcomes from recording outcomes;
 - capacity-exhaustion and overflow behavior;
@@ -94,7 +94,9 @@ Every comparison performed under a `ReplayComparisonProfile`
 | `Incomparable(reason)` | The comparison cannot be evaluated: unsupported profile version, incompleteness where the profile requires completeness, unknown mandatory extension, missing migration, contamination, cancellation timing |
 
 A replay run stops at the first non-`Equal` comparison and reports it; `Incomparable`
-MUST NOT be reported as `Diverged`.
+MUST NOT be reported as `Diverged`. A live assertion's `Unevaluable(reason)` outcome
+([verification.md](verification.md) §2.3) maps to `Incomparable(reason)` at replay —
+`Incomparable` exists only on the replay side and is never a recorded expectation.
 
 ### 3.4 Query answers
 
@@ -139,17 +141,20 @@ durability obligations.
 
 The manifest header. Contains: the `ReplayComparisonProfile` (ID and version), the record
 `ViewContract` ID/version, the redaction policy ID, the immutable table of
-`CapabilityContractId → CompletionProfileId` bindings in force, the
-`RuntimeIncarnationId`, and the `ContentId` of the base observation snapshot.
+`CapabilityContractId → CompletionProfileId` bindings in force, the immutable tables of
+registered state-source contracts and predicate contracts
+([observation-state.md](observation-state.md) §7, [verification.md](verification.md) §2),
+the `RuntimeIncarnationId`, and the `ContentId` of the base observation snapshot.
 
 - E1 is a **linearization cut on the mutation lane**: opening drains in-flight mutation
   interactions to their E4, then materializes the base snapshot, then appends E1, then
   admits subsequent mutations into the recording (the open fence).
 - Commit order MUST be StateStore-first: base snapshot blob durable and pinned → E1
   appended ([recording-replay.md](recording-replay.md) §4).
-- The contract table is immutable for the artifact's lifetime. Contract registration
-  during an active recording either is refused or terminates the recording as
-  `Incomplete(ContractChanged)`; v2 does not define a `ContractCatalogExtended` cut.
+- The contract tables are immutable for the artifact's lifetime. Registration of a
+  capability, state-source, or predicate contract during an active recording either is
+  refused or terminates the recording as `Incomplete(ContractChanged)`; v2 does not
+  define a `ContractCatalogExtended` cut.
 
 ### 5.2 E2 `AdmissionCut`
 
@@ -183,8 +188,9 @@ fix current observation revision (SourceRevision / ViewWatermark)
   redaction/security domain; completeness sufficient for the pinned profile; the blob is
   pinned to this artifact; the current `SourceRevision`/`ViewWatermark` is recorded in the
   cut; and either a gap-free invalidation token proves `NoRelevantMutation` since that
-  blob, or re-materialization produced the same `ContentId`. Absence of an observed E5 is
-  NOT acceptable proof.
+  blob — where relevant mutations include node changes **and state-source publications**
+  ([observation-state.md](observation-state.md) §7) — or re-materialization produced the
+  same `ContentId`. Absence of an observed E5 is NOT acceptable proof.
 - The first E3 after an `ExternalMutationBarrier` (§5.5) MUST use a fresh
   materialization; checkpoint reuse across a barrier is prohibited.
 - E3 is taken immediately before `Invoking`, not at admission, so that effects of
@@ -206,7 +212,9 @@ contributed to the terminal), `CancellationEvidence` when cancellation was invol
 ### 5.5 E5 `ExternalMutationBarrier`
 
 Appended when an `ObservedExternal` effect ([adapter-conformance.md](adapter-conformance.md) §6)
-intersects the recording. E5 records a **contamination interval**, not a point:
+— including a state-source mutation whose causation is external to the controlled work
+([observation-state.md](observation-state.md) §7) — intersects the recording. E5 records
+a **contamination interval**, not a point:
 `lastKnownCleanCut .. firstObservedCut`, plus the `SourceRevision` at detection, a source
 hint, and the `RequestId`s of any interactions whose effect window overlaps the interval
 (marked `contaminated`).
@@ -276,6 +284,28 @@ verify closure themselves.
 
 Absence of E7 is meaningful: the reader classifies the artifact `Interrupted` (§3.2).
 
+### 5.10 E8 `AssertionEvaluated`
+
+One per standalone assertion ([verification.md](verification.md) §3) evaluated while the
+recording is active. E8 is an **atomic single cut**: it opens no commitment, the close
+fence neither waits for nor cancels it, and it imposes no closure obligation (§6.2 R5).
+
+Contains the full evaluation identification: `RuntimeIncarnationId`, the observation
+revision/watermark, `ViewContractId@version`, the state-source contract table version,
+scope and security domain, the evaluated snapshot's `ContentId`, its completeness, the
+predicate contract ID/version with redacted operands (secret operands as secret
+references), stable clause IDs with expected/actual evaluations, the outcome
+(`Satisfied | False | Unevaluable(reason)`), and bounded, redacted witness paths.
+Per-clause structured explanations are diagnostic material and are never part of strict
+comparison.
+
+Replay semantics: the replayer re-evaluates the predicate at the same position against
+the corresponding materialization and requires the **same outcome** — a recorded
+`Satisfied` must re-evaluate `Satisfied`, a recorded `False` must re-evaluate `False`
+(replay *fidelity*; whether a `False` fails the *case* is the separate verdict axis,
+§9). A recorded `Unevaluable(reason)`, or an evaluation that cannot be performed at
+replay, answers `Incomparable(reason)` (§3.3).
+
 ## 6. Terminal artifact shapes
 
 ### 6.1 Per-interaction shapes
@@ -299,9 +329,14 @@ Absence of E7 is meaningful: the reader classifies the artifact `Interrupted` (�
 - **R4 (comparison targets):** strict replay compares evidence from **all** cuts — E1
   (initial base semantics), E2 (AuthorKey resolution, contract/version, argument and
   secret resolution), E3 (before semantics), E4 (terminal + after semantics), E6
-  (predicate re-evaluation), E7 (final semantics and artifact closure). Restricting
-  comparison to E3/E4 would leave zero-mutation recordings, wait-only recordings, and the
-  final reached state unverified.
+  (predicate re-evaluation), E7 (final semantics and artifact closure), E8 (assertion
+  re-evaluation, §5.10). Restricting comparison to E3/E4 would leave zero-mutation
+  recordings, wait-only recordings, and the final reached state unverified.
+- **R5 (assertions are closure-free):** E8 cuts are self-contained. An artifact may
+  close `Completed` with any number of E8 cuts and any mix of E8 outcomes; whether a
+  `False` required assertion disqualifies the artifact as a *verification case* is a
+  seal condition ([verification.md](verification.md) §5), never an artifact-completeness
+  condition.
 
 ### 6.3 Artifact-level shapes
 
@@ -336,6 +371,9 @@ alone fails. This preserves v1's recorder-poisoning stance.
 | Runtime crash | pending → `OutcomeUnknown` after retention expiry; incarnation changes | artifact `Interrupted` unless E7 was durable |
 | Gateway crash / disconnect | unaffected — runtime is the authority; caller re-queries | unaffected |
 | Incarnation change | stranded requests are never auto re-executed; queries answer `OutcomeUnknown` after retention | recording bound to old incarnation closes `Incomplete(IncarnationChanged)` if writable, else `Interrupted` |
+| Revision-bound source publish refused (mailbox overflow) | publisher receives an explicit refusal; no partial document swap ever occurs | no evidence obligation (nothing was observed) |
+| Assertion evaluated, crash before E8 append | the live caller may have received the answer; the artifact holds no E8 | artifact `Incomplete`/`Interrupted`; replay treats the position as having no assertion |
+| Case seal fails (conditions unmet) | not an interaction concern | artifact remains a diagnostic recording; no `VerificationCaseManifest` is produced ([verification.md](verification.md) §5) |
 | Capacity exhaustion | new admissions refused (`Rejected(CapacityExhausted)`); active work unaffected | per recording policy: `Incomplete(SizeLimit)`, chunk rollover, or normal close at configured bounds (§8) |
 
 Cells not listed (e.g. sink fault while no recording is active) reduce to the
@@ -370,6 +408,15 @@ A strict replay that completes with all comparisons `Equal` proves:
 It does **not** prove application equivalence. Side effects outside the observed
 profile — database writes, audio, network traffic, analytics — are unverified. Specs and
 user documentation MUST NOT use the phrase "application equivalence" for this guarantee.
+
+Replay fidelity is also **not a test verdict**. A diagnostic recording that faithfully
+reproduces a `False` assertion is entirely `Equal` and still not a passing test; a
+sealed case whose required assertion re-evaluates `False` is an E8 fidelity divergence
+that the verdict axis reports distinctly as `FailedAssertion`. Case verdicts
+(`Passed | Diverged | FailedAssertion | Unevaluable | InfrastructureFailed`) are a
+separate, independently versioned taxonomy defined in
+[verification.md](verification.md) §6; the two axes MUST NOT be merged in any report or
+tool answer.
 
 Replay artifacts are executable input and sit on a trust boundary: before execution the
 replayer MUST enforce artifact integrity (ContentId verification), size/depth/node-count

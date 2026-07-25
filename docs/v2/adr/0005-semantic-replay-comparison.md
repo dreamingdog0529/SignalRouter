@@ -29,7 +29,8 @@ Promote comparison, don't relax it:
 - three modes: `StrictSemantic` (default), `ExactArtifact` (ContentId equality for
   same-build/encoder checks), `AdaptiveGoal` (locator fallback and tolerances — never
   labeled strict);
-- comparison covers all evidence cuts (E1–E7), so zero-mutation and wait-only
+- comparison covers all evidence cuts (E1–E8 since
+  [ADR 0008](0008-mcp-verification-surface.md)), so zero-mutation and wait-only
   recordings and the final reached state are verified;
 - intermediate delta sequences are never compared (timing tier is a non-goal);
 - the verified claim is named **observational equivalence relative to the profile** —

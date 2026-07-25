@@ -24,7 +24,12 @@ An adapter:
 6. hosts the pump ([kernel-execution.md](kernel-execution.md) §6) and provides frame
    phases;
 7. supplies the replay environment factory for isolated replay runtimes
-   ([recording-replay.md](recording-replay.md) §6).
+   ([recording-replay.md](recording-replay.md) §6), including state-source fixture,
+   reset, and update wiring per the case fixture contract
+   ([verification.md](verification.md) §5.3);
+8. provides the headless `VerificationHost` — batch engine lifecycle, pump driving,
+   fixture/reset execution — used by CI verification runs
+   ([verification.md](verification.md) §6.1).
 
 Adapters never touch kernel state directly; everything crosses the mailbox.
 
@@ -137,7 +142,10 @@ A **versioned, black-box** suite that drives any adapter through the SDK surface
 registration/identity rules, effect adoption/completion/cancellation, completion-profile
 evidence, ManagedIntent/ObservedExternal classification behavior, gating and
 `HumanIntentBlocked`, pump budget compliance, execution-time bounds, ObservedExternal
-contamination, and replay-environment isolation. The TCK runs against the in-process
+contamination, replay-environment isolation, revision-bound source publication
+atomicity and `SourceRevision` advance, fixture/reset contract execution, and custom
+predicate contract obligations (purity, bounds, no ambient inputs —
+[verification.md](verification.md) §2.2). The TCK runs against the in-process
 reference adapter in CI (fast feedback) — and that run proves **SDK contract
 compliance only**.
 
@@ -153,3 +161,9 @@ An adapter verified only against the reference environment MUST be labeled
 *experimental*. This rule is the design-level answer to v1's local-only Unity test gap:
 the split between spec-level and engine-level verification is explicit, and the support
 label tells the truth about which tier ran where.
+
+An application's verification suite ([verification.md](verification.md)) reuses this
+tier's **infrastructure** — engine launcher, pump integration, report plumbing — but is
+not adapter conformance and MUST NOT be presented as such: conformance proves the
+adapter honors the SDK contract; a verification suite proves one application's
+scenarios still hold.

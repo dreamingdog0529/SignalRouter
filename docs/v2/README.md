@@ -22,7 +22,7 @@ with v1's API, protocol, or artifacts, and this set renumbers its ADRs from 0001
 ## Normative specs
 
 1. [spec/guarantees.md](spec/guarantees.md) — outcome taxonomies, determinism tiers,
-   ReplayEvidence cuts E1–E7, terminal shapes, the failure matrix
+   ReplayEvidence cuts E1–E8, terminal shapes, the failure matrix
 2. [spec/semantic-model.md](spec/semantic-model.md) — nodes, roles vs. capabilities,
    three-way identity, the identifier family, the `ContentId` contract
 3. [spec/kernel-execution.md](spec/kernel-execution.md) — single-owner kernel, lanes,
@@ -37,6 +37,8 @@ with v1's API, protocol, or artifacts, and this set renumbers its ADRs from 0001
    profiles, ManagedIntent/ObservedExternal, the three conformance tiers
 8. [spec/security-resources.md](spec/security-resources.md) — threat model, redaction,
    exposure, bounds, artifact trust, release gating
+9. [spec/verification.md](spec/verification.md) — predicate model, assertions (E8),
+   fidelity vs. verdict, verification cases, seal conditions, CI runner and reports
 
 ## Architecture decision records
 
@@ -47,6 +49,7 @@ with v1's API, protocol, or artifacts, and this set renumbers its ADRs from 0001
 5. [adr/0005-semantic-replay-comparison.md](adr/0005-semantic-replay-comparison.md)
 6. [adr/0006-human-intent-ingress.md](adr/0006-human-intent-ingress.md)
 7. [adr/0007-codec-and-package-boundaries.md](adr/0007-codec-and-package-boundaries.md)
+8. [adr/0008-mcp-verification-surface.md](adr/0008-mcp-verification-surface.md)
 
 ## Provenance
 

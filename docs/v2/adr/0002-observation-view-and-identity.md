@@ -50,3 +50,8 @@ conflated three needs — runtime addressing, persistent identity, and search.
   of silent omissions.
 - The `ContentId` contract adds up-front cost (algorithm/migration rules) in exchange
   for artifact integrity and deduplication.
+- The projection model later absorbed non-UI domain state as first-class **state
+  sources** (`sources/<StateSourceKey>` scopes with their own contracts and exposure),
+  extending this decision rather than revising it
+  ([ADR 0008](0008-mcp-verification-surface.md),
+  [../spec/observation-state.md](../spec/observation-state.md) §7).
