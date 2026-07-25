@@ -67,7 +67,10 @@ public sealed class EffectProtocolTests
             EffectResolution.Succeeded(SdkTestData.Completion),
             ValueList<ContinuationRequest>.From(new[]
             {
-                new ContinuationRequest(SdkTestData.Invocation, InvocationPayload.Empty),
+                new ContinuationRequest(
+                    SdkTestData.Capability,
+                    TargetReference.ForKey(new AuthorKey("save")),
+                    InvocationPayload.Empty),
             }));
         Assert.That(completion.Continuations.Count, Is.EqualTo(1));
 

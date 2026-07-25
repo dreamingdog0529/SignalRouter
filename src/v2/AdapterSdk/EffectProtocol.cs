@@ -250,17 +250,32 @@ namespace SignalRouter.V2.AdapterSdk
     /// <summary>
     /// One follow-up invocation an active effect commits (kernel-execution.md §9).
     /// The kernel records commitments in the parent's terminal and admits children
-    /// only after that terminal is durable; ordinals follow list order.
+    /// only after that terminal is durable; ordinals follow list order. Like a
+    /// submission, it names the capability and target — the kernel derives the
+    /// child's fingerprint itself.
     /// </summary>
     public sealed class ContinuationRequest
     {
-        public ContinuationRequest(CapabilityInvocation invocation, InvocationPayload payload)
+        public ContinuationRequest(CapabilityContractRef capability, TargetReference target, InvocationPayload payload)
         {
-            Invocation = invocation ?? throw new ArgumentNullException(nameof(invocation));
+            if (capability.IsDefault)
+            {
+                throw new ArgumentException("Continuation requires a non-default capability.", nameof(capability));
+            }
+
+            if (target.IsDefault)
+            {
+                throw new ArgumentException("Continuation requires a non-default target.", nameof(target));
+            }
+
+            Capability = capability;
+            Target = target;
             Payload = payload ?? throw new ArgumentNullException(nameof(payload));
         }
 
-        public CapabilityInvocation Invocation { get; }
+        public CapabilityContractRef Capability { get; }
+
+        public TargetReference Target { get; }
 
         /// <summary>Ephemeral, like every payload (kernel-execution.md §3).</summary>
         public InvocationPayload Payload { get; }

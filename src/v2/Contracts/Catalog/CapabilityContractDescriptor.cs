@@ -14,7 +14,8 @@ namespace SignalRouter.V2.Contracts
             CapabilityContractRef contract,
             ArgumentSchema arguments,
             PredicateDefinition? precondition,
-            CompletionProfileRef completionProfile)
+            CompletionProfileRef completionProfile,
+            PredicateDefinition? postcondition = null)
         {
             if (contract.IsDefault)
             {
@@ -32,6 +33,7 @@ namespace SignalRouter.V2.Contracts
             Arguments = arguments ?? throw new ArgumentNullException(nameof(arguments));
             Precondition = precondition;
             CompletionProfile = completionProfile;
+            Postcondition = postcondition;
         }
 
         public CapabilityContractRef Contract { get; }
@@ -42,5 +44,12 @@ namespace SignalRouter.V2.Contracts
         public PredicateDefinition? Precondition { get; }
 
         public CompletionProfileRef CompletionProfile { get; }
+
+        /// <summary>
+        /// Contract-declared postcondition, evaluated during `Observing` against the
+        /// pinned after basis; its failure terminates
+        /// `Faulted(CompletionPostconditionNotSatisfied)` (verification.md §2.1, §3.4).
+        /// </summary>
+        public PredicateDefinition? Postcondition { get; }
     }
 }
