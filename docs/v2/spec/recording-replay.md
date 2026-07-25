@@ -26,7 +26,12 @@ CI verification case is a separate, condition-gated step
 An artifact consists of:
 
 - a **manifest** — E1 header plus the closure material E7 references;
-- the **evidence stream** — append-only ReplayEvidence cuts in `LogicalOrder`;
+- the **evidence stream** — append-only ReplayEvidence cuts, each carrying its
+  artifact-local **`EvidenceSequence`** (the monotonic append position,
+  [semantic-model.md](semantic-model.md) §4). Interaction cuts (E2/E3/E4) additionally
+  carry their interaction's `LogicalOrder`, and their relative order in the stream is
+  consistent with it; non-interaction cuts (E1, E5, E6, E7, E8) have no `LogicalOrder`
+  and are positioned by `EvidenceSequence` alone;
 - the optional **timeline stream** — TimelineTrack events (§3);
 - the **blob set** — the `StateStore` materializations pinned by the evidence.
 

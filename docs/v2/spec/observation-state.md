@@ -99,6 +99,15 @@ Rules:
   a gap and resynchronizes. Recording evidence never depends on subscription liveness:
   the E3/E4 cuts are fresh, revision-stamped materializations
   ([guarantees.md](guarantees.md) §5).
+- The **`ViewWatermark`** of a materialization or subscription is its view-side
+  high-water mark: the highest `SourceRevision` whose mutations it has fully applied.
+  It is a role of `SourceRevision`, not a separate identifier
+  ([semantic-model.md](semantic-model.md) §4). Because materializations are
+  revision-consistent, a snapshot's watermark equals its pinned `SourceRevision`; a
+  subscription's watermark advances with delivery and is the gap-detection signal
+  above. Evidence cuts that fix an observation basis (E3, E8) record the watermark of
+  the exact materialization they reference, so a reader can prove which observation
+  state a cut speaks for without consulting subscription history.
 - Delta chains are bounded (maximum chain length between checkpoints,
   [recording-replay.md](recording-replay.md) §4); readers MUST NOT need unbounded chains
   to reconstruct a state.

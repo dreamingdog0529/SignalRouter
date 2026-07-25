@@ -76,7 +76,7 @@ Every evaluation answers exactly one of:
 |---|---|
 | `Satisfied` | The predicate evaluated true against the materialization |
 | `False` | It evaluated false |
-| `Unevaluable(reason)` | It could not be evaluated: referenced field `Redacted` or `OutOfScope`, region incomplete, contract version unsupported, source `SourceUnavailable`/`Stale` |
+| `Unevaluable(reason)` | It could not be evaluated: referenced field `Redacted` or `OutOfScope`, region incomplete, contract version unsupported, source `SourceUnavailable`/`Stale`. Canonical reason codes: [guarantees.md](guarantees.md) §3.5 |
 
 **No boolean oracle:** a comparison against a value the caller is not entitled to read
 is `Unevaluable(Redacted)` or an authorization rejection — never `False`
@@ -149,7 +149,7 @@ it references the E4 materialization, not the current state.
 Only a postcondition bound into the versioned **capability contract** participates in
 completion semantics; its failure terminates the interaction
 `Faulted(CompletionPostconditionNotSatisfied)` with a stable detail
-(`False | TimedOut | EvaluationUnavailable`) in E4
+(`False | TimedOut | Unknown`) in E4
 ([guarantees.md](guarantees.md) §5.4, [semantic-model.md](semantic-model.md) §2.2).
 
 ## 4. Discovery and pre-validation
@@ -252,6 +252,16 @@ Three versioned schemas, none collapsed into another:
   The verdicts are disjoint by construction (one first event, one classification).
   Each verdict carries the first failing evidence reference and, for divergences, the
   typed semantic diff.
+
+  `InfrastructureFailed` reason codes are owned by this taxonomy (it versions
+  independently of [guarantees.md](guarantees.md) §3.5):
+
+  | Code | Condition |
+  |---|---|
+  | `HostLaunchFailed` | The verification host or engine could not be launched |
+  | `FixtureUnavailable` | The case's fixture contract could not be satisfied (§5.3) |
+  | `ArtifactIntegrityFailed` | Artifact closure or `ContentId` verification failed at pre-scan |
+  | `Timeout` | The run exceeded its configured time budget |
 - **Batch outcome** — aggregates verdicts and expresses batch-level conditions a
   verdict cannot: empty selection, invalid manifest, engine unavailable, aborted run.
 - **Exit codes** — a stable, documented mapping from batch outcome for CI: success /

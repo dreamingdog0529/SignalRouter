@@ -50,6 +50,7 @@ with v1's API, protocol, or artifacts, and this set renumbers its ADRs from 0001
 6. [adr/0006-human-intent-ingress.md](adr/0006-human-intent-ingress.md)
 7. [adr/0007-codec-and-package-boundaries.md](adr/0007-codec-and-package-boundaries.md)
 8. [adr/0008-mcp-verification-surface.md](adr/0008-mcp-verification-surface.md)
+9. [adr/0009-evidence-ordering-and-open-reason-vocabularies.md](adr/0009-evidence-ordering-and-open-reason-vocabularies.md)
 
 ## Provenance
 
