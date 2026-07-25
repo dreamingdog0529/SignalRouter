@@ -75,9 +75,13 @@ redacted-argument digest. The invocation contains no callbacks, tasks, engine ob
 transport metadata, timestamps, or identity envelope; those live in the admission
 envelope ([kernel-execution.md](kernel-execution.md) §3).
 
-Availability is per capability, not per node: a node may be visible while a capability is
-currently unavailable (disabled, precondition unmet). Invoking an unavailable capability
-is `Rejected`, never a silent no-op.
+Availability is per capability, not per node: a node may be visible while a capability
+is currently unavailable. Availability and validation preconditions are **two disjoint
+gates**: availability is state the adapter/application declares (enabled/disabled);
+a validation precondition is a predicate the capability contract declares, evaluated
+at `Validating`. Invoking an unavailable capability is `Rejected(CapabilityUnavailable)`
+and a failed precondition is `Rejected(PreconditionFailed)`
+([guarantees.md](guarantees.md) §3.5) — never a silent no-op.
 
 ## 3. Identity: three distinct concepts
 

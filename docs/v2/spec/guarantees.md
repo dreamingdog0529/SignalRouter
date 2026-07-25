@@ -125,14 +125,22 @@ a meaning it does not know.
 | `RequestIdConflict` | Duplicate `RequestId` with a different semantic fingerprint |
 | `CapacityExhausted` | Mutation-lane or `RecoveryIndex` capacity refused the admission (§8) |
 | `ReentrantDispatch` | Nested submission from inside an effect handler |
+| `TargetNotFound` | The target cannot be resolved to exactly one node **for this principal**: unregistered, ambiguous, or not exposed to the principal's security domain — deliberately indistinguishable |
+| `CapabilityUnavailable` | The resolved node is visible to the principal, but the invoked capability is not invocable there: its **availability state** is off (disabled by the adapter/application), **or it is not declared / not exposed on this node for this principal** — merged for the same concealment reason |
+| `PreconditionFailed` | A **validation precondition declared in the capability contract** ([semantic-model.md](semantic-model.md) §2.2) evaluated false during `Validating`. Disjoint from `CapabilityUnavailable` by source: availability is adapter/application-declared state, a precondition is a contract-declared predicate |
+| `IncarnationMismatch` | The submission references a stale `RuntimeIncarnationId` ([kernel-execution.md](kernel-execution.md) §10) |
+| `UnkeyedTarget` | The strict open policy of an active recording refused admission of an invocation resolving to a node without an `AuthorKey` (§5.2) |
 
-Rejection causes that exist in prose but carry no reserved code yet (authorization
-refusal, capability unavailability, precondition failure, incarnation mismatch,
-unkeyed-target refusal at admission) remain unnamed here deliberately: naming them is
-a separate normative decision that must weigh the exposure rules of
-[security-resources.md](security-resources.md) §4 (a rejection code must not become an
-existence oracle for hidden targets). They are expected to be reserved alongside the
-kernel implementation.
+**Existence concealment.** `TargetNotFound` and `CapabilityUnavailable` are
+deliberately coarse: no code distinguishes "does not exist" from "exists but is hidden
+from you", so a rejection can never become an existence oracle for hidden targets
+([security-resources.md](security-resources.md) §4). The concealment is
+**observational equivalence**, not just code choice: for an unauthorized target the
+admission answer, dedup behavior, `RecoveryIndex` footprint, trace emission, query
+answers, and `LogicalOrder` consumption MUST be indistinguishable from the
+unregistered-target case (timing side channels are outside the promised tiers, §4).
+The same rule extends to status queries: a `RequestId` outside the querying
+principal's authority answers exactly as an unknown id.
 
 **`Incomplete(reason)`** (§3.2, §5, §7):
 

@@ -43,18 +43,46 @@ The kernel processes two lanes:
   responsiveness is bounded instead by the adapter execution-time contract and enforced
   by the TCK ([adapter-conformance.md](adapter-conformance.md) §4, §7).
 
-An `OperationRef` (`OperationId`) detaches the **caller**, never the guarantee: the
-mutation lane is held until the adapter reports the **effect fence** — the point after
-which the effect can no longer mutate application state. Only work that outlives its
-effect fence (e.g. a postcondition watch) and operations that never mutate (waits,
-queries, observation) continue under an `OperationRef` on the control/observation lane.
-Explicit waits (`wait_for`) always live on the control/observation lane.
+An operation handle carrying the `OperationId` detaches the **caller**, never the
+guarantee. The adapter reports the **effect fence** — the point after which the effect
+can no longer mutate application state — as a distinct signal from completion
+evidence; which completion messages imply an unreported fence is profile-limited
+([adapter-conformance.md](adapter-conformance.md) §3,
+[adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)). The mutation
+lane is released only when the interaction's **after-observation basis is pinned and
+any capability postcondition has resolved** (§5) — releasing at the fence would let
+the next mutation leak into the previous interaction's after state, breaking the
+`afterRequestId` exclusion promise ([verification.md](verification.md) §3.2), and
+releasing with a postcondition still pending would let a later mutation satisfy an
+earlier interaction's postcondition. Postconditions are evaluated only against pinned
+bases; while unresolved, re-evaluation re-pins a fresh basis with the lane still held,
+until satisfied or timed out. Only operations that never mutate (waits, queries,
+observation) run concurrently, under an operation handle on the control/observation
+lane. Explicit waits (`wait_for`) always live on the control/observation lane.
+
+Status queries never enter the mailbox: the kernel atomically publishes an immutable
+status snapshot that query surfaces read. A query carries the querying principal; a
+`RequestId` outside that principal's authority answers exactly as an unknown id —
+existence concealment extends to the query path
+([guarantees.md](guarantees.md) §3.5).
 
 ## 3. Admission
 
-A submission carries: the caller-assigned `RequestId`, the semantic fingerprint, the
-capability invocation ([semantic-model.md](semantic-model.md) §2.2), and the identity
-envelope (Principal/Ingress/Provenance/Causality, [semantic-model.md](semantic-model.md) §6).
+A submission carries: the caller-assigned `RequestId`, the capability invocation
+([semantic-model.md](semantic-model.md) §2.2) with its typed argument payload, and the
+identity envelope (Principal/Ingress/Provenance/Causality,
+[semantic-model.md](semantic-model.md) §6).
+
+The typed argument payload is **ephemeral**: it exists in memory only, is never stored
+in the mailbox's retained structures, `RecoveryIndex`, trace, or events, and its
+lifetime ends at adoption refusal, terminal, or cancellation
+([security-resources.md](security-resources.md) §3). The kernel derives the
+authoritative semantic fingerprint and redacted-argument digest from the
+**canonicalized payload**; a caller-supplied fingerprint (the wire protocol carries
+one for dedup, [protocol-topology.md](protocol-topology.md) §4) is verified against
+the derived value and a mismatch refuses the submission at the protocol boundary —
+a caller-chosen fingerprint is never the dedup authority
+([adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)).
 
 At admission — a single mailbox-serialized step — the kernel:
 
@@ -78,8 +106,10 @@ A multiple-producer, single-consumer queue with:
 - **One linearization point:** message adoption. Concurrent arrival order is not
   reproducible and is not part of any guarantee; the adopted sequence is recorded and is
   the only order that exists ([guarantees.md](guarantees.md) §4).
-- **Priority classes:** control before mutation admission at each turn boundary; within a
-  class, FIFO by adoption.
+- **Three bounded classes:** control, revision-bound source publication, and mutation
+  admission. At each turn boundary the processing priority is control, then source
+  publication, then mutation admission; within a class, FIFO by adoption. The
+  starvation rule below applies to the two non-mutation classes alike.
 - **Bounded capacity** per class with declared overflow policy: control-lane overflow is
   a kernel fault (it must be sized for the worst case); mutation-lane overflow refuses
   admission (`Rejected(CapacityExhausted)`); state-source publication overflow answers
@@ -90,8 +120,17 @@ A multiple-producer, single-consumer queue with:
   step; observers can never see a torn document or an unrevisioned swap
   ([observation-state.md](observation-state.md) §7.1).
 - **Starvation rule:** the pump guarantees that if the mutation lane is idle, queued
-  control messages are drained before the turn ends; if a mutation is active, control
-  messages are processed at every step boundary of its state machine.
+  control and source-publication messages are drained before the turn ends; if a
+  mutation is active, they are processed at every step boundary of its state machine.
+
+**Node registration is bootstrap-then-messages**
+([adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)): initial
+construction uses a synchronous builder before the runtime starts (duplicate
+`AuthorKey` throws, [semantic-model.md](semantic-model.md) §3.2); after start,
+registration, unregistration, and attribute updates are bounded control-lane messages
+answered with a **receipt** — a duplicate `AuthorKey` fails in the receipt, before any
+subsequent message is adopted. Registration never bypasses the mailbox's single
+linearization point.
 
 ## 5. Interaction state machine
 
@@ -103,11 +142,11 @@ Admitted → Validating → Invoking → WaitingCompletion → Observing → Ter
 
 | State | Work | Exit |
 |---|---|---|
-| `Validating` | Re-resolve the target by `AuthorKey`/`NodeRef`, check capability availability and preconditions; no side effects | `Rejected` (no E3) or advance |
-| `Invoking` | Take the before-cut (E3 EffectPermit when recording, [guarantees.md](guarantees.md) §5.3), then issue the adapter effect request | advance |
-| `WaitingCompletion` | Await the completion evidence required by the bound completion profile, as mailbox messages | evidence, fault, or cancellation |
-| `Observing` | Materialize the after observation, evaluate the capability postcondition (final evaluation embeds in E4) | advance |
-| `Terminal` | Commit terminal to `RecoveryIndex`, append E4 when recording, answer waiters | done |
+| `Validating` | Re-resolve the target by `AuthorKey`/`NodeRef`, check capability availability and preconditions; no side effects | `Rejected` (no E3, codes per [guarantees.md](guarantees.md) §3.5) or advance |
+| `Invoking` | Prepare the effect-permit evidence (E3 when recording, [guarantees.md](guarantees.md) §5.3); only on readiness mint the single-use `EffectPermitToken` and issue the adapter effect request; a preparation fault terminates `Faulted(EvidenceUnavailable)` | advance |
+| `WaitingCompletion` | Await the fence and the completion evidence required by the bound completion profile, as mailbox messages | evidence, fault, or cancellation |
+| `Observing` | Pin the after-observation basis and evaluate the capability postcondition against it (final evaluation embeds in E4); while the postcondition is unresolved, re-pin and re-evaluate with the lane still held. The lane is released on resolution | advance |
+| `Terminal` | Commit terminal to `RecoveryIndex`, commit E4 when recording (an evidence-commit fault fails the recording alone, §7 of [guarantees.md](guarantees.md)), answer waiters, release committed continuations | done |
 
 Rules:
 
@@ -115,8 +154,18 @@ Rules:
   block the owner thread beyond the synchronous adapter execution-time contract.
 - State-dependent rejection in `Validating` terminates with the `E2 + E4,
   effectPermitted=false` shape — no permit, zero effects.
-- Nested submission from inside an effect is refused (`Rejected(ReentrantDispatch)`);
-  follow-up work uses continuations (§8).
+- The executor answers the effect request **synchronously**: `Adopted` or
+  `Refused(faultCode)` ([adapter-conformance.md](adapter-conformance.md) §3). An
+  executor MUST NOT begin any effect before returning `Adopted`; under that rule a
+  synchronous refusal terminates the interaction `Faulted` with
+  `effectStarted = false` — never `Rejected`, because the permit was already granted
+  ([guarantees.md](guarantees.md) §3.1). An executor **exception** cannot prove that
+  rule was honored: the kernel terminates the interaction `Faulted` with a redacted
+  stable code and treats the effect as possibly started (partial effects possible,
+  §3.1) — it MUST NOT claim `effectStarted = false` for a throw.
+- Nested submission from inside an effect is refused (`Rejected(ReentrantDispatch)`)
+  whether it arrives on the executing thread or re-enters through another producer
+  thread during the synchronous executor call; follow-up work uses continuations (§9).
 - Effect handlers MUST NOT branch on `LogicalOrder`, `RequestId`, or the identity
   envelope; replay cannot reproduce them.
 
@@ -130,16 +179,31 @@ Pump(maxTurns, deadline, framePhase) → PumpReport
 
 - The kernel processes at most `maxTurns` turns and returns by `deadline`; it never
   installs its own thread or timer.
-- `framePhase` (e.g. `Update`, `LateUpdate`, or adapter-defined phases) is an input the
-  kernel exposes to completion profiles that need frame fencing (`FrameCommitted`).
+- **Two host-supplied clocks, no ambient clock**
+  ([adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)): semantic time
+  (wait timeouts, retention expiry) advances only with the logical `now` supplied per
+  pump and resolves at pump boundaries; deadline enforcement reads a host-injected
+  monotonic clock at step boundaries. The kernel never reads a system clock, and a
+  monotonicity violation is a fail-fast kernel fault.
+- `framePhase` is a value from the adapter's declared, open phase vocabulary (e.g.
+  `Update`, `LateUpdate`, or adapter-defined phases,
+  [adapter-conformance.md](adapter-conformance.md) §4); the kernel exposes it to
+  completion profiles that need frame fencing (`FrameCommitted`).
 - Per-frame observation work is budgeted: snapshot/delta materialization respects a
   per-pump byte/node budget. Carry-over across pumps is revision-consistent: it
   continues only against a revision-pinned read of the same `SourceRevision`; if the
   pinned revision cannot be retained, materialization restarts, and truncation surfaces
   as `BudgetTruncated` completeness ([observation-state.md](observation-state.md) §4).
-- `PumpReport` states work remaining, so hosts can schedule additional pumps.
-- Adapters declare their synchronous execution-time bound; the TCK enforces it. A pump
-  on the engine main thread therefore has a computable worst-case occupancy:
+- `PumpReport` states, at minimum: turns executed, whether immediately processable
+  work remains, per-class queue depths, whether the kernel awaits an adapter
+  completion, and which declared frame phase (if any) it awaits — so a host can both
+  schedule additional pumps and know when a pump without that phase cannot make
+  progress. The report MUST be truthful: any drive-until-quiescent loop built on it
+  MUST itself be bounded (e.g. a maximum frame count).
+- Adapters declare their synchronous execution-time bound; it is normative — the TCK
+  enforces its logical form and tier 3 measures wall clock
+  ([adapter-conformance.md](adapter-conformance.md) §4). A pump on the engine main
+  thread therefore has a computable worst-case occupancy:
   `maxTurns × (step bound + adapter sync bound)`.
 
 ## 7. Multi-actor arbitration
