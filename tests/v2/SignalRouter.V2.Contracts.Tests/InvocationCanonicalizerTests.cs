@@ -101,6 +101,21 @@ public sealed class InvocationCanonicalizerTests
     }
 
     [Test]
+    public void SeparatorCharactersInValuesCannotForgeCollisions()
+    {
+        // Length framing makes the canonical form injective even when a value
+        // embeds the record/field separators a naive encoding would rely on.
+        var forged = Canonicalize(Payload(
+            new NamedField("value", FieldValue.Of("x\u001etimes\u001fi\u001f2"))));
+        var genuine = Canonicalize(Payload(
+            new NamedField("value", FieldValue.Of("x")),
+            new NamedField("times", FieldValue.Of(2L))));
+
+        Assert.That(forged.Fingerprint, Is.Not.EqualTo(genuine.Fingerprint));
+        Assert.That(forged.Arguments, Is.Not.EqualTo(genuine.Arguments));
+    }
+
+    [Test]
     public void PayloadFieldNamesAreUnique()
     {
         AssertEx.Throws<ArgumentException>(() => _ = Payload(

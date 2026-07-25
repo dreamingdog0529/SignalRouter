@@ -45,10 +45,10 @@ namespace SignalRouter.V2.Contracts
     /// </summary>
     public static class InvocationCanonicalizer
     {
-        // ASCII unit/record separators keep the canonical form unambiguous without
-        // escaping: neither may appear in identifiers (ContractGrammar bans control
-        // characters), and field values are length-free because fields are
-        // separator-delimited.
+        // Separators structure the canonical form; every variable text segment is
+        // additionally LENGTH-FRAMED ("<length>:<text>") because field VALUES are
+        // arbitrary strings that may themselves contain the separators — framing is
+        // what makes distinct payloads collision-free by construction.
         private const char FieldSeparator = '\u001f';
         private const char RecordSeparator = '\u001e';
 
@@ -90,20 +90,23 @@ namespace SignalRouter.V2.Contracts
             var argumentDigest = new ArgumentDigest(Sha256Hex(argumentsSection));
 
             var builder = new StringBuilder();
-            builder.Append("capability").Append(FieldSeparator)
-                .Append(contract.Id.Value).Append(FieldSeparator)
+            builder.Append("capability").Append(FieldSeparator);
+            AppendFramed(builder, contract.Id.Value);
+            builder.Append(FieldSeparator)
                 .Append(contract.Version.Major.ToString(CultureInfo.InvariantCulture)).Append('.')
                 .Append(contract.Version.Minor.ToString(CultureInfo.InvariantCulture))
                 .Append(RecordSeparator);
             builder.Append("target").Append(FieldSeparator);
             if (target.HasAuthorKey)
             {
-                builder.Append("key").Append(FieldSeparator).Append(target.AuthorKey!.Value.Value);
+                builder.Append("key").Append(FieldSeparator);
+                AppendFramed(builder, target.AuthorKey!.Value.Value);
             }
             else
             {
-                builder.Append("node").Append(FieldSeparator)
-                    .Append(target.Node.Incarnation.Value).Append('/')
+                builder.Append("node").Append(FieldSeparator);
+                AppendFramed(builder, target.Node.Incarnation.Value);
+                builder.Append('/')
                     .Append(target.Node.Value.ToString(CultureInfo.InvariantCulture));
             }
 
@@ -176,7 +179,8 @@ namespace SignalRouter.V2.Contracts
             {
                 payload.TryGetValue(name, out var value);
                 schema.TryGetField(name, out var declared);
-                builder.Append(name).Append(FieldSeparator);
+                AppendFramed(builder, name);
+                builder.Append(FieldSeparator);
                 if (declared.Sensitivity == Sensitivity.Sensitive &&
                     value.Kind != FieldValueKind.Null)
                 {
@@ -185,14 +189,21 @@ namespace SignalRouter.V2.Contracts
                 }
                 else
                 {
-                    builder.Append(FieldKindTag(value.Kind)).Append(FieldSeparator)
-                        .Append(value.ToString());
+                    builder.Append(FieldKindTag(value.Kind)).Append(FieldSeparator);
+                    AppendFramed(builder, value.ToString());
                 }
 
                 builder.Append(RecordSeparator);
             }
 
             return builder.ToString();
+        }
+
+        private static void AppendFramed(StringBuilder builder, string text)
+        {
+            builder.Append(text.Length.ToString(CultureInfo.InvariantCulture))
+                .Append(':')
+                .Append(text);
         }
 
         private static string FieldKindTag(FieldValueKind kind)

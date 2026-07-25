@@ -81,31 +81,6 @@ namespace SignalRouter.V2.AdapterSdk
         public AuthorKey? AuthorKey { get; }
     }
 
-    /// <summary>An immutable state-source document: uniquely named typed fields.</summary>
-    public sealed class SourceDocument
-    {
-        public SourceDocument(ValueList<NamedField> fields)
-        {
-            if (fields == null)
-            {
-                throw new ArgumentNullException(nameof(fields));
-            }
-
-            var seen = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
-            foreach (var field in fields)
-            {
-                if (!seen.Add(field.Name))
-                {
-                    throw new ArgumentException("Document field names must be unique.", nameof(fields));
-                }
-            }
-
-            Fields = fields;
-        }
-
-        public ValueList<NamedField> Fields { get; }
-    }
-
     /// <summary>
     /// One revision-bound source publication (observation-state.md §7.1): an
     /// immutable typed document with its causation, adopted atomically at the

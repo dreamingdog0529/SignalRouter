@@ -196,6 +196,37 @@ namespace SignalRouter.V2.AdapterSdk
                 }
             }
 
+            // Every supported profile has exactly one latency row, and no row is an
+            // orphan — the TCK and host rely on a declared MaxFrames for each.
+            var supportedProfiles = new HashSet<CompletionProfileRef>();
+            foreach (var support in capabilities)
+            {
+                foreach (var profile in support.Profiles)
+                {
+                    supportedProfiles.Add(profile);
+                }
+            }
+
+            foreach (var profile in supportedProfiles)
+            {
+                if (!latencyProfiles.Contains(profile))
+                {
+                    throw new ArgumentException(
+                        "Every supported completion profile requires a latency bound.",
+                        nameof(completionLatencies));
+                }
+            }
+
+            foreach (var profile in latencyProfiles)
+            {
+                if (!supportedProfiles.Contains(profile))
+                {
+                    throw new ArgumentException(
+                        "A latency bound must reference a supported completion profile.",
+                        nameof(completionLatencies));
+                }
+            }
+
             if (inputClassifications == null)
             {
                 throw new ArgumentNullException(nameof(inputClassifications));

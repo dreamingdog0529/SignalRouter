@@ -42,6 +42,15 @@ namespace SignalRouter.V2.AdapterSdk
     /// </summary>
     public interface IEffectExecutor
     {
+        /// <summary>
+        /// Pump thread, once, before the runtime starts: the completion sink the
+        /// executor reports fences and completions through for every adopted permit.
+        /// </summary>
+        void Attach(IEffectCompletionSink sink);
+
+        /// <summary>Pump thread, at incarnation teardown.</summary>
+        void Detach();
+
         /// <summary>Pump thread; synchronous adopt-or-refuse within the declared bound.</summary>
         EffectAdoption Execute(EffectRequest request);
 

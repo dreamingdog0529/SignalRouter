@@ -110,5 +110,32 @@ public sealed class PredicateTypeCheckTests
         Assert.That(
             operandTooLong.Errors.Any(e => e.Kind == PredicateValidationErrorKind.BoundViolation),
             Is.True);
+
+        // Secret references honor the configured operand bound too.
+        var secretTooLong = PredicateTypeChecker.Check(
+            Define(new StringMatchExpression(
+                new FieldPath("nodes/save/attributes/label"),
+                StringMatchKind.Contains,
+                PredicateOperand.OfSecret(new SecretReference("secret-longer-than-four")))),
+            Catalog,
+            tinyBounds);
+        Assert.That(
+            secretTooLong.Errors.Any(e => e.Kind == PredicateValidationErrorKind.BoundViolation),
+            Is.True);
+    }
+
+    [Test]
+    public void AMaximumLengthUnknownPathStillValidatesInsteadOfThrowing()
+    {
+        var longPath = new FieldPath("nodes/" + new string('x', 1018));
+        Assert.That(longPath.Value.Length, Is.EqualTo(1024));
+
+        var result = PredicateTypeChecker.Check(
+            Define(new ExistsExpression(longPath)),
+            Catalog,
+            PredicateStructuralBounds.Default);
+
+        Assert.That(result.IsValid, Is.False);
+        Assert.That(result.Errors[0].Kind, Is.EqualTo(PredicateValidationErrorKind.UnknownField));
     }
 }

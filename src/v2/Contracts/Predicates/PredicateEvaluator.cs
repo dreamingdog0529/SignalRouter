@@ -134,8 +134,11 @@ namespace SignalRouter.V2.Contracts
                                     return Verdict.Of(subject.StartsWith(operand, StringComparison.Ordinal));
                                 case StringMatchKind.Suffix:
                                     return Verdict.Of(subject.EndsWith(operand, StringComparison.Ordinal));
-                                default:
+                                case StringMatchKind.Contains:
                                     return Verdict.Of(subject.IndexOf(operand, StringComparison.Ordinal) >= 0);
+                                default:
+                                    throw new InvalidOperationException(
+                                        "Unknown string-match kind; construction validates the allowlist.");
                             }
                         }
 
@@ -229,8 +232,11 @@ namespace SignalRouter.V2.Contracts
                     return Verdict.Of(comparison <= 0);
                 case ComparisonOperator.Gt:
                     return Verdict.Of(comparison > 0);
-                default:
+                case ComparisonOperator.Ge:
                     return Verdict.Of(comparison >= 0);
+                default:
+                    throw new InvalidOperationException(
+                        "Unknown comparison operator; construction validates the allowlist.");
             }
         }
 

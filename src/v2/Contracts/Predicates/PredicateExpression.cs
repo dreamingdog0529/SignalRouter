@@ -78,6 +78,12 @@ namespace SignalRouter.V2.Contracts
                 throw new ArgumentException("Comparison requires a non-default path.", nameof(path));
             }
 
+            if (@operator < ComparisonOperator.Eq || @operator > ComparisonOperator.Ge)
+            {
+                throw new ArgumentException(
+                    "Unknown comparison operator; the allowlist is closed.", nameof(@operator));
+            }
+
             if (operand.IsDefault)
             {
                 throw new ArgumentException("Comparison requires a non-default operand.", nameof(operand));
@@ -116,6 +122,12 @@ namespace SignalRouter.V2.Contracts
                 throw new ArgumentException("StringMatch requires a non-default path.", nameof(path));
             }
 
+            if (match < StringMatchKind.Prefix || match > StringMatchKind.Contains)
+            {
+                throw new ArgumentException(
+                    "Unknown string-match kind; the allowlist is closed.", nameof(match));
+            }
+
             if (operand.Kind != PredicateOperandKind.String &&
                 operand.Kind != PredicateOperandKind.SecretReference)
             {
@@ -147,6 +159,12 @@ namespace SignalRouter.V2.Contracts
             if (path.IsDefault)
             {
                 throw new ArgumentException("Count requires a non-default path.", nameof(path));
+            }
+
+            if (@operator < ComparisonOperator.Eq || @operator > ComparisonOperator.Ge)
+            {
+                throw new ArgumentException(
+                    "Unknown comparison operator; the allowlist is closed.", nameof(@operator));
             }
 
             if (operand < 0)
@@ -184,6 +202,12 @@ namespace SignalRouter.V2.Contracts
             {
                 throw new ArgumentException(
                     "Boolean composition requires at least two operands.", nameof(operands));
+            }
+
+            if (@operator < BooleanOperator.And || @operator > BooleanOperator.Or)
+            {
+                throw new ArgumentException(
+                    "Unknown boolean operator; the allowlist is closed.", nameof(@operator));
             }
 
             Operator = @operator;

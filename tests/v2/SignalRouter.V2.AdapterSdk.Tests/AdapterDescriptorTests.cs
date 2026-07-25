@@ -79,4 +79,19 @@ public sealed class AdapterDescriptorTests
         AssertEx.Throws<ArgumentOutOfRangeException>(() => _ = new CompletionLatencyBound(
             SdkTestData.FrameCommitted, 0));
     }
+
+    [Test]
+    public void EverySupportedProfileHasExactlyOneLatencyBound()
+    {
+        // A supported profile without a declared MaxFrames leaves the TCK and host
+        // with nothing to enforce; an orphan bound declares latency for nothing.
+        AssertEx.Throws<ArgumentException>(() => Build(
+            latencies: ValueList<CompletionLatencyBound>.Empty));
+        AssertEx.Throws<ArgumentException>(() => Build(
+            latencies: ValueList<CompletionLatencyBound>.From(new[]
+            {
+                new CompletionLatencyBound(SdkTestData.Applied, 1),
+                new CompletionLatencyBound(SdkTestData.FrameCommitted, 2),
+            })));
+    }
 }

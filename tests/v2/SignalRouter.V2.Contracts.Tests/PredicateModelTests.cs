@@ -71,6 +71,20 @@ public sealed class PredicateModelTests
     }
 
     [Test]
+    public void TheOperatorAllowlistIsClosedAtConstruction()
+    {
+        // A decoder cannot smuggle an undefined operator into the AST.
+        AssertEx.Throws<ArgumentException>(() => _ = new ComparisonExpression(
+            new FieldPath("nodes/a/attributes/x"), (ComparisonOperator)99, PredicateOperand.Of(1L)));
+        AssertEx.Throws<ArgumentException>(() => _ = new StringMatchExpression(
+            new FieldPath("nodes/a/attributes/x"), (StringMatchKind)99, PredicateOperand.Of("v")));
+        AssertEx.Throws<ArgumentException>(() => _ = new CountExpression(
+            new FieldPath("sources/s/items"), (ComparisonOperator)99, 1));
+        AssertEx.Throws<ArgumentException>(() => _ = new BooleanExpression(
+            (BooleanOperator)99, ValueList<PredicateExpression>.From(new[] { Leaf(), Leaf("b/c") })));
+    }
+
+    [Test]
     public void FieldPathsAreSegmentedAndRejectMalformedShapes()
     {
         var path = new FieldPath("sources/inventory/items");

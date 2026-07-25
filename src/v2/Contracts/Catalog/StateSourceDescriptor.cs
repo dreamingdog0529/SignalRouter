@@ -106,22 +106,56 @@ namespace SignalRouter.V2.Contracts
         public int MaxDocumentBytes { get; }
     }
 
-    /// <summary>Binds a stable source key to its contract and class (semantic-model.md §8).</summary>
+    /// <summary>
+    /// Binds a stable source key to its contract and class (semantic-model.md §8).
+    /// A revision-bound source receives documents through kernel publication; a
+    /// sampled source supplies its reader and declared freshness bound
+    /// (observation-state.md §7.1) — staleness surfaces as `Stale` completeness.
+    /// </summary>
     public sealed class StateSourceRegistration
     {
         public StateSourceRegistration(
             StateSourceKey key,
             StateSourceContractDescriptor descriptor,
-            StateSourceClass sourceClass)
+            StateSourceClass sourceClass,
+            ISampledSourceReader? sampledReader = null,
+            long? freshnessBoundLogicalTime = null)
         {
             if (key.IsDefault)
             {
                 throw new ArgumentException("Registration requires a non-default key.", nameof(key));
             }
 
+            if (sourceClass == StateSourceClass.Sampled)
+            {
+                if (sampledReader == null)
+                {
+                    throw new ArgumentException(
+                        "A sampled source requires its reader.", nameof(sampledReader));
+                }
+
+                if (!freshnessBoundLogicalTime.HasValue || freshnessBoundLogicalTime.Value < 1)
+                {
+                    throw new ArgumentException(
+                        "A sampled source requires a positive declared freshness bound.",
+                        nameof(freshnessBoundLogicalTime));
+                }
+            }
+            else
+            {
+                if (sampledReader != null || freshnessBoundLogicalTime.HasValue)
+                {
+                    throw new ArgumentException(
+                        "A revision-bound source receives documents through publication, not a reader.",
+                        nameof(sampledReader));
+                }
+            }
+
             Key = key;
             Descriptor = descriptor ?? throw new ArgumentNullException(nameof(descriptor));
             SourceClass = sourceClass;
+            SampledReader = sampledReader;
+            FreshnessBoundLogicalTime = freshnessBoundLogicalTime;
         }
 
         public StateSourceKey Key { get; }
@@ -129,5 +163,11 @@ namespace SignalRouter.V2.Contracts
         public StateSourceContractDescriptor Descriptor { get; }
 
         public StateSourceClass SourceClass { get; }
+
+        /// <summary>Present exactly for sampled sources.</summary>
+        public ISampledSourceReader? SampledReader { get; }
+
+        /// <summary>Present exactly for sampled sources; host logical-time units.</summary>
+        public long? FreshnessBoundLogicalTime { get; }
     }
 }

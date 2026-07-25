@@ -77,6 +77,40 @@ public sealed class CatalogDescriptorTests
     }
 
     [Test]
+    public void SampledSourcesRequireAReaderAndFreshnessBound()
+    {
+        // observation-state.md §7.1: sampled sources are read at materialization
+        // time and carry a declared freshness bound; revision-bound sources have
+        // neither.
+        var descriptor = new StateSourceContractDescriptor(
+            new StateSourceContractRef(new StateSourceContractId("clock"), new ContractVersion(1, 0)),
+            ValueList<SourceFieldSchema>.Empty,
+            agentVisible: false,
+            recordVisible: false,
+            maxDocumentBytes: 64);
+        var reader = new FixedReader();
+
+        var sampled = new StateSourceRegistration(
+            new StateSourceKey("clock"), descriptor, StateSourceClass.Sampled,
+            sampledReader: reader, freshnessBoundLogicalTime: 100);
+        Assert.That(sampled.SampledReader, Is.SameAs(reader));
+
+        AssertEx.Throws<ArgumentException>(() => _ = new StateSourceRegistration(
+            new StateSourceKey("clock"), descriptor, StateSourceClass.Sampled));
+        AssertEx.Throws<ArgumentException>(() => _ = new StateSourceRegistration(
+            new StateSourceKey("clock"), descriptor, StateSourceClass.Sampled,
+            sampledReader: reader, freshnessBoundLogicalTime: 0));
+        AssertEx.Throws<ArgumentException>(() => _ = new StateSourceRegistration(
+            new StateSourceKey("clock"), descriptor, StateSourceClass.RevisionBound,
+            sampledReader: reader, freshnessBoundLogicalTime: 100));
+    }
+
+    private sealed class FixedReader : ISampledSourceReader
+    {
+        public SampledDocument? Read() => null;
+    }
+
+    [Test]
     public void StateSourceDescriptorEnforcesUniqueFieldsAndPositiveCeiling()
     {
         AssertEx.Throws<ArgumentException>(() => _ = new StateSourceContractDescriptor(

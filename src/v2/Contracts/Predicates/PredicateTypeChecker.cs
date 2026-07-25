@@ -22,9 +22,18 @@ namespace SignalRouter.V2.Contracts
                 throw new ArgumentException("An error requires a non-default clause id.", nameof(clause));
             }
 
+            if (string.IsNullOrEmpty(description))
+            {
+                throw new ArgumentException("An error requires a description.", nameof(description));
+            }
+
             Clause = clause;
             Kind = kind;
-            Description = ContractGrammar.ValidateIdentifier(description, nameof(description));
+            // Diagnostics embed caller-chosen values (e.g. a maximum-length field
+            // path), so they are truncated to the grammar bound instead of rejected.
+            Description = description.Length <= ContractGrammar.MaxIdentifierLength
+                ? description
+                : description.Substring(0, ContractGrammar.MaxIdentifierLength);
         }
 
         public ClauseId Clause { get; }
@@ -235,8 +244,10 @@ namespace SignalRouter.V2.Contracts
             PredicateStructuralBounds bounds,
             List<PredicateValidationError> errors)
         {
-            if (operand.Kind == PredicateOperandKind.String &&
-                operand.Literal.AsString.Length > bounds.MaxOperandLength)
+            var length =
+                operand.Kind == PredicateOperandKind.String ? operand.Literal.AsString.Length :
+                operand.Kind == PredicateOperandKind.SecretReference ? operand.Secret.Value.Length : 0;
+            if (length > bounds.MaxOperandLength)
             {
                 errors.Add(new PredicateValidationError(
                     clause, PredicateValidationErrorKind.BoundViolation,
