@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>SignalRouter.V2.Contracts</AssemblyName>
+    <RootNamespace>SignalRouter.V2.Contracts</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- Design-phase module (docs/v2): not packaged until the ADR 0007 distribution
+         decision. The BCL-only axiom forbids every PackageReference in this project. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>
