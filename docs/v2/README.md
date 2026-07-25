@@ -22,7 +22,7 @@ with v1's API, protocol, or artifacts, and this set renumbers its ADRs from 0001
 ## Normative specs
 
 1. [spec/guarantees.md](spec/guarantees.md) — outcome taxonomies, determinism tiers,
-   ReplayEvidence cuts E1–E7, terminal shapes, the failure matrix
+   ReplayEvidence cuts E1–E8, terminal shapes, the failure matrix
 2. [spec/semantic-model.md](spec/semantic-model.md) — nodes, roles vs. capabilities,
    three-way identity, the identifier family, the `ContentId` contract
 3. [spec/kernel-execution.md](spec/kernel-execution.md) — single-owner kernel, lanes,

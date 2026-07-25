@@ -8,7 +8,7 @@
 
 This spec defines the recording artifact (lanes, commit order, manifest), the
 `ReplayComparisonProfile`, the three replay modes, and the replay trust boundary. The
-evidence cut set (E1–E7), durability rules, terminal shapes, and failure matrix are
+evidence cut set (E1–E8), durability rules, terminal shapes, and failure matrix are
 normative in [guarantees.md](guarantees.md) and are not restated here. The key words
 MUST, MUST NOT, SHOULD, and MAY follow RFC 2119.
 

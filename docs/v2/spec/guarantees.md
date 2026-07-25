@@ -95,7 +95,7 @@ Every comparison performed under a `ReplayComparisonProfile`
 
 A replay run stops at the first non-`Equal` comparison and reports it; `Incomparable`
 MUST NOT be reported as `Diverged`. A live assertion's `Unevaluable(reason)` outcome
-([verification.md](verification.md) §3) maps to `Incomparable(reason)` at replay —
+([verification.md](verification.md) §2.3) maps to `Incomparable(reason)` at replay —
 `Incomparable` exists only on the replay side and is never a recorded expectation.
 
 ### 3.4 Query answers
