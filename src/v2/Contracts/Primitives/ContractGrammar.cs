@@ -9,20 +9,20 @@ namespace SignalRouter.V2.Contracts
     /// reason codes are stable, case-sensitive code-like identifiers
     /// (guarantees.md §3.5).
     /// </summary>
-    internal static class ContractGrammar
+    public static class ContractGrammar
     {
         /// <summary>Upper bound for free-form identifier values.</summary>
-        internal const int MaxIdentifierLength = 1024;
+        public const int MaxIdentifierLength = 1024;
 
         /// <summary>Upper bound for reason and evidence-kind codes.</summary>
-        internal const int MaxCodeLength = 128;
+        public const int MaxCodeLength = 128;
 
         /// <summary>
         /// Validates a free-form identifier: non-null, non-empty, bounded, and free of
         /// control characters. The grammar is deliberately permissive — author keys and
         /// request identifiers are caller-chosen — but never unbounded.
         /// </summary>
-        internal static string ValidateIdentifier(string value, string parameterName)
+        public static string ValidateIdentifier(string value, string parameterName)
         {
             if (value == null)
             {
@@ -59,7 +59,7 @@ namespace SignalRouter.V2.Contracts
         /// restricted to ASCII letters and digits (guarantees.md §3.5 codes are
         /// code-like identifiers such as <c>SizeLimit</c>).
         /// </summary>
-        internal static string ValidateCode(string value, string parameterName)
+        public static string ValidateCode(string value, string parameterName)
         {
             if (value == null)
             {
@@ -96,7 +96,7 @@ namespace SignalRouter.V2.Contracts
         }
 
         /// <summary>Combines hash codes without depending on System.HashCode ordering guarantees across runtimes.</summary>
-        internal static int CombineHashes(int first, int second)
+        public static int CombineHashes(int first, int second)
         {
             unchecked
             {
