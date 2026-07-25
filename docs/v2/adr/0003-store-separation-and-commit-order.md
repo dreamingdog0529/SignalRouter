@@ -23,8 +23,11 @@ kept apart (wire-owned vs. recording-owned projections).
   `RecordingSink` (non-droppable ReplayEvidence, explicit durability), `StateStore`
   (content-addressed, immutable, pinned/GC).
 - **Shared vocabulary stops at the in-memory event algebra**
-  (OperationId/CausationId/IncarnationId/EventKind/LogicalOrder); the four persistent
-  schemas version independently.
+  (OperationId/EventCausation/IncarnationId/EventKind/LogicalOrder — `EventCausation`
+  is the causation union of [observation-state.md](../spec/observation-state.md) §6,
+  not a distinct identifier; the listing originally said "CausationId" and was
+  corrected when the algebra was typed); the four persistent schemas version
+  independently.
 - **RecordingSink commits from kernel authoritative transitions**, never as a
   subscriber of the lossy trace.
 - **Dual-write order is StateStore-first**: blob durable + pinned → evidence appended →

@@ -36,30 +36,58 @@ Adapters never touch kernel state directly; everything crosses the mailbox.
 ## 2. Adapter SDK surface
 
 The Adapter SDK is BCL-only ([architecture.md](../architecture.md)). Its contract
-surface (names indicative, shapes normative):
+surface (names indicative, shapes normative — **member-level signatures are carried by
+the versioned `AdapterSdk` assembly**, this spec pins the behavioral obligations):
 
 - `INodeSource` — registration/unregistration, attribute updates, revision reporting;
 - `IEffectExecutor` — receives effect requests `(invocation, NodeRef, permitToken)`,
-  returns adoption synchronously, delivers completion evidence as mailbox messages;
+  returns adoption synchronously, delivers the fence and completion evidence as
+  mailbox messages (§3);
 - `IIngressSource` — emits ManagedIntent submissions and ObservedExternal events;
-- `IPumpHost` — drives `Pump` and supplies frame phases and deadlines;
-- `IReplayEnvironmentFactory` — builds isolated replay runtimes.
+- `IPumpHost` — drives `Pump` and supplies frame phases, deadlines, and the two host
+  clocks ([kernel-execution.md](kernel-execution.md) §6).
 
-All SDK calls declare threading requirements explicitly; the SDK never assumes a
-synchronization context.
+The kernel hands each source its implemented counterpart at attach time: the node
+registry (bootstrap builder before start, receipt-answered control messages after,
+[kernel-execution.md](kernel-execution.md) §4), the ingress sink, and the
+effect-completion sink. `IReplayEnvironmentFactory` (isolated replay runtimes) is
+declared with the recording/replay module, not in the initial SDK surface.
+
+All SDK calls declare threading requirements explicitly in the assembly; the SDK
+never assumes a synchronization context.
 
 ## 3. Effect protocol
 
-An effect request is issued only after the permit ([guarantees.md](guarantees.md)
-§5.3). The executor:
+An effect request carries a kernel-minted, single-use **permit token** and is issued
+only after the permit evidence is ready ([guarantees.md](guarantees.md) §5.3,
+[adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)). The executor:
 
-- MUST adopt or refuse synchronously within its declared sync bound;
-- MUST deliver terminal completion evidence exactly once, as a mailbox message, even
-  after cooperative cancellation;
-- MUST NOT invoke other capabilities re-entrantly from inside an effect (follow-ups are
-  continuations, [kernel-execution.md](kernel-execution.md) §9);
+- MUST adopt or refuse synchronously within its declared sync bound: the answer is
+  `Adopted` or `Refused(faultCode)`; a refusal (or an executor exception) terminates
+  the interaction `Faulted` with `effectStarted = false`;
+- MUST report the **effect fence** (`EffectFenceReached(permit)`) — the point after
+  which the effect can no longer mutate application state — and, separately, deliver
+  terminal completion evidence (`EffectCompletion(permit, resolution)`) **exactly once
+  per permit token**, as mailbox messages, even after cooperative cancellation;
+- MAY omit the fence message only for profiles whose completion entails it
+  (`Applied@1`, `FrameCommitted@1`, `PostconditionSatisfied@1`);
+  `AdapterAcknowledged@1` never implies a fence (§4);
+- MUST NOT invoke other capabilities re-entrantly from inside an effect; follow-up
+  work is **committed as continuations through the completion message**, which carries
+  the parent's ordered continuation declarations
+  ([kernel-execution.md](kernel-execution.md) §9);
 - MUST report faults with a stable application fault code where one exists; exception
   internals never leave the adapter boundary unredacted.
+
+**Permit-token lifecycle (normative):** `issued → adopted → fenced → completed`.
+Refusal ends the lifecycle at `adopted`; profiles with completion-implied fences may
+collapse `fenced` into `completed`. A duplicate fence or completion message for a
+token, a message for an unknown token, and a message carrying a token from a previous
+`RuntimeIncarnationId` are protocol violations: the kernel rejects the message,
+traces it, and never lets it alter interaction state. The guarantee this protocol
+provides is at-most-once dispatch within an incarnation plus exactly-once completion
+messaging — never effect-exactly-once across crashes
+([guarantees.md](guarantees.md) §6.1).
 
 ## 4. Completion profiles
 
@@ -78,10 +106,22 @@ binding in E1 so replay compares like against like across engines. Adapters MUST
 invent bespoke termination semantics for standard capabilities; custom capabilities
 define their profiles in their own namespace.
 
-Adapters also declare their synchronous execution-time bound and their maximum
-effect-completion latency per profile; the TCK enforces both, which is what makes the
-kernel's control-lane responsiveness claim real
-([kernel-execution.md](kernel-execution.md) §2).
+`AdapterAcknowledged@1` never implies the effect fence — it exists precisely for
+effects the engine cannot fence. A **mutating** capability therefore MUST NOT be bound
+to `AdapterAcknowledged@1` unless the adapter still reports a genuine fence for it; an
+effect that can provide neither acknowledgment-with-fence nor any stronger profile is
+not a conformant `ManagedIntent` mutation and belongs to `ObservedExternal` (§6). The
+TCK checks declared bindings against this rule.
+
+Adapters also declare, in their **adapter descriptor**: their frame-phase vocabulary
+and fence phase; their synchronous execution-time bound (a normative logical
+obligation — adopt-or-refuse without blocking waits — plus an advisory wall-clock
+value); and their maximum effect-completion latency per profile, declared as a
+**frame/pump count** (`MaxFrames`). The TCK enforces the logical forms deterministically
+(driving declared frame counts on a synthetic host); tier 3 measures the wall-clock
+forms on the real engine. Together these keep the kernel's control-lane responsiveness
+claim real ([kernel-execution.md](kernel-execution.md) §2,
+[adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)).
 
 ## 5. Distribution constraints
 
@@ -148,6 +188,13 @@ predicate contract obligations (purity, bounds, no ambient inputs —
 [verification.md](verification.md) §2.2). The TCK runs against the in-process
 reference adapter in CI (fast feedback) — and that run proves **SDK contract
 compliance only**.
+
+The TCK is versioned, and each version documents exactly which of the obligations
+above it covers; coverage MAY be staged while the corresponding modules land. A
+required obligation a TCK version cannot yet check is reported
+**skipped-with-reason**, and any such skip makes the run's aggregate answer
+`Incomplete` — never `Passed`. A run with required skips MUST NOT be presented as
+tier-2 completion or SDK conformance; it demonstrates only the checked subset.
 
 ### 7.3 Engine integration and distribution tests
 

@@ -98,6 +98,38 @@ Exhaustion behavior is the guarantees taxonomy — refuse admission, degrade to
 `Incomplete`, or mark trace gaps — never silent drop, never unbounded growth
 ([guarantees.md](guarantees.md) §8).
 
+### 5.1 Resource profiles
+
+Defaults are carried by a **versioned resource profile**; `default@1` below is the
+design-time default ([adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)).
+Conformance (the TCK) verifies that **configured** bounds are enforced, not that these
+specific numbers are in force — tuning a default is a profile revision, not a
+conformance change. Keys owned by modules not yet implemented are **reserved**: they
+are named here and receive their defaults when the owning module lands.
+
+| Key (`default@1`) | Value | Notes |
+|---|---|---|
+| `Mailbox.ControlCapacity` | 4096 | control overflow is a kernel fault; sized for worst case |
+| `Mailbox.MaxOutstandingPostFenceOperations` | 64 | separate accounting so fence/completion messages of admitted work can never be starved by the control bound |
+| `Mailbox.MutationCapacity` | 256 | overflow refuses admission (`Rejected(CapacityExhausted)`) |
+| `Mailbox.SourcePublicationCapacity` | 512 entries / 16 MiB aggregate / 16 pending per source | overflow answers the publisher with an explicit refusal; the pending-per-source cap is also the clockless publication-rate bound |
+| `Pump.DefaultMaxTurns` | 64 | host-overridable per pump |
+| `Pump.ObservationBudget` | 256 KiB / 2048 nodes per pump | reserved — consumed by the observation module |
+| `RecoveryIndex.PendingCapacity` | 4096 | pending entries are non-evictable; at capacity new admissions are refused |
+| `RecoveryIndex.TerminalRetention` | 300 s (logical clock) | terminals expire only by retention; if unexpired terminals reach `RecoveryIndex.TerminalCapacity` (4096), new admissions are refused — existing entries are never evicted ([guarantees.md](guarantees.md) §8) |
+| `KernelTrace.RingCapacity` | 8192 events / 4 MiB | loss permitted, gap-marked |
+| `Predicates.MaxAstDepth` | 16 | |
+| `Predicates.MaxAstNodes` | 256 | |
+| `Predicates.MaxOperandLength` | 4096 UTF-16 code units | |
+| `Predicates.MaxBatchSize` | 32 | |
+| `Predicates.MaxEvaluationSteps` | 65536 | the per-evaluation cost bound |
+| `Predicates.MaxRegisteredContracts` | 1024 | |
+| `StateSources.MaxDocumentBytes` | 1 MiB | a source contract may lower, never raise |
+| `StateSources.MaxCollectionCardinality` | 4096 | |
+| `Kernel.MaxArmedWaits` | 256 | |
+| `Kernel.MaxContinuationsPerParent` | 32 | |
+| Reserved | — | `RecordingSink.*` (declared at open), `StateStore.*` (blob/chain/total), `Protocol.*` (message/slot caps), `Timeline.Retention`, `ObservationViews.*` (per-field/byte ceilings) |
+
 ## 6. Artifact trust
 
 Replay artifacts execute real capabilities and are treated as untrusted input:

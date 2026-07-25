@@ -44,6 +44,12 @@ deliberately distinct and unchanged:
 | Capability-contract postcondition | evaluated during `Observing`; determines the terminal | embedded in E4 ([guarantees.md](guarantees.md) §5.4) |
 | Standalone assertion | atomic evaluation | single E8 cut ([guarantees.md](guarantees.md) §5.10) |
 
+Armed waits re-evaluate at kernel turn boundaries, and only when the visible
+`SourceRevision` has advanced past the last evaluated revision; timeout checks occur
+once per pump against the host-supplied logical clock
+([kernel-execution.md](kernel-execution.md) §6). Sub-pump timeout precision is not
+promised — the kernel owns no timer.
+
 ### 2.2 Predicate contracts
 
 A predicate is a **declarative, snapshot-local, pure** expression over one observation
@@ -84,6 +90,22 @@ is `Unevaluable(Redacted)` or an authorization rejection — never `False`
 the live side; it is the replay-side mapping of `Unevaluable`
 ([guarantees.md](guarantees.md) §3.3).
 
+**Composition is three-valued.** When a sub-expression answers `Unevaluable`, boolean
+composition propagates it unless an evaluable sibling already determines the result:
+
+| Expression | Answer |
+|---|---|
+| `False AND Unevaluable` | `False` |
+| `True AND Unevaluable` | `Unevaluable` |
+| `True OR Unevaluable` | `True` |
+| `False OR Unevaluable` | `Unevaluable` |
+| `NOT Unevaluable` | `Unevaluable` |
+
+Evaluation order never changes the answer: composition is commutative over these
+rules, and a determined result carries the reason-free determined value while an
+undetermined one carries the first `Unevaluable` reason in clause order. This is what
+makes "never `False` from a hidden value" compositional rather than clause-local.
+
 ## 3. Assertions
 
 ### 3.1 Semantics
@@ -104,8 +126,15 @@ The caller chooses the evaluation basis:
   slip between the invocation's completion and a later `current` read.
 
 An **assertion batch** evaluates multiple predicates against one pinned materialization
-atomically; individual sequential tool calls give no same-revision guarantee and MUST
-NOT be advertised as equivalent.
+atomically: the kernel takes a single revision-pinned read on the control lane and
+evaluates every predicate of the batch against it within one turn. Individual
+sequential tool calls give no same-revision guarantee and MUST NOT be advertised as
+equivalent.
+
+The `afterRequestId` basis is retained no longer than the `RecoveryIndex` terminal
+retention window ([guarantees.md](guarantees.md) §8): an assertion against an expired
+basis answers `Unevaluable(Incompleteness)` — the referenced materialization region is
+no longer available — never a fresh-state evaluation silently substituted.
 
 ### 3.3 Results and evidence
 

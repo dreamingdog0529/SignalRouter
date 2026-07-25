@@ -140,8 +140,23 @@ persistence semantics**. What is shared is only the in-memory event algebra:
 
 ```text
 SemanticEventAlgebra (BCL types, no serialization)
-  OperationId · CausationId · RuntimeIncarnationId · EventKind · LogicalOrder
+  OperationId · EventCausation · RuntimeIncarnationId · EventKind · LogicalOrder
 ```
+
+- **`EventCausation`** is not a new identifier: it is the union already implied by
+  §7.2 — caused by a `RequestId`, caused externally (with a source hint), or uncaused
+  (`None`). A continuation's causal binding (`ParentRequestId + ContinuationOrdinal +
+  fingerprint`, [semantic-model.md](semantic-model.md) §6) maps into it without loss:
+  the causing `RequestId` is the parent, and the ordinal/fingerprint remain on the
+  admission envelope.
+- **`EventKind`** is an open, kernel-owned vocabulary, non-normative for the
+  persistent schemas. The reserved minimum set: `Admitted`, `StateTransition`,
+  `EffectPermitted`, `EffectFenceReached`, `TerminalCommitted`,
+  `SourcePublicationAdopted`, `PredicateArmed`, `PredicateResolved`,
+  `AssertionEvaluated`, `HumanIntentBlocked`, `ContaminationObserved`,
+  `IncarnationLifecycle`, `TraceGap`. `RequestId` and `OperationId` participation is
+  per kind — mutation events carry a `RequestId`, operation events an `OperationId`;
+  neither is universally required.
 
 | Store | Semantics | Persistent schema |
 |---|---|---|

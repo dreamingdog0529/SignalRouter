@@ -51,6 +51,7 @@ with v1's API, protocol, or artifacts, and this set renumbers its ADRs from 0001
 7. [adr/0007-codec-and-package-boundaries.md](adr/0007-codec-and-package-boundaries.md)
 8. [adr/0008-mcp-verification-surface.md](adr/0008-mcp-verification-surface.md)
 9. [adr/0009-evidence-ordering-and-open-reason-vocabularies.md](adr/0009-evidence-ordering-and-open-reason-vocabularies.md)
+10. [adr/0010-effect-protocol-and-kernel-host-contract.md](adr/0010-effect-protocol-and-kernel-host-contract.md)
 
 ## Provenance
 

@@ -51,7 +51,11 @@ Infrastructure leaves
 Rules: dependencies point up this list, never sideways into an engine; JSON types never
 appear in Contracts/Kernel/AdapterSdk; distribution packaging may bundle logical
 modules, chosen by adapter restore burden, without changing these boundaries
-([adr/0007](adr/0007-codec-and-package-boundaries.md)).
+([adr/0007](adr/0007-codec-and-package-boundaries.md)). One additional edge exists
+inside the core: `Kernel` depends on `AdapterSdk`, which is a pure shape assembly
+(interfaces and message/descriptor types over Contracts, zero behavior) — the kernel
+calls `IEffectExecutor` and hands adapters its implemented counterpart sinks
+([adr/0010](adr/0010-effect-protocol-and-kernel-host-contract.md)).
 
 ## 3. Main data flows
 
