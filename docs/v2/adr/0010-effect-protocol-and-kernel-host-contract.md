@@ -55,24 +55,30 @@ why and what was rejected.
    protocol makes is **at-most-once dispatch within an incarnation plus exactly-once
    completion messaging** — never effect-exactly-once across crashes
    ([guarantees.md](../spec/guarantees.md) §6.1).
-3. **The mutation lane is released when the after basis is pinned, not at the fence.**
-   If the next mutation could start at the fence, the previous interaction's after
-   observation and postcondition could absorb the successor's effects, breaking
-   `afterRequestId`'s exclusion promise ([verification.md](../spec/verification.md)
-   §3.2). The kernel therefore holds the lane through `Observing` until the
-   after-observation basis is pinned; only post-basis work (postcondition watches,
-   waiters) continues on the control lane.
+3. **The mutation lane is released when the after basis is pinned and the
+   postcondition has resolved, not at the fence.** If the next mutation could start
+   at the fence, the previous interaction's after observation could absorb the
+   successor's effects, breaking `afterRequestId`'s exclusion promise
+   ([verification.md](../spec/verification.md) §3.2); if it could start with a
+   postcondition still pending, a later mutation could satisfy an earlier
+   interaction's postcondition. The kernel therefore holds the lane through
+   `Observing` until the basis is pinned and the postcondition resolves —
+   postconditions are evaluated only against pinned bases, re-pinning while
+   unresolved.
 4. **The kernel reads no ambient clock; it reads two host-supplied ones.** Semantic
    time (wait timeouts, retention expiry) advances only with the logical `now` the
    host passes per pump, resolving at pump boundaries. Deadline enforcement reads a
    host-injected monotonic clock at step boundaries — without it `Pump(…, deadline)`
    is unenforceable. Monotonicity violations fail fast. The adapter's synchronous
-   execution-time bound stays **normative** (it underwrites control-lane
-   responsiveness and the worst-case pump occupancy of
-   [kernel-execution.md](../spec/kernel-execution.md) §6); the TCK enforces its
-   logical form (synchronous return, declared frame counts) and tier 3 measures the
-   wall-clock form. The timing non-goal of [guarantees.md](../spec/guarantees.md) §4
-   is about replay reproduction, not about abandoning pump responsiveness.
+   execution-time bound stays **normative, wall clock included** (it underwrites
+   control-lane responsiveness and the worst-case pump occupancy of
+   [kernel-execution.md](../spec/kernel-execution.md) §6): the TCK enforces its
+   logical form deterministically (synchronous return, declared frame counts), tier 3
+   measures the wall-clock form, and a supported adapter MUST meet it. The kernel's
+   deadline promise is conditional on the adapter honoring its declared bound — a
+   synchronous call cannot be preempted. The timing non-goal of
+   [guarantees.md](../spec/guarantees.md) §4 is about replay reproduction, not about
+   abandoning pump responsiveness.
 5. **The kernel depends on the AdapterSdk shape assembly.** `AdapterSdk` carries only
    interfaces and message/descriptor shapes over Contracts (zero behavior); the
    kernel references it to call `IEffectExecutor` and to hand adapters its
@@ -125,9 +131,14 @@ why and what was rejected.
   restore-burden principle, and kernel-owned ports would invert the spec's
   assignment of the SDK interfaces to `AdapterSdk`; the one documented edge is
   cheaper than either.
-- **Advisory-only synchronous execution bound:** rejected — it would dissolve the
-  basis of the control-lane responsiveness claim and the computable worst-case pump
-  occupancy.
+- **Advisory-only synchronous execution bound:** rejected — a synchronous method can
+  avoid blocking waits yet burn arbitrary CPU time, so an advisory wall-clock value
+  would dissolve the basis of the control-lane responsiveness claim and the
+  computable worst-case pump occupancy; the bound stays normative, tier-3 measured.
+- **Treating an executor exception as a zero-effect refusal:** rejected — a throw
+  cannot prove the no-effect-before-adoption rule was honored; it is classified as
+  possibly effected (`Faulted`, partial effects possible), never
+  `effectStarted = false`.
 
 ## Consequences
 

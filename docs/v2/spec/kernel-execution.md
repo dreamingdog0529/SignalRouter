@@ -49,13 +49,16 @@ can no longer mutate application state — as a distinct signal from completion
 evidence; which completion messages imply an unreported fence is profile-limited
 ([adapter-conformance.md](adapter-conformance.md) §3,
 [adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)). The mutation
-lane is released only when the interaction's **after-observation basis is pinned**
-(the `Observing` entry, §5) — releasing at the fence would let the next mutation leak
-into the previous interaction's after state, breaking the `afterRequestId` exclusion
-promise ([verification.md](verification.md) §3.2). Only post-basis work (e.g. a
-postcondition watch) and operations that never mutate (waits, queries, observation)
-continue under an operation handle on the control/observation lane. Explicit waits
-(`wait_for`) always live on the control/observation lane.
+lane is released only when the interaction's **after-observation basis is pinned and
+any capability postcondition has resolved** (§5) — releasing at the fence would let
+the next mutation leak into the previous interaction's after state, breaking the
+`afterRequestId` exclusion promise ([verification.md](verification.md) §3.2), and
+releasing with a postcondition still pending would let a later mutation satisfy an
+earlier interaction's postcondition. Postconditions are evaluated only against pinned
+bases; while unresolved, re-evaluation re-pins a fresh basis with the lane still held,
+until satisfied or timed out. Only operations that never mutate (waits, queries,
+observation) run concurrently, under an operation handle on the control/observation
+lane. Explicit waits (`wait_for`) always live on the control/observation lane.
 
 Status queries never enter the mailbox: the kernel atomically publishes an immutable
 status snapshot that query surfaces read. A query carries the querying principal; a
@@ -142,7 +145,7 @@ Admitted → Validating → Invoking → WaitingCompletion → Observing → Ter
 | `Validating` | Re-resolve the target by `AuthorKey`/`NodeRef`, check capability availability and preconditions; no side effects | `Rejected` (no E3, codes per [guarantees.md](guarantees.md) §3.5) or advance |
 | `Invoking` | Prepare the effect-permit evidence (E3 when recording, [guarantees.md](guarantees.md) §5.3); only on readiness mint the single-use `EffectPermitToken` and issue the adapter effect request; a preparation fault terminates `Faulted(EvidenceUnavailable)` | advance |
 | `WaitingCompletion` | Await the fence and the completion evidence required by the bound completion profile, as mailbox messages | evidence, fault, or cancellation |
-| `Observing` | Pin the after-observation basis (releasing the mutation lane), evaluate the capability postcondition (final evaluation embeds in E4) | advance |
+| `Observing` | Pin the after-observation basis and evaluate the capability postcondition against it (final evaluation embeds in E4); while the postcondition is unresolved, re-pin and re-evaluate with the lane still held. The lane is released on resolution | advance |
 | `Terminal` | Commit terminal to `RecoveryIndex`, commit E4 when recording (an evidence-commit fault fails the recording alone, §7 of [guarantees.md](guarantees.md)), answer waiters, release committed continuations | done |
 
 Rules:
@@ -152,11 +155,14 @@ Rules:
 - State-dependent rejection in `Validating` terminates with the `E2 + E4,
   effectPermitted=false` shape — no permit, zero effects.
 - The executor answers the effect request **synchronously**: `Adopted` or
-  `Refused(faultCode)` ([adapter-conformance.md](adapter-conformance.md) §3). A
-  refusal — and an executor exception, which the kernel converts to a refusal with a
-  redacted stable code — terminates the interaction `Faulted` with
-  `effectStarted = false`; it is never `Rejected`, because the permit was already
-  granted ([guarantees.md](guarantees.md) §3.1).
+  `Refused(faultCode)` ([adapter-conformance.md](adapter-conformance.md) §3). An
+  executor MUST NOT begin any effect before returning `Adopted`; under that rule a
+  synchronous refusal terminates the interaction `Faulted` with
+  `effectStarted = false` — never `Rejected`, because the permit was already granted
+  ([guarantees.md](guarantees.md) §3.1). An executor **exception** cannot prove that
+  rule was honored: the kernel terminates the interaction `Faulted` with a redacted
+  stable code and treats the effect as possibly started (partial effects possible,
+  §3.1) — it MUST NOT claim `effectStarted = false` for a throw.
 - Nested submission from inside an effect is refused (`Rejected(ReentrantDispatch)`)
   whether it arrives on the executing thread or re-enters through another producer
   thread during the synchronous executor call; follow-up work uses continuations (§9).

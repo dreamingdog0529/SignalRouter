@@ -63,12 +63,17 @@ only after the permit evidence is ready ([guarantees.md](guarantees.md) §5.3,
 [adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)). The executor:
 
 - MUST adopt or refuse synchronously within its declared sync bound: the answer is
-  `Adopted` or `Refused(faultCode)`; a refusal (or an executor exception) terminates
-  the interaction `Faulted` with `effectStarted = false`;
-- MUST report the **effect fence** (`EffectFenceReached(permit)`) — the point after
-  which the effect can no longer mutate application state — and, separately, deliver
-  terminal completion evidence (`EffectCompletion(permit, resolution)`) **exactly once
-  per permit token**, as mailbox messages, even after cooperative cancellation;
+  `Adopted` or `Refused(faultCode)`, and **no effect may begin before `Adopted` is
+  returned** — this is what makes a synchronous refusal a zero-effect terminal
+  (`Faulted`, `effectStarted = false`). An executor exception cannot prove that rule
+  was honored and is treated as possibly effected
+  ([kernel-execution.md](kernel-execution.md) §5);
+- MUST, for every **adopted** permit token, report the **effect fence**
+  (`EffectFenceReached(permit)`) — the point after which the effect can no longer
+  mutate application state — and, separately, deliver terminal completion evidence
+  (`EffectCompletion(permit, resolution)`) **exactly once**, as mailbox messages,
+  even after cooperative cancellation. A refused permit emits no messages — the
+  synchronous refusal is its terminal answer;
 - MAY omit the fence message only for profiles whose completion entails it
   (`Applied@1`, `FrameCommitted@1`, `PostconditionSatisfied@1`);
   `AdapterAcknowledged@1` never implies a fence (§4);
@@ -114,13 +119,17 @@ not a conformant `ManagedIntent` mutation and belongs to `ObservedExternal` (§6
 TCK checks declared bindings against this rule.
 
 Adapters also declare, in their **adapter descriptor**: their frame-phase vocabulary
-and fence phase; their synchronous execution-time bound (a normative logical
-obligation — adopt-or-refuse without blocking waits — plus an advisory wall-clock
-value); and their maximum effect-completion latency per profile, declared as a
-**frame/pump count** (`MaxFrames`). The TCK enforces the logical forms deterministically
-(driving declared frame counts on a synthetic host); tier 3 measures the wall-clock
-forms on the real engine. Together these keep the kernel's control-lane responsiveness
-claim real ([kernel-execution.md](kernel-execution.md) §2,
+and fence phase; their synchronous execution-time bound — a **normative wall-clock
+bound** with an equally normative logical obligation (adopt-or-refuse without
+blocking waits); and their maximum effect-completion latency per profile, declared as
+a **frame/pump count** (`MaxFrames`). Enforcement is tiered by what each tier can
+measure deterministically: the TCK enforces the logical forms (synchronous return,
+declared frame counts on a synthetic host); tier 3 measures the wall-clock bound on
+the real engine, and a supported adapter MUST meet it. The kernel's deadline promise
+and its worst-case occupancy formula are **conditional on the adapter honoring its
+declared sync bound** — the kernel cannot preempt a synchronous call; a
+non-conformant adapter breaks exactly the guarantee the bound exists to protect
+([kernel-execution.md](kernel-execution.md) §2, §6,
 [adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md)).
 
 ## 5. Distribution constraints

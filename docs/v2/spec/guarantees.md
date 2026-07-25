@@ -126,8 +126,8 @@ a meaning it does not know.
 | `CapacityExhausted` | Mutation-lane or `RecoveryIndex` capacity refused the admission (§8) |
 | `ReentrantDispatch` | Nested submission from inside an effect handler |
 | `TargetNotFound` | The target cannot be resolved to exactly one node **for this principal**: unregistered, ambiguous, or not exposed to the principal's security domain — deliberately indistinguishable |
-| `CapabilityUnavailable` | The resolved node is visible to the principal, but the invoked capability cannot currently be invoked: unavailable (disabled), **or not declared / not exposed on this node for this principal** — merged for the same concealment reason |
-| `PreconditionFailed` | A validation precondition of the capability contract evaluated false during `Validating` |
+| `CapabilityUnavailable` | The resolved node is visible to the principal, but the invoked capability is not invocable there: its **availability state** is off (disabled by the adapter/application), **or it is not declared / not exposed on this node for this principal** — merged for the same concealment reason |
+| `PreconditionFailed` | A **validation precondition declared in the capability contract** ([semantic-model.md](semantic-model.md) §2.2) evaluated false during `Validating`. Disjoint from `CapabilityUnavailable` by source: availability is adapter/application-declared state, a precondition is a contract-declared predicate |
 | `IncarnationMismatch` | The submission references a stale `RuntimeIncarnationId` ([kernel-execution.md](kernel-execution.md) §10) |
 | `UnkeyedTarget` | The strict open policy of an active recording refused admission of an invocation resolving to a node without an `AuthorKey` (§5.2) |
 
