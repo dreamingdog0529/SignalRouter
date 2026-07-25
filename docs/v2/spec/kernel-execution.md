@@ -41,10 +41,12 @@ The kernel processes two lanes:
   responsiveness is bounded instead by the adapter execution-time contract and enforced
   by the TCK ([adapter-conformance.md](adapter-conformance.md) §4, §7).
 
-Long-running work never holds the mutation lane: an operation that cannot terminate
-within its completion profile's bounds returns an `OperationRef` (`OperationId`) and the
-lane is released; progress and resolution flow through the control lane. Explicit waits
-(`wait_for`) always live on the control/observation lane.
+An `OperationRef` (`OperationId`) detaches the **caller**, never the guarantee: the
+mutation lane is held until the adapter reports the **effect fence** — the point after
+which the effect can no longer mutate application state. Only work that outlives its
+effect fence (e.g. a postcondition watch) and operations that never mutate (waits,
+queries, observation) continue under an `OperationRef` on the control/observation lane.
+Explicit waits (`wait_for`) always live on the control/observation lane.
 
 ## 3. Admission
 
@@ -123,8 +125,10 @@ Pump(maxTurns, deadline, framePhase) → PumpReport
 - `framePhase` (e.g. `Update`, `LateUpdate`, or adapter-defined phases) is an input the
   kernel exposes to completion profiles that need frame fencing (`FrameCommitted`).
 - Per-frame observation work is budgeted: snapshot/delta materialization respects a
-  per-pump byte/node budget; excess carries over with `completeness` marked accordingly
-  ([observation-state.md](observation-state.md) §4).
+  per-pump byte/node budget. Carry-over across pumps is revision-consistent: it
+  continues only against a revision-pinned read of the same `SourceRevision`; if the
+  pinned revision cannot be retained, materialization restarts, and truncation surfaces
+  as `BudgetTruncated` completeness ([observation-state.md](observation-state.md) §4).
 - `PumpReport` states work remaining, so hosts can schedule additional pumps.
 - Adapters declare their synchronous execution-time bound; the TCK enforces it. A pump
   on the engine main thread therefore has a computable worst-case occupancy:
@@ -136,8 +140,9 @@ Humans, agents, tests, and replay coexist. Arbitration rules:
 
 - All **ManagedIntent** input ([adapter-conformance.md](adapter-conformance.md) §6) —
   human or otherwise — enters through admission and the same mutation lane. Human intents
-  MAY be prioritized at the next mutation boundary but MUST NOT interleave into an active
-  effect.
+  MAY be prioritized **at mailbox adoption, before `LogicalOrder` is assigned**; once
+  admitted, execution strictly follows `LogicalOrder` — priority never reorders admitted
+  interactions, and nothing interleaves into an active effect.
 - During replay, and during any session holding **exclusive control**, foreign mutation
   admission is gated. Gating MUST be visible: the adapter surfaces UI indication, and
   every refused or deferred human intent is traced as `HumanIntentBlocked` — silent

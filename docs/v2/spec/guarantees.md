@@ -154,10 +154,13 @@ The manifest header. Contains: the `ReplayComparisonProfile` (ID and version), t
 ### 5.2 E2 `AdmissionCut`
 
 One per admitted mutation interaction. Contains: `RequestId`, semantic fingerprint, the
-capability invocation (capability contract ID/version, target `AuthorKey`, redacted
-arguments), and the identity envelope (`Principal`, `Ingress`, `Provenance`,
-`Causality`). For a continuation, `Causality` MUST carry
-`ParentRequestId + ContinuationOrdinal + fingerprint` (§5.8).
+capability invocation (capability contract ID/version, the **resolved** target
+`AuthorKey`, redacted arguments), and the identity envelope (`Principal`, `Ingress`,
+`Provenance`, `Causality`). A strict recording requires an `AuthorKey`-resolvable
+target: an invocation whose resolved node has none is either refused admission or
+closes the artifact `Incomplete(UnkeyedTarget)`, per the open policy
+([semantic-model.md](semantic-model.md) §3.2). For a continuation, `Causality` MUST
+carry `ParentRequestId + ContinuationOrdinal + fingerprint` (§5.8).
 
 E2 MUST be durable **before any UI effect of that interaction begins** (inherited from
 v1's request-before-side-effect guarantee).
@@ -263,8 +266,9 @@ pre-cancelled token; `DuringEffect` cancellations stop strict replay as
 ### 5.9 E7 `RecordingClosed`
 
 The close fence, also a linearization cut on the mutation lane: interactions admitted
-before the membership fence are drained to E4, the final snapshot is materialized and
-pinned, then E7 is appended. Contains: the close reason (`Completed` or
+before the membership fence are drained to E4, **armed predicates still open at the
+fence are resolved** (as `Cancelled` when nothing else resolves them first, §5.6), the
+final snapshot is materialized and pinned, then E7 is appended. Contains: the close reason (`Completed` or
 `Incomplete(reason)`), the event count, the final checkpoint `ContentId`, and closure
 material the reader can **recompute** — at minimum the event count and the manifest root
 / reachable-`ContentId` set. A self-declared boolean is not sufficient; readers MUST
@@ -286,8 +290,9 @@ Absence of E7 is meaningful: the reader classifies the artifact `Interrupted` (�
 ### 6.2 Rules
 
 - **R1 (shape completeness):** every admitted interaction inside a `Completed` artifact
-  MUST have one of the first two shapes. Any other shape forces the artifact to close as
-  `Incomplete` or be read as `Interrupted`.
+  MUST have one of the first two shapes, and every `PredicateArmed` MUST have a matching
+  `PredicateResolved`. Any other shape — including an unmatched armed predicate —
+  forces the artifact to close as `Incomplete` or be read as `Interrupted`.
 - **R2 (control lane):** control-lane operations (cancel requests, queries) are not
   ReplayEvidence; their influence surfaces only through `CancellationEvidence` in E4.
 - **R3 (continuations):** as §5.8; unresolved commitments block `Completed`.

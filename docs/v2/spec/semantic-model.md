@@ -66,9 +66,14 @@ Custom capabilities are permitted under a reverse-DNS namespace
 (`com.example.app:Rotate@1`) with the same contract obligations.
 
 A **capability invocation** — the v2 successor of the v1 command — is pure data:
-`(CapabilityContractId@version, target AuthorKey, typed arguments)`. It contains no
-callbacks, tasks, engine objects, transport metadata, timestamps, or identity envelope;
-those live in the admission envelope ([kernel-execution.md](kernel-execution.md) §3).
+`(CapabilityContractId@version, target reference, typed arguments)`. The **target
+reference** is either a `NodeRef` (runtime form, §3.1) or an `AuthorKey` (persistent
+form, §3.2); admission resolves it to exactly one node and records the resolved
+identity. The semantic fingerprint covers the capability contract, the resolved target
+identity (the `AuthorKey` when the node has one, otherwise the `NodeRef`), and the
+redacted-argument digest. The invocation contains no callbacks, tasks, engine objects,
+transport metadata, timestamps, or identity envelope; those live in the admission
+envelope ([kernel-execution.md](kernel-execution.md) §3).
 
 Availability is per capability, not per node: a node may be visible while a capability is
 currently unavailable (disabled, precondition unmet). Invoking an unavailable capability
@@ -96,6 +101,11 @@ incarnations, and therefore the identity recordings and tests bind to.
   comparison MUST have an `AuthorKey`. Nodes without one are excluded from strict
   comparison scope (they may still appear in agent views). Dynamic collections MUST use
   item keys stable within their scope.
+- **Invocation targets:** a `NodeRef`-targeted invocation on a keyless node is a normal
+  within-session operation, but it cannot enter strict-replay scope: an active strict
+  recording either refuses its admission or the artifact closes
+  `Incomplete(UnkeyedTarget)`, per the recording's open policy
+  ([guarantees.md](guarantees.md) §5.2).
 - Hierarchy paths, labels, and sibling indexes MUST NOT serve as fallback persistent
   identity.
 
@@ -183,7 +193,11 @@ arguments; node registrations annotate sensitive attributes. A node may raise se
 relative to the contract but never lower it, and cannot change argument names, types, or
 requiredness.
 
-Redaction is applied **at value production** — before any materialization, canonical
-encoding, hashing, tracing, or transmission. No codec, store, transport, or log ever
-receives an unredacted sensitive value ([observation-state.md](observation-state.md) §5,
+Redaction is applied **at value production** for every observation, materialization,
+trace, recording, and diagnostic surface — no store, log, or observation codec ever
+receives an unredacted sensitive value. The **live submission path is the sole
+exception**: a sensitive argument travels from submitter to executor under protected
+handling — in memory only, bounded lifetime, never logged, never echoed in errors,
+never entering any store — and recordings persist only secret references, resolved in
+memory at replay ([observation-state.md](observation-state.md) §5,
 [security-resources.md](security-resources.md) §3).

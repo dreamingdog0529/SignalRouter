@@ -88,8 +88,9 @@ query(requestId) → pending | terminal(outcome) | unavailable
   via `query`; both carry the same terminal projection.
 - Long-running operations (waits, recording control, replay) follow the same shape with
   `OperationId`s and are single-flight per runtime where the operation demands it.
-- Control-plane queries about unknown IDs answer `unknown`, which the caller maps to
-  `OutcomeUnknown` after its own retention reasoning; the runtime never guesses.
+- A query for an ID the runtime cannot prove anything about — never admitted in this
+  incarnation, or expired from retention — answers `OutcomeUnknown` directly; the §6
+  taxonomy is exhaustive, and the runtime never guesses.
 
 ## 5. Discovery and authentication
 

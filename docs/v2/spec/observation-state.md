@@ -84,9 +84,17 @@ Rules:
   `baseContentId → resultContentId` transition, and are gap-detectable. A subscriber
   observing a `ViewSequence` gap MUST resynchronize from an authoritative snapshot;
   deltas are never trusted across a gap.
-- Providers are not assumed perfect: the design does not presume every mutation yields a
-  delta event. Gap detection plus resync, not provider perfection, is the correctness
-  mechanism.
+- A materialization is **revision-consistent**: every snapshot and delta is produced
+  from a single `SourceRevision` via a revision-pinned read; work spanning multiple
+  pumps either retains the pin or restarts. A snapshot MUST NOT mix revisions.
+- Every observable mutation MUST advance `SourceRevision` — an adapter conformance
+  obligation verified by the TCK ([adapter-conformance.md](adapter-conformance.md) §1,
+  §7). Delta *delivery* is still not assumed perfect: each delta carries the resulting
+  `SourceRevision` watermark and subscriptions emit periodic watermark heartbeats, so a
+  subscriber that observes the watermark advance without contiguous deltas treats it as
+  a gap and resynchronizes. Recording evidence never depends on subscription liveness:
+  the E3/E4 cuts are fresh, revision-stamped materializations
+  ([guarantees.md](guarantees.md) §5).
 - Delta chains are bounded (maximum chain length between checkpoints,
   [recording-replay.md](recording-replay.md) §4); readers MUST NOT need unbounded chains
   to reconstruct a state.

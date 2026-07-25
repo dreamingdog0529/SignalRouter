@@ -43,8 +43,11 @@ hosts) MUST re-derive this analysis; the default posture never silently extends.
 
 - Sensitivity is declared at contract/registration level
   ([semantic-model.md](semantic-model.md) §7); redaction executes **at value
-  production**, before materialization, canonicalization, tracing, recording, or
-  transmission. No downstream component ever holds an unredacted sensitive value.
+  production** for every observation, materialization, trace, recording, and diagnostic
+  surface — no store, log, or observation codec ever holds an unredacted sensitive
+  value. The live submission path (submitter → executor) is the sole exception and
+  carries sensitive arguments under protected handling: in memory only, bounded
+  lifetime, never logged, never echoed in errors, never entering any store.
 - Recording artifacts store secret **references**; resolution happens only in memory at
   replay time, and unresolvable references stop replay before the affected entry
   ([recording-replay.md](recording-replay.md) §7).
