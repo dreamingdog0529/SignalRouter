@@ -154,8 +154,9 @@ kernel implementation.
 | `UnknownMandatoryExtension` | The artifact carries an unknown extension the profile marks mandatory |
 | `MissingMigration` | No projection exists onto a common comparison profile ([semantic-model.md](semantic-model.md) §5) |
 | `Contamination` | The position lies at or beyond a contamination interval (§5.5) |
-| `CancellationTiming` | A `DuringEffect` cancellation (§5.7) |
+| `CancellationTiming` | A `DuringEffect` cancellation, or a `Cancelled` terminal with `phase = AfterEffect` (§5.7) |
 | `TemporalPredicate` | A temporal predicate without interval evidence (§5.6) |
+| `PredicateFault` | A recorded E6 resolution of `Faulted` (§5.6) |
 
 Additionally, **every `Unevaluable` reason code is a valid `Incomparable` reason
 code**: the §3.3 mapping of a live `Unevaluable(reason)` to replay-side
@@ -292,12 +293,16 @@ final evaluation of any capability postcondition (including `TimedOut` / `False`
 `Unknown` when that contributed to the terminal), `CancellationEvidence` when
 cancellation was involved (§5.7), and the ordered `ContinuationCommitment[]` (§5.8).
 
-Field presence follows the terminal: the after record-view `ContentId` is required
-exactly when an effect was permitted (`effectPermitted = true`); a zero-effect terminal
-(§6.1 first shape) carries no after view — its after-state is, by definition, the
-observation state it was admitted against. The completion evidence is the **evidence
-itself** — the material the bound profile demands — not merely the profile reference,
-and is required exactly for `Succeeded`.
+Field presence follows the terminal: the after record-view `ContentId` is present in
+**every** E4. For an effect-permitted terminal it is the fresh after-effect
+materialization; for a zero-effect terminal (§6.1 first shape) it records the
+observation state the terminal was decided against — not the admission state, since
+interactions executed while this one was queued may have advanced the revision. Blob
+reuse is permitted under the §5.3 conditions; the cut is always fresh. This keeps
+`afterRequestId` bindings ([verification.md](verification.md) §3.2) and R4's
+after-semantics comparison valid for every terminal. The completion evidence is the
+**evidence itself** — the material the bound profile demands — not merely the profile
+reference, and is required exactly for `Succeeded`.
 
 ### 5.5 E5 `ExternalMutationBarrier`
 
@@ -336,7 +341,7 @@ become true; it does not require bytewise equality with the recorded witness. `T
 `Cancelled`, `Faulted`, and `Unknown` resolutions stop strict replay before execution of
 the wait (`TimedOut`/`Cancelled`/`Unknown` because timing is out of tier, §4; `Faulted`
 because a predicate-evaluation fault is an infrastructure condition, not a reproducible
-observation). Temporal predicates (e.g. "remains true for N frames")
+observation — the stop reports `Incomparable(PredicateFault)`, §3.5). Temporal predicates (e.g. "remains true for N frames")
 require interval evidence, which v2 defers; a recording containing one is
 `Incomparable(TemporalPredicate)` under strict replay.
 
@@ -351,9 +356,13 @@ and the `effectPermitted` / `effectStarted` flags.
 
 Replay: `BeforeEffect` cancellations are replayed deterministically with a synthetic
 pre-cancelled token; `DuringEffect` cancellations stop strict replay as
-`Incomparable(CancellationTiming)`; `AfterEffect` cancellations do not affect the
-effect (it had already completed), so the entry replays as a normal terminal and the
-recorded `CancellationEvidence` is compared as part of the terminal evidence.
+`Incomparable(CancellationTiming)`. `AfterEffect` splits on the terminal it is attached
+to: evidence on a non-`Cancelled` terminal (a cancel that arrived too late to matter)
+replays as a normal terminal, with the `CancellationEvidence` excluded from strict
+comparison as timing metadata (§4) — a live run that observes no cancellation still
+compares `Equal`; a terminal that is itself `Cancelled` with `phase = AfterEffect`
+(cancellation terminated post-effect work) stops strict replay as
+`Incomparable(CancellationTiming)`, like `DuringEffect`.
 
 ### 5.8 Continuations
 
