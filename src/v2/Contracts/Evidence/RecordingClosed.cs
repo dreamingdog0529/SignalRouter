@@ -30,6 +30,9 @@ namespace SignalRouter.V2.Contracts
             return new RecordingCloseReason(false, reason);
         }
 
+        /// <summary>True for the uninitialized <c>default</c> value, which bypassed both factories.</summary>
+        public bool IsDefault => !IsCompleted && reason.IsDefault;
+
         public bool IsCompleted { get; }
 
         public IncompleteReason Reason =>
@@ -68,6 +71,13 @@ namespace SignalRouter.V2.Contracts
             ValueList<ContentId> declaredReachableContentIds)
             : base(sequence)
         {
+            if (reason.IsDefault)
+            {
+                throw new ArgumentException(
+                    "E7 requires a close reason produced by a factory, not the default value.",
+                    nameof(reason));
+            }
+
             if (declaredEventCount < 2)
             {
                 throw new ArgumentOutOfRangeException(

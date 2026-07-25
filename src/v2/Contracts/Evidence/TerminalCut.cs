@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace SignalRouter.V2.Contracts
 {
@@ -132,6 +133,42 @@ namespace SignalRouter.V2.Contracts
             {
                 throw new ArgumentException(
                     "Cancellation evidence must agree with the terminal's permit flag.", nameof(cancellation));
+            }
+
+            // verification.md §3.4: the reserved postcondition fault carries the stable
+            // False | TimedOut | Unknown detail, and that detail appears only with it.
+            var postconditionFailed =
+                postcondition == PostconditionResult.False ||
+                postcondition == PostconditionResult.TimedOut ||
+                postcondition == PostconditionResult.Unknown;
+            var isPostconditionFault =
+                faultCode != null && faultCode.Value == Contracts.FaultCode.CompletionPostconditionNotSatisfied;
+            if (isPostconditionFault && !postconditionFailed)
+            {
+                throw new ArgumentException(
+                    "Faulted(CompletionPostconditionNotSatisfied) requires the failing postcondition detail (False | TimedOut | Unknown).",
+                    nameof(postcondition));
+            }
+
+            if (postconditionFailed && !isPostconditionFault)
+            {
+                throw new ArgumentException(
+                    "A failing postcondition detail terminates the interaction Faulted(CompletionPostconditionNotSatisfied); it cannot attach to another terminal.",
+                    nameof(postcondition));
+            }
+
+            if (continuations != null)
+            {
+                var ordinals = new HashSet<int>();
+                foreach (var commitment in continuations)
+                {
+                    if (!ordinals.Add(commitment.Ordinal))
+                    {
+                        throw new ArgumentException(
+                            "Continuation ordinals must be unique within one terminal; replay binds by (ParentRequestId, ContinuationOrdinal).",
+                            nameof(continuations));
+                    }
+                }
             }
 
             RequestId = requestId;

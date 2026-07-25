@@ -70,6 +70,10 @@ public sealed class StructureRuleTests
             EvidenceSemantics.CheckStructure(orphanTerminal)
                 .Any(v => v.Rule == ShapeRule.R1 && v.Description.Contains("without a preceding E2")),
             Is.True);
+        Assert.That(
+            EvidenceSemantics.ClassifyInteractions(orphanTerminal),
+            Is.Empty,
+            "an orphan cut is a violation, never an admitted interaction");
 
         var outOfOrder = new EvidenceFixture()
             .Open()
@@ -107,6 +111,54 @@ public sealed class StructureRuleTests
         Assert.That(
             EvidenceSemantics.CheckStructure(facts)
                 .Any(v => v.Rule == ShapeRule.R1 && v.Description.Contains("permit flag")),
+            Is.True);
+    }
+
+    [Test]
+    public void R1FlagsLogicalOrderInversionsAndMismatches()
+    {
+        // recording-replay.md §2: E2 cuts appear in LogicalOrder (admission order is
+        // append order), and E3/E4 carry their interaction's LogicalOrder.
+        var invertedAdmissions = new EvidenceFixture()
+            .Open()
+            .Admit("a", order: 5)
+            .Admit("b", order: 3)
+            .Build();
+        Assert.That(
+            EvidenceSemantics.CheckStructure(invertedAdmissions)
+                .Any(v => v.Rule == ShapeRule.R1 && v.Description.Contains("E2 cuts out of LogicalOrder")),
+            Is.True);
+
+        var mismatchedPermit = new EvidenceFixture()
+            .Open()
+            .Admit("a", order: 1)
+            .Append(sequence => new EffectPermit(
+                sequence,
+                TestData.Request("a"),
+                new LogicalOrder(9),
+                new SourceRevision(1),
+                TestData.Content("before-a"),
+                reusedCheckpointBlob: false))
+            .Build();
+        Assert.That(
+            EvidenceSemantics.CheckStructure(mismatchedPermit)
+                .Any(v => v.Rule == ShapeRule.R1 && v.Description.Contains("E3 LogicalOrder disagrees")),
+            Is.True);
+    }
+
+    [Test]
+    public void R1FlagsAResolutionPrecedingItsArming()
+    {
+        // guarantees.md §5.6: E6 is an armed-then-resolved pair.
+        var facts = new EvidenceFixture()
+            .Open()
+            .Resolve("op1", PredicateResolution.Satisfied)
+            .Arm("op1")
+            .Build();
+
+        Assert.That(
+            EvidenceSemantics.CheckStructure(facts)
+                .Any(v => v.Rule == ShapeRule.R1 && v.Description.Contains("precedes its PredicateArmed")),
             Is.True);
     }
 
@@ -170,6 +222,29 @@ public sealed class StructureRuleTests
         Assert.That(
             EvidenceSemantics.ClassifyArtifact(facts).Outcome,
             Is.Not.EqualTo(RecordingOutcome.Completed));
+    }
+
+    [Test]
+    public void R3FlagsAChildAdmittedBeforeItsParentTerminal()
+    {
+        // guarantees.md §5.8: "A child is admitted only after its parent's E4 is durable".
+        var commitment = new ContinuationCommitment(0, TestData.Fingerprint("child"));
+        var link = new ContinuationLink(TestData.Request("parent"), 0, TestData.Fingerprint("child"));
+        var facts = new EvidenceFixture()
+            .Open()
+            .Admit("parent")
+            .Permit("parent")
+            .Admit("child", Causality.OfContinuation(link))
+            .Permit("child")
+            .Terminal("child", InteractionOutcome.Succeeded)
+            .Terminal("parent", InteractionOutcome.Succeeded,
+                continuations: ValueList<ContinuationCommitment>.From(new[] { commitment }))
+            .Build();
+
+        Assert.That(
+            EvidenceSemantics.CheckStructure(facts)
+                .Any(v => v.Rule == ShapeRule.R3 && v.Description.Contains("before its parent terminal")),
+            Is.True);
     }
 
     [Test]

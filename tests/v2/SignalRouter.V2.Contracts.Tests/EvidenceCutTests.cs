@@ -155,6 +155,86 @@ public sealed class EvidenceCutTests
     }
 
     [Test]
+    public void PostconditionFaultCouplingIsEnforced()
+    {
+        // verification.md §3.4: Faulted(CompletionPostconditionNotSatisfied) carries
+        // the stable False | TimedOut | Unknown detail — and that detail appears
+        // with no other terminal.
+        AssertEx.Throws<ArgumentException>(() => _ = new TerminalCut(
+            new EvidenceSequence(1),
+            TestData.Request("r1"),
+            new LogicalOrder(1),
+            InteractionOutcome.Faulted,
+            effectPermitted: true,
+            TestData.Content("after"),
+            faultCode: FaultCode.CompletionPostconditionNotSatisfied));
+
+        AssertEx.Throws<ArgumentException>(() => _ = new TerminalCut(
+            new EvidenceSequence(1),
+            TestData.Request("r1"),
+            new LogicalOrder(1),
+            InteractionOutcome.Faulted,
+            effectPermitted: true,
+            TestData.Content("after"),
+            faultCode: FaultCode.CompletionPostconditionNotSatisfied,
+            postcondition: PostconditionResult.Satisfied));
+
+        AssertEx.Throws<ArgumentException>(() => _ = new TerminalCut(
+            new EvidenceSequence(1),
+            TestData.Request("r1"),
+            new LogicalOrder(1),
+            InteractionOutcome.Succeeded,
+            effectPermitted: true,
+            TestData.Content("after"),
+            completionEvidence: TestData.Completion(),
+            postcondition: PostconditionResult.False));
+
+        var postconditionFault = new TerminalCut(
+            new EvidenceSequence(1),
+            TestData.Request("r1"),
+            new LogicalOrder(1),
+            InteractionOutcome.Faulted,
+            effectPermitted: true,
+            TestData.Content("after"),
+            faultCode: FaultCode.CompletionPostconditionNotSatisfied,
+            postcondition: PostconditionResult.TimedOut);
+        Assert.That(postconditionFault.Postcondition, Is.EqualTo(PostconditionResult.TimedOut));
+    }
+
+    [Test]
+    public void DuplicateContinuationOrdinalsAreRejected()
+    {
+        // guarantees.md §5.8: replay binds by (ParentRequestId, ContinuationOrdinal).
+        AssertEx.Throws<ArgumentException>(() => _ = new TerminalCut(
+            new EvidenceSequence(1),
+            TestData.Request("r1"),
+            new LogicalOrder(1),
+            InteractionOutcome.Succeeded,
+            effectPermitted: true,
+            TestData.Content("after"),
+            completionEvidence: TestData.Completion(),
+            continuations: ValueList<ContinuationCommitment>.From(new[]
+            {
+                new ContinuationCommitment(0, TestData.Fingerprint("a")),
+                new ContinuationCommitment(0, TestData.Fingerprint("b")),
+            })));
+    }
+
+    [Test]
+    public void CloseRejectsTheDefaultReason()
+    {
+        // A default RecordingCloseReason bypasses both factories; a malformed close
+        // must be rejected at construction, never crash the reader later.
+        AssertEx.Throws<ArgumentException>(() => _ = new RecordingClosed(
+            new EvidenceSequence(2),
+            default,
+            declaredEventCount: 2,
+            TestData.Content("final"),
+            ValueList<ContentId>.Empty));
+        Assert.That(default(RecordingCloseReason).IsDefault, Is.True);
+    }
+
+    [Test]
     public void CloseReasonPairsIncompleteWithAReason()
     {
         AssertEx.Throws<ArgumentException>(() => RecordingCloseReason.Incomplete(default));

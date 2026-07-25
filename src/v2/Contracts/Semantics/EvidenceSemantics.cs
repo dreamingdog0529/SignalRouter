@@ -49,6 +49,13 @@ namespace SignalRouter.V2.Contracts
             var results = new List<InteractionClassification>();
             foreach (var chain in CollectChains(facts))
             {
+                // Orphan E3/E4 cuts (no E2) surface as R1 violations, never as
+                // admitted interactions: classification is one result per E2.
+                if (chain.Admission == null)
+                {
+                    continue;
+                }
+
                 results.Add(ClassifyChain(chain, contaminated.Contains(chain.RequestId)));
             }
 
@@ -99,12 +106,23 @@ namespace SignalRouter.V2.Contracts
                 return ClosureCheckResult.EventCountMismatch;
             }
 
+            // guarantees.md §5.9 defines the reachable set exactly: every ContentId
+            // referenced by any cut — recomputation compares set equality.
             var declared = new HashSet<ContentId>(close.DeclaredReachableContentIds);
-            foreach (var referenced in CollectReferencedContentIds(facts))
+            var referenced = new HashSet<ContentId>(CollectReferencedContentIds(facts));
+            foreach (var contentId in referenced)
             {
-                if (!declared.Contains(referenced))
+                if (!declared.Contains(contentId))
                 {
                     return ClosureCheckResult.UnreachableContentId;
+                }
+            }
+
+            foreach (var contentId in declared)
+            {
+                if (!referenced.Contains(contentId))
+                {
+                    return ClosureCheckResult.SurplusDeclaredContentId;
                 }
             }
 
@@ -129,6 +147,11 @@ namespace SignalRouter.V2.Contracts
 
             foreach (var chain in CollectChains(facts))
             {
+                if (chain.Admission == null)
+                {
+                    continue;
+                }
+
                 if (chain.Permit != null && chain.Terminal == null)
                 {
                     hazards.Add(new StaticReplayHazard(
@@ -378,6 +401,52 @@ namespace SignalRouter.V2.Contracts
                             : "Admitted interaction without terminal",
                         chain.RequestId));
                 }
+
+                // recording-replay.md §2: E3/E4 carry their interaction's LogicalOrder.
+                if (chain.Admission != null)
+                {
+                    if (chain.Permit != null && chain.Permit.LogicalOrder != chain.Admission.LogicalOrder)
+                    {
+                        violations.Add(new RuleViolation(
+                            ShapeRule.R1, "E3 LogicalOrder disagrees with its E2", chain.RequestId));
+                    }
+
+                    if (chain.Terminal != null && chain.Terminal.LogicalOrder != chain.Admission.LogicalOrder)
+                    {
+                        violations.Add(new RuleViolation(
+                            ShapeRule.R1, "E4 LogicalOrder disagrees with its E2", chain.RequestId));
+                    }
+                }
+            }
+
+            // recording-replay.md §2 stream-order constraints per cut kind: E2 cuts
+            // appear in LogicalOrder, and — mutation execution being serialized — so
+            // do the E3 cuts and the E4 cuts of different interactions.
+            CheckLogicalOrderMonotonic(
+                facts.Cuts.OfType<AdmissionCut>().Select(cut => (cut.LogicalOrder, cut.RequestId)),
+                "E2 cuts out of LogicalOrder", violations);
+            CheckLogicalOrderMonotonic(
+                facts.Cuts.OfType<EffectPermit>().Select(cut => (cut.LogicalOrder, cut.RequestId)),
+                "E3 cuts out of LogicalOrder", violations);
+            CheckLogicalOrderMonotonic(
+                facts.Cuts.OfType<TerminalCut>().Select(cut => (cut.LogicalOrder, cut.RequestId)),
+                "E4 cuts out of LogicalOrder", violations);
+        }
+
+        private static void CheckLogicalOrderMonotonic(
+            IEnumerable<(LogicalOrder Order, RequestId Request)> cuts,
+            string description,
+            List<RuleViolation> violations)
+        {
+            LogicalOrder? previous = null;
+            foreach (var (order, request) in cuts)
+            {
+                if (previous.HasValue && order <= previous.Value)
+                {
+                    violations.Add(new RuleViolation(ShapeRule.R1, description, request));
+                }
+
+                previous = order;
             }
         }
 
@@ -412,6 +481,19 @@ namespace SignalRouter.V2.Contracts
             {
                 violations.Add(new RuleViolation(
                     ShapeRule.R1, "PredicateResolved without a matching PredicateArmed", operation: operation));
+            }
+
+            // E6 is an armed-then-resolved pair: the resolution must follow its arming
+            // in the stream (guarantees.md §5.6).
+            var firstArmed = armedGroups.ToDictionary(group => group.Key, group => group.First());
+            foreach (var group in resolvedGroups)
+            {
+                if (firstArmed.TryGetValue(group.Key, out var armed) &&
+                    group.First().Sequence <= armed.Sequence)
+                {
+                    violations.Add(new RuleViolation(
+                        ShapeRule.R1, "PredicateResolved precedes its PredicateArmed", operation: group.Key));
+                }
             }
         }
 
@@ -462,6 +544,14 @@ namespace SignalRouter.V2.Contracts
                     {
                         violations.Add(new RuleViolation(
                             ShapeRule.R3, "Continuation fingerprint mismatch", child.RequestId));
+                    }
+
+                    // guarantees.md §5.8: a child is admitted only after its parent's
+                    // E4 is durable — the child E2 must follow it in the stream.
+                    if (child.Sequence <= parent.Sequence)
+                    {
+                        violations.Add(new RuleViolation(
+                            ShapeRule.R3, "Continuation child admitted before its parent terminal", child.RequestId));
                     }
 
                     if (!chains.TryGetValue(child.RequestId, out var childChain) || childChain.Terminal == null)

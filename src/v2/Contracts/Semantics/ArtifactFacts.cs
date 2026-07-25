@@ -20,6 +20,9 @@ namespace SignalRouter.V2.Contracts
 
         /// <summary>A ContentId referenced by a cut is missing from the declared reachable set.</summary>
         UnreachableContentId,
+
+        /// <summary>The declared reachable set contains a ContentId no cut references (guarantees.md §5.9 defines the set exactly).</summary>
+        SurplusDeclaredContentId,
     }
 
     /// <summary>

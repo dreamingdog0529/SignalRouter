@@ -39,14 +39,16 @@ internal sealed class EvidenceFixture
         return this;
     }
 
-    internal EvidenceFixture Admit(string request, Causality? causality = null)
+    internal EvidenceFixture Admit(string request, Causality? causality = null, ulong? order = null)
     {
-        var order = new LogicalOrder(nextLogicalOrder++);
-        logicalOrders[request] = order;
+        var logicalOrder = order.HasValue
+            ? new LogicalOrder(order.Value)
+            : new LogicalOrder(nextLogicalOrder++);
+        logicalOrders[request] = logicalOrder;
         cuts.Add(new AdmissionCut(
             NextSequence(),
             TestData.Request(request),
-            order,
+            logicalOrder,
             TestData.Fingerprint(request),
             TestData.Invocation(request),
             TestData.KeyedTarget($"key-{request}"),
@@ -160,7 +162,8 @@ internal sealed class EvidenceFixture
     internal EvidenceFixture Close(
         RecordingCloseReason? reason = null,
         long? declaredEventCountOverride = null,
-        bool omitReachableContentId = false)
+        bool omitReachableContentId = false,
+        bool extraDeclaredContentId = false)
     {
         var finalCheckpoint = TestData.Content("final");
         var reachable = new List<ContentId> { finalCheckpoint };
@@ -189,6 +192,11 @@ internal sealed class EvidenceFixture
         if (omitReachableContentId)
         {
             reachable.RemoveAt(reachable.Count - 1);
+        }
+
+        if (extraDeclaredContentId)
+        {
+            reachable.Add(TestData.Content("surplus-never-referenced"));
         }
 
         cuts.Add(new RecordingClosed(

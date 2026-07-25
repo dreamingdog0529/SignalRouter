@@ -96,6 +96,21 @@ public sealed class ArtifactClassificationTests
     }
 
     [Test]
+    public void SurplusDeclaredContentIdIsInterrupted()
+    {
+        // §5.9 defines the reachable set exactly — a declaration with an
+        // unreferenced extra ContentId does not verify.
+        var facts = new EvidenceFixture()
+            .Open()
+            .Close(extraDeclaredContentId: true)
+            .Build();
+
+        var classification = EvidenceSemantics.ClassifyArtifact(facts);
+        Assert.That(classification.Outcome, Is.EqualTo(RecordingOutcome.Interrupted));
+        Assert.That(classification.Closure, Is.EqualTo(ClosureCheckResult.SurplusDeclaredContentId));
+    }
+
+    [Test]
     public void ExternalIntegrityFailureIsInterrupted()
     {
         // Codec-level integrity (blob existence, digests) is a supplied fact; when
