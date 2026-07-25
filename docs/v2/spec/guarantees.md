@@ -143,7 +143,7 @@ The manifest header. Contains: the `ReplayComparisonProfile` (ID and version), t
 `ViewContract` ID/version, the redaction policy ID, the immutable table of
 `CapabilityContractId → CompletionProfileId` bindings in force, the immutable tables of
 registered state-source contracts and predicate contracts
-([observation-state.md](observation-state.md) §8, [verification.md](verification.md) §2),
+([observation-state.md](observation-state.md) §7, [verification.md](verification.md) §2),
 the `RuntimeIncarnationId`, and the `ContentId` of the base observation snapshot.
 
 - E1 is a **linearization cut on the mutation lane**: opening drains in-flight mutation
@@ -189,7 +189,7 @@ fix current observation revision (SourceRevision / ViewWatermark)
   pinned to this artifact; the current `SourceRevision`/`ViewWatermark` is recorded in the
   cut; and either a gap-free invalidation token proves `NoRelevantMutation` since that
   blob — where relevant mutations include node changes **and state-source publications**
-  ([observation-state.md](observation-state.md) §8) — or re-materialization produced the
+  ([observation-state.md](observation-state.md) §7) — or re-materialization produced the
   same `ContentId`. Absence of an observed E5 is NOT acceptable proof.
 - The first E3 after an `ExternalMutationBarrier` (§5.5) MUST use a fresh
   materialization; checkpoint reuse across a barrier is prohibited.
@@ -213,7 +213,7 @@ contributed to the terminal), `CancellationEvidence` when cancellation was invol
 
 Appended when an `ObservedExternal` effect ([adapter-conformance.md](adapter-conformance.md) §6)
 — including a state-source mutation whose causation is external to the controlled work
-([observation-state.md](observation-state.md) §8) — intersects the recording. E5 records
+([observation-state.md](observation-state.md) §7) — intersects the recording. E5 records
 a **contamination interval**, not a point:
 `lastKnownCleanCut .. firstObservedCut`, plus the `SourceRevision` at detection, a source
 hint, and the `RequestId`s of any interactions whose effect window overlaps the interval

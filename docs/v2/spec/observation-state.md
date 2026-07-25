@@ -17,9 +17,10 @@ NOT, SHOULD, and MAY follow RFC 2119.
 An **observation view** is defined by:
 
 - a `ViewContractId@version` — the versioned projection rules: which node kinds,
-  attributes, and capability metadata are included, how values are normalized, and which
-  redaction policy applies;
-- a **scope** — the subtree/filter it observes;
+  attributes, capability metadata, and state sources (§8) are included, how values are
+  normalized, and which redaction policy applies;
+- a **scope** — the subtree/filter it observes, plus the `sources/<StateSourceKey>`
+  scopes it includes;
 - a **security domain** — which principal class it serves.
 
 Standard view families:
@@ -62,6 +63,9 @@ snapshots are comparable only under the same `ViewContract` (or an explicit migr
 | `Redacted` | Field/value withheld by redaction policy |
 | `OutOfScope` | Outside the view's scope or exposure policy |
 | `BudgetTruncated` | Per-pump or per-view budget cut materialization short |
+| `SourceUnavailable` | A state source produced no document (§8) |
+| `Stale` | A sampled source's document is older than its declared freshness bound (§8) |
+| `UnsupportedContract` | The source's contract version is not supported by this view contract |
 
 Rules:
 
@@ -149,7 +153,48 @@ Rules:
   §7): no store ever receives an unredacted sensitive value; trace-lane diagnostics MUST
   NOT leak into recording artifacts.
 
-## 7. State timeline
+## 7. State sources
+
+Domain state that the node tree cannot represent (inventory, navigation, scene phase —
+the v1 state-probe concern) enters observation as **state sources**. A source appears
+inside views as its own scope, `sources/<StateSourceKey>`, holding one typed document
+governed by a `StateSourceContractId@version`
+([semantic-model.md](semantic-model.md) §8).
+
+### 7.1 Two source classes
+
+| Class | Contract | Strict eligibility |
+|---|---|---|
+| `RevisionBoundStateSource` | The application **publishes** an immutable typed document (with causation) as a kernel message; adoption swaps the document and allocates an observation revision atomically ([kernel-execution.md](kernel-execution.md) §4) | Comparable under strict replay; assertable, including cross-source and node+source predicates |
+| `SampledStateSource` | The document is read at materialization time (may consult external state); carries a declared freshness bound | Diagnostic only: excluded from strict comparison scope and from cross-source atomic assertions; staleness surfaces as `Stale` completeness |
+
+The distinction exists because strict comparison needs point-in-time consistency:
+only publication-through-the-kernel gives a document a place in the revision order.
+A callback captured at read time (the v1 probe shape) cannot guarantee that two
+sources — or a source and the node tree — describe the same moment.
+
+### 7.2 Source rules
+
+- **Exposure is declared per view family**: agent exposure and record exposure are
+  independent opt-ins; a source may be recordable but not agent-visible, or vice versa.
+- **Causation:** every revision-bound publication carries its causation (a
+  `RequestId`, or an external-source hint). A publication caused outside the active
+  controlled work that lands during a recorded interaction's effect window participates
+  in contamination (E5, [guarantees.md](guarantees.md) §5.5).
+- **Blob-reuse invalidation:** source publications count as relevant mutations for E3
+  checkpoint reuse ([guarantees.md](guarantees.md) §5.3).
+- **Registration pinning:** the source contract table is pinned in E1 and immutable
+  while a recording is active ([guarantees.md](guarantees.md) §5.1).
+- **Redaction and domains:** source documents follow the same
+  redaction-at-production and security-domain namespacing rules as node
+  materializations (§5, [semantic-model.md](semantic-model.md) §7).
+- **Replay:** the replay environment factory MUST wire source fixtures — initial
+  documents and reset — per the case's fixture contract
+  ([verification.md](verification.md) §5.3,
+  [adapter-conformance.md](adapter-conformance.md) §1); source and predicate contracts
+  join the artifact pre-scan allowlist ([recording-replay.md](recording-replay.md) §7).
+
+## 8. State timeline
 
 Because recording evidence and timeline diagnostics reference `StateStore`
 materializations, a bounded, queryable state history falls out of the same machinery:

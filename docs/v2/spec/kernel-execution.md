@@ -34,8 +34,10 @@ The kernel processes two lanes:
 - **Mutation lane** — capability invocations that may change application state. At most
   **one** mutation interaction is active at any time; the rest queue in admission order.
 - **Control/observation lane** — cancellation requests, status queries, observation
-  reads, wait-predicate evaluation, lifecycle messages (recording open/close fences,
-  incarnation teardown), and adapter completions. Control messages are processed with
+  reads, wait-predicate evaluation, standalone assertion and assertion-batch
+  evaluation ([verification.md](verification.md) §3), revision-bound state-source
+  publications ([observation-state.md](observation-state.md) §7), lifecycle messages
+  (recording open/close fences, incarnation teardown), and adapter completions. Control messages are processed with
   priority **at each turn boundary**; the spec deliberately does not claim "always
   processable", because a synchronous adapter call can occupy the owner thread —
   responsiveness is bounded instead by the adapter execution-time contract and enforced
@@ -80,7 +82,13 @@ A multiple-producer, single-consumer queue with:
   class, FIFO by adoption.
 - **Bounded capacity** per class with declared overflow policy: control-lane overflow is
   a kernel fault (it must be sized for the worst case); mutation-lane overflow refuses
-  admission (`Rejected(CapacityExhausted)`).
+  admission (`Rejected(CapacityExhausted)`); state-source publication overflow answers
+  the publisher with an explicit refusal — a partial document swap never occurs
+  ([guarantees.md](guarantees.md) §7).
+- **Atomic publication:** adoption of a revision-bound state-source publication swaps
+  the source's immutable document and allocates the observation revision in one step;
+  observers can never see a torn document or an unrevisioned swap
+  ([observation-state.md](observation-state.md) §7.1).
 - **Starvation rule:** the pump guarantees that if the mutation lane is idle, queued
   control messages are drained before the turn ends; if a mutation is active, control
   messages are processed at every step boundary of its state machine.

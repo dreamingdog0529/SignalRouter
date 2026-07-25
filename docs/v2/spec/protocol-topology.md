@@ -128,7 +128,7 @@ MCP tools are projections of the split-phase protocol:
 | `wait_for` | predicate operation (armed/resolved) |
 | `cancel` | explicit kernel cancel request |
 | `start_recording` / `stop_recording` / `replay_recording` / `get_operation_result` | control operations |
-| `inspect_state` (read-only timeline) | state timeline query ([observation-state.md](observation-state.md) §7) |
+| `inspect_state` (read-only timeline) | state timeline query ([observation-state.md](observation-state.md) §8) |
 
 Rules:
 

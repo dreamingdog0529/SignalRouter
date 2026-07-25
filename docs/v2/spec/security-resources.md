@@ -82,7 +82,7 @@ enforced fail-fast at its owning boundary:
 | `StateStore` | blob size, chain length, total budget, pin-aware GC |
 | `KernelTrace` | ring capacity; loss always permitted, gap-marked |
 | Protocol | per-direction message size, pending-handshake slots separated from authenticated slots, per-session in-flight caps |
-| Timeline | retention budget ([observation-state.md](observation-state.md) §7) |
+| Timeline | retention budget ([observation-state.md](observation-state.md) §8) |
 
 Exhaustion behavior is the guarantees taxonomy — refuse admission, degrade to
 `Incomplete`, or mark trace gaps — never silent drop, never unbounded growth

@@ -135,6 +135,9 @@ v2 replaces v1's single session epoch with distinct identifiers, each with one m
 | `RequestId` | One submitted request, assigned by the caller before dispatch | Deduplicated within incarnation + retention window |
 | `OperationId` | A long-running operation (wait, recording, replay) | Until resolved + retention |
 | `ContentId` | Content address of a materialized observation blob | Artifact-scoped (§5) |
+| `StateSourceKey` | One registered domain state source (§8) | Stable across incarnations |
+| `StateSourceContractId@version` | The schema contract of a state-source document (§8) | Versioned contract |
+| `PredicateContractId@version` | One registered predicate ([verification.md](verification.md) §2) | Versioned contract |
 
 Rules:
 
@@ -201,3 +204,26 @@ handling — in memory only, bounded lifetime, never logged, never echoed in err
 never entering any store — and recordings persist only secret references, resolved in
 memory at replay ([observation-state.md](observation-state.md) §5,
 [security-resources.md](security-resources.md) §3).
+
+## 8. State source identity and contracts
+
+Domain state sources ([observation-state.md](observation-state.md) §7) separate three
+concerns that v1's probe ID conflated:
+
+- **`StateSourceKey`** — the stable, ordinal-compared identity of one registered
+  source (`inventory`, `navigation`). It names the `sources/<key>` scope in views and
+  persists across incarnations.
+- **`StateSourceContractId@version`** — the document schema contract: field types and
+  stable field paths, collection key and ordering rules, migration rules, and the
+  unknown-field policy. Contract identity is independent of the key, so two
+  applications may bind the same contract under different keys.
+- **Display name** — a human label; never identity.
+
+Source contracts declare sensitivity per field (§7 rules apply unchanged) and two
+independent exposure flags — agent-visible and record-visible
+([observation-state.md](observation-state.md) §7.2). Registration validates the
+contract before any document is accepted; duplicate keys fail immediately, mirroring
+node-registration discipline (§3.2).
+
+Predicate contracts (`PredicateContractId@version`) follow the same registration
+pattern; their semantics live in [verification.md](verification.md) §2.
