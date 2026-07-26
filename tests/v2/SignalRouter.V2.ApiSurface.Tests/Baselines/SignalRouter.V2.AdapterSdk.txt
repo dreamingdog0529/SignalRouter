@@ -1,0 +1,240 @@
+# API surface of SignalRouter.V2.AdapterSdk
+
+sealed class SignalRouter.V2.AdapterSdk.AdapterDescriptor
+  property AdapterId : System.String { public get; }
+  property Capabilities : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.CapabilityProfileSupport> { public get; }
+  property CompletionLatencies : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.CompletionLatencyBound> { public get; }
+  property FencePhase : SignalRouter.V2.AdapterSdk.FramePhase { public get; }
+  property FramePhases : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.FramePhase> { public get; }
+  property InputClassifications : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.InputClassification> { public get; }
+  property SyncExecutionBoundMilliseconds : System.Int32 { public get; }
+  property Version : SignalRouter.V2.Contracts.ContractVersion { public get; }
+  public ctor(System.String adapterId, SignalRouter.V2.Contracts.ContractVersion version, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.FramePhase> framePhases, SignalRouter.V2.AdapterSdk.FramePhase fencePhase, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.CapabilityProfileSupport> capabilities, System.Int32 syncExecutionBoundMilliseconds, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.CompletionLatencyBound> completionLatencies, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.InputClassification> inputClassifications)
+
+sealed class SignalRouter.V2.AdapterSdk.CapabilityProfileSupport
+  property Capability : SignalRouter.V2.Contracts.CapabilityContractRef { public get; }
+  property Profiles : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.CompletionProfileRef> { public get; }
+  public ctor(SignalRouter.V2.Contracts.CapabilityContractRef capability, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.CompletionProfileRef> profiles)
+
+readonly struct SignalRouter.V2.AdapterSdk.CompletionLatencyBound
+  implements System.IEquatable<SignalRouter.V2.AdapterSdk.CompletionLatencyBound>
+  property MaxFrames : System.Int32 { public get; }
+  property Profile : SignalRouter.V2.Contracts.CompletionProfileRef { public get; }
+  public ctor(SignalRouter.V2.Contracts.CompletionProfileRef profile, System.Int32 maxFrames)
+  public method Equals(SignalRouter.V2.AdapterSdk.CompletionLatencyBound other) : System.Boolean
+  public operator op_Equality(SignalRouter.V2.AdapterSdk.CompletionLatencyBound left, SignalRouter.V2.AdapterSdk.CompletionLatencyBound right) : System.Boolean
+  public operator op_Inequality(SignalRouter.V2.AdapterSdk.CompletionLatencyBound left, SignalRouter.V2.AdapterSdk.CompletionLatencyBound right) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+
+sealed class SignalRouter.V2.AdapterSdk.ContinuationRequest
+  property Capability : SignalRouter.V2.Contracts.CapabilityContractRef { public get; }
+  property Payload : SignalRouter.V2.Contracts.InvocationPayload { public get; }
+  property Target : SignalRouter.V2.Contracts.TargetReference { public get; }
+  public ctor(SignalRouter.V2.Contracts.CapabilityContractRef capability, SignalRouter.V2.Contracts.TargetReference target, SignalRouter.V2.Contracts.InvocationPayload payload)
+
+readonly struct SignalRouter.V2.AdapterSdk.EffectAdoption
+  implements System.IEquatable<SignalRouter.V2.AdapterSdk.EffectAdoption>
+  property IsAdopted : System.Boolean { public get; }
+  property RefusalCode : SignalRouter.V2.Contracts.FaultCode { public get; }
+  public method Equals(SignalRouter.V2.AdapterSdk.EffectAdoption other) : System.Boolean
+  public operator op_Equality(SignalRouter.V2.AdapterSdk.EffectAdoption left, SignalRouter.V2.AdapterSdk.EffectAdoption right) : System.Boolean
+  public operator op_Inequality(SignalRouter.V2.AdapterSdk.EffectAdoption left, SignalRouter.V2.AdapterSdk.EffectAdoption right) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+  public override method ToString() : System.String
+  public static method Refused(SignalRouter.V2.Contracts.FaultCode code) : SignalRouter.V2.AdapterSdk.EffectAdoption
+  static property Adopted : SignalRouter.V2.AdapterSdk.EffectAdoption { public get; }
+
+sealed class SignalRouter.V2.AdapterSdk.EffectCompletion
+  property Continuations : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.ContinuationRequest> { public get; }
+  property Permit : SignalRouter.V2.AdapterSdk.EffectPermitToken { public get; }
+  property Resolution : SignalRouter.V2.AdapterSdk.EffectResolution { public get; }
+  public ctor(SignalRouter.V2.AdapterSdk.EffectPermitToken permit, SignalRouter.V2.AdapterSdk.EffectResolution resolution, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.ContinuationRequest>? continuations = null)
+
+readonly struct SignalRouter.V2.AdapterSdk.EffectPermitToken
+  implements System.IEquatable<SignalRouter.V2.AdapterSdk.EffectPermitToken>
+  property Incarnation : SignalRouter.V2.Contracts.RuntimeIncarnationId { public get; }
+  property IsDefault : System.Boolean { public get; }
+  property Nonce : System.UInt64 { public get; }
+  property Request : SignalRouter.V2.Contracts.RequestId { public get; }
+  public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.RuntimeIncarnationId incarnation, System.UInt64 nonce)
+  public method Equals(SignalRouter.V2.AdapterSdk.EffectPermitToken other) : System.Boolean
+  public operator op_Equality(SignalRouter.V2.AdapterSdk.EffectPermitToken left, SignalRouter.V2.AdapterSdk.EffectPermitToken right) : System.Boolean
+  public operator op_Inequality(SignalRouter.V2.AdapterSdk.EffectPermitToken left, SignalRouter.V2.AdapterSdk.EffectPermitToken right) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+  public override method ToString() : System.String
+
+sealed class SignalRouter.V2.AdapterSdk.EffectRequest
+  property Invocation : SignalRouter.V2.Contracts.CapabilityInvocation { public get; }
+  property Payload : SignalRouter.V2.Contracts.InvocationPayload { public get; }
+  property Permit : SignalRouter.V2.AdapterSdk.EffectPermitToken { public get; }
+  property Profile : SignalRouter.V2.Contracts.CompletionProfileRef { public get; }
+  property Target : SignalRouter.V2.Contracts.NodeRef { public get; }
+  public ctor(SignalRouter.V2.Contracts.CapabilityInvocation invocation, SignalRouter.V2.Contracts.InvocationPayload payload, SignalRouter.V2.Contracts.NodeRef target, SignalRouter.V2.AdapterSdk.EffectPermitToken permit, SignalRouter.V2.Contracts.CompletionProfileRef profile)
+
+sealed class SignalRouter.V2.AdapterSdk.EffectResolution
+  property CancellationDisposition : System.String { public get; }
+  property CancellationPhase : SignalRouter.V2.Contracts.CancellationPhase { public get; }
+  property CompletionEvidence : SignalRouter.V2.Contracts.CompletionEvidence { public get; }
+  property FaultCode : SignalRouter.V2.Contracts.FaultCode { public get; }
+  property Kind : SignalRouter.V2.AdapterSdk.EffectResolutionKind { public get; }
+  public static method Cancelled(SignalRouter.V2.Contracts.CancellationPhase phase, System.String disposition) : SignalRouter.V2.AdapterSdk.EffectResolution
+  public static method Faulted(SignalRouter.V2.Contracts.FaultCode code) : SignalRouter.V2.AdapterSdk.EffectResolution
+  public static method Succeeded(SignalRouter.V2.Contracts.CompletionEvidence evidence) : SignalRouter.V2.AdapterSdk.EffectResolution
+
+enum SignalRouter.V2.AdapterSdk.EffectResolutionKind
+  : System.Int32
+  Cancelled = 2
+  Faulted = 1
+  Succeeded = 0
+
+readonly struct SignalRouter.V2.AdapterSdk.FramePhase
+  implements System.IEquatable<SignalRouter.V2.AdapterSdk.FramePhase>
+  property IsDefault : System.Boolean { public get; }
+  property Value : System.String { public get; }
+  public ctor(System.String value)
+  public method Equals(SignalRouter.V2.AdapterSdk.FramePhase other) : System.Boolean
+  public operator op_Equality(SignalRouter.V2.AdapterSdk.FramePhase left, SignalRouter.V2.AdapterSdk.FramePhase right) : System.Boolean
+  public operator op_Inequality(SignalRouter.V2.AdapterSdk.FramePhase left, SignalRouter.V2.AdapterSdk.FramePhase right) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+  public override method ToString() : System.String
+  static property LateUpdate : SignalRouter.V2.AdapterSdk.FramePhase { public get; }
+  static property Update : SignalRouter.V2.AdapterSdk.FramePhase { public get; }
+
+interface SignalRouter.V2.AdapterSdk.IBootstrapRegistry
+  public method RegisterCapabilityContract(SignalRouter.V2.Contracts.CapabilityContractDescriptor descriptor) : System.Void
+  public method RegisterNode(SignalRouter.V2.Contracts.NodeRegistration registration) : SignalRouter.V2.Contracts.NodeRef
+  public method RegisterPredicateContract(SignalRouter.V2.Contracts.PredicateContractRef contract, SignalRouter.V2.Contracts.PredicateDefinition definition) : System.Void
+  public method RegisterStateSource(SignalRouter.V2.Contracts.StateSourceRegistration registration) : System.Void
+  public method RegisterViewContract(SignalRouter.V2.Contracts.ViewContractDescriptor descriptor) : System.Void
+
+interface SignalRouter.V2.AdapterSdk.IEffectCompletionSink
+  public method ReportCompletion(SignalRouter.V2.AdapterSdk.EffectCompletion completion) : System.Void
+  public method ReportFenceReached(SignalRouter.V2.AdapterSdk.EffectPermitToken permit) : System.Void
+
+interface SignalRouter.V2.AdapterSdk.IEffectExecutor
+  public method Attach(SignalRouter.V2.AdapterSdk.IEffectCompletionSink sink) : System.Void
+  public method Detach() : System.Void
+  public method Execute(SignalRouter.V2.AdapterSdk.EffectRequest request) : SignalRouter.V2.AdapterSdk.EffectAdoption
+  public method RequestCancel(SignalRouter.V2.AdapterSdk.EffectPermitToken permit) : System.Void
+
+interface SignalRouter.V2.AdapterSdk.IIngressSink
+  public method PublishSourceDocument(SignalRouter.V2.AdapterSdk.SourcePublication publication) : SignalRouter.V2.AdapterSdk.PublicationAnswer
+  public method ReportObservedExternal(SignalRouter.V2.AdapterSdk.ObservedExternalReport report) : System.Void
+  public method Submit(SignalRouter.V2.AdapterSdk.IntentSubmission submission) : System.Void
+
+interface SignalRouter.V2.AdapterSdk.IIngressSource
+  public method Attach(SignalRouter.V2.AdapterSdk.IIngressSink sink) : System.Void
+  public method Detach() : System.Void
+
+interface SignalRouter.V2.AdapterSdk.IMonotonicClock
+  property Now : System.Int64 { public get; }
+
+interface SignalRouter.V2.AdapterSdk.INodeRegistry
+  public method Register(SignalRouter.V2.Contracts.NodeRegistration registration, SignalRouter.V2.AdapterSdk.IRegistrationObserver? observer) : System.Void
+  public method SetCapabilityAvailability(SignalRouter.V2.Contracts.NodeRef node, SignalRouter.V2.Contracts.CapabilityContractRef capability, System.Boolean available, SignalRouter.V2.AdapterSdk.IRegistrationObserver? observer) : System.Void
+  public method Unregister(SignalRouter.V2.Contracts.NodeRef node, SignalRouter.V2.AdapterSdk.IRegistrationObserver? observer) : System.Void
+  public method UpdateAttributes(SignalRouter.V2.Contracts.NodeRef node, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.NodeAttribute> updates, SignalRouter.V2.AdapterSdk.IRegistrationObserver? observer) : System.Void
+
+interface SignalRouter.V2.AdapterSdk.INodeSource
+  public method Attach(SignalRouter.V2.AdapterSdk.IBootstrapRegistry bootstrap, SignalRouter.V2.AdapterSdk.INodeRegistry registry) : System.Void
+  public method Detach() : System.Void
+
+interface SignalRouter.V2.AdapterSdk.IPumpHost
+  public method Attach(SignalRouter.V2.AdapterSdk.IPumpable kernel) : System.Void
+  public method Detach() : System.Void
+
+interface SignalRouter.V2.AdapterSdk.IPumpable
+  public method Pump(SignalRouter.V2.AdapterSdk.PumpBudget budget) : SignalRouter.V2.AdapterSdk.PumpReport
+
+interface SignalRouter.V2.AdapterSdk.IRegistrationObserver
+  public method OnCompleted(SignalRouter.V2.AdapterSdk.RegistrationReceipt receipt) : System.Void
+
+interface SignalRouter.V2.AdapterSdk.ISubmissionObserver
+  public method OnAccepted(SignalRouter.V2.Contracts.RequestId request) : System.Void
+  public method OnRejected(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.RejectionReason reason) : System.Void
+
+enum SignalRouter.V2.AdapterSdk.InputClass
+  : System.Int32
+  Managed = 0
+  Observed = 1
+
+readonly struct SignalRouter.V2.AdapterSdk.InputClassification
+  implements System.IEquatable<SignalRouter.V2.AdapterSdk.InputClassification>
+  property Classification : SignalRouter.V2.AdapterSdk.InputClass { public get; }
+  property InputClassCode : System.String { public get; }
+  public ctor(System.String inputClass, SignalRouter.V2.AdapterSdk.InputClass classification)
+  public method Equals(SignalRouter.V2.AdapterSdk.InputClassification other) : System.Boolean
+  public operator op_Equality(SignalRouter.V2.AdapterSdk.InputClassification left, SignalRouter.V2.AdapterSdk.InputClassification right) : System.Boolean
+  public operator op_Inequality(SignalRouter.V2.AdapterSdk.InputClassification left, SignalRouter.V2.AdapterSdk.InputClassification right) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+
+sealed class SignalRouter.V2.AdapterSdk.IntentSubmission
+  property Capability : SignalRouter.V2.Contracts.CapabilityContractRef { public get; }
+  property Envelope : SignalRouter.V2.Contracts.IdentityEnvelope { public get; }
+  property Observer : SignalRouter.V2.AdapterSdk.ISubmissionObserver? { public get; }
+  property Payload : SignalRouter.V2.Contracts.InvocationPayload { public get; }
+  property Request : SignalRouter.V2.Contracts.RequestId { public get; }
+  property Target : SignalRouter.V2.Contracts.TargetReference { public get; }
+  public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.CapabilityContractRef capability, SignalRouter.V2.Contracts.TargetReference target, SignalRouter.V2.Contracts.InvocationPayload payload, SignalRouter.V2.Contracts.IdentityEnvelope envelope, SignalRouter.V2.AdapterSdk.ISubmissionObserver? observer)
+
+readonly struct SignalRouter.V2.AdapterSdk.LogicalTime
+  implements System.IComparable<SignalRouter.V2.AdapterSdk.LogicalTime>, System.IEquatable<SignalRouter.V2.AdapterSdk.LogicalTime>
+  property Value : System.Int64 { public get; }
+  public ctor(System.Int64 value)
+  public method CompareTo(SignalRouter.V2.AdapterSdk.LogicalTime other) : System.Int32
+  public method Equals(SignalRouter.V2.AdapterSdk.LogicalTime other) : System.Boolean
+  public operator op_Equality(SignalRouter.V2.AdapterSdk.LogicalTime left, SignalRouter.V2.AdapterSdk.LogicalTime right) : System.Boolean
+  public operator op_GreaterThan(SignalRouter.V2.AdapterSdk.LogicalTime left, SignalRouter.V2.AdapterSdk.LogicalTime right) : System.Boolean
+  public operator op_GreaterThanOrEqual(SignalRouter.V2.AdapterSdk.LogicalTime left, SignalRouter.V2.AdapterSdk.LogicalTime right) : System.Boolean
+  public operator op_Inequality(SignalRouter.V2.AdapterSdk.LogicalTime left, SignalRouter.V2.AdapterSdk.LogicalTime right) : System.Boolean
+  public operator op_LessThan(SignalRouter.V2.AdapterSdk.LogicalTime left, SignalRouter.V2.AdapterSdk.LogicalTime right) : System.Boolean
+  public operator op_LessThanOrEqual(SignalRouter.V2.AdapterSdk.LogicalTime left, SignalRouter.V2.AdapterSdk.LogicalTime right) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+  public override method ToString() : System.String
+
+sealed class SignalRouter.V2.AdapterSdk.ObservedExternalReport
+  property AuthorKey : SignalRouter.V2.Contracts.AuthorKey? { public get; }
+  property Node : SignalRouter.V2.Contracts.NodeRef? { public get; }
+  property SourceHint : System.String { public get; }
+  public ctor(System.String sourceHint, SignalRouter.V2.Contracts.NodeRef? node, SignalRouter.V2.Contracts.AuthorKey? authorKey)
+
+enum SignalRouter.V2.AdapterSdk.PublicationAnswer
+  : System.Int32
+  Accepted = 0
+  Refused = 1
+
+readonly struct SignalRouter.V2.AdapterSdk.PumpBudget
+  property Deadline : System.Int64 { public get; }
+  property FramePhase : SignalRouter.V2.AdapterSdk.FramePhase { public get; }
+  property LogicalNow : SignalRouter.V2.AdapterSdk.LogicalTime { public get; }
+  property MaxTurns : System.Int32 { public get; }
+  public ctor(System.Int32 maxTurns, System.Int64 deadline, SignalRouter.V2.AdapterSdk.LogicalTime logicalNow, SignalRouter.V2.AdapterSdk.FramePhase framePhase)
+
+sealed class SignalRouter.V2.AdapterSdk.PumpReport
+  property AwaitingAdapterCompletion : System.Boolean { public get; }
+  property AwaitingFramePhase : SignalRouter.V2.AdapterSdk.FramePhase? { public get; }
+  property ControlQueueDepth : System.Int32 { public get; }
+  property MutationQueueDepth : System.Int32 { public get; }
+  property SourcePublicationQueueDepth : System.Int32 { public get; }
+  property TurnsExecuted : System.Int32 { public get; }
+  property WorkRemaining : System.Boolean { public get; }
+  public ctor(System.Int32 turnsExecuted, System.Boolean workRemaining, System.Int32 controlQueueDepth, System.Int32 sourcePublicationQueueDepth, System.Int32 mutationQueueDepth, System.Boolean awaitingAdapterCompletion, SignalRouter.V2.AdapterSdk.FramePhase? awaitingFramePhase)
+
+sealed class SignalRouter.V2.AdapterSdk.RegistrationReceipt
+  property FailureCode : System.String? { public get; }
+  property Node : SignalRouter.V2.Contracts.NodeRef? { public get; }
+  property Succeeded : System.Boolean { public get; }
+  public static method Failure(System.String failureCode) : SignalRouter.V2.AdapterSdk.RegistrationReceipt
+  public static method Success(SignalRouter.V2.Contracts.NodeRef? node) : SignalRouter.V2.AdapterSdk.RegistrationReceipt
+
+sealed class SignalRouter.V2.AdapterSdk.SourcePublication
+  property Causation : SignalRouter.V2.Contracts.EventCausation { public get; }
+  property Document : SignalRouter.V2.Contracts.SourceDocument { public get; }
+  property Source : SignalRouter.V2.Contracts.StateSourceKey { public get; }
+  public ctor(SignalRouter.V2.Contracts.StateSourceKey source, SignalRouter.V2.Contracts.SourceDocument document, SignalRouter.V2.Contracts.EventCausation causation)
