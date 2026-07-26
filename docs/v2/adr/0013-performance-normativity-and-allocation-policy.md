@@ -73,14 +73,21 @@ list was ranked by evidence, not intuition.
 ## Consequences
 
 - Performance work is falsifiable: every optimization PR cites the baseline row
-  it moves and lands the gate that keeps it moved. The track's measured effect
-  so far — quiescent pump 222 ns/280 B → 81 ns/56 B, idle at 4096 retained
-  terminals 636 µs/714 KB → 82 ns/56 B, a 256-wait revision advance
-  53.4 ms/108 MB → 543 µs/1.19 MB — is recorded as profile input, not as spec.
-- The remaining structural costs (aggregate construction copies, codec staging)
-  are the representation phase's work list, gated the same way.
-- Kernel model tests gain a Release-configuration CI job; Debug builds cannot
-  host exact-counter gates.
+  it moves and lands the gate that keeps it moved. Measured values live in the
+  measurement artifacts with full provenance — the pre-optimization record in
+  `bench/v2/BASELINE.md`, the running post-change record in
+  `bench/v2/PROFILE-default.md` (the first `PerformanceConformanceProfile`
+  draft) — never as numbers quoted only in an ADR. The gated properties so far:
+  status republication on change only, retained-state independence of the
+  quiescent pump (exact equality), zero-allocation trace-ring emission at
+  capacity, deadline-indexed expiry, and one shared wait-evaluation read per
+  sampled-free domain.
+- The remaining structural costs (aggregate construction copies, codec staging,
+  the pump report's own allocation) are the representation phase's work list,
+  gated the same way.
+- Kernel model tests gain a Release-configuration CI job. Exact-equality gates
+  hold in Debug too and run in both configurations; certification and every
+  recorded number are Release-only.
 
 ## Rejected alternatives
 

@@ -101,6 +101,11 @@ incarnations, and therefore the identity recordings and tests bind to.
 - Uniqueness within an incarnation is enforced at registration; duplicates fail
   immediately, and are never resolved by "first match".
 - `AuthorKey`s are compared ordinally and never normalized.
+- **Key identity survives re-registration.** A node registered under a
+  previously-used key *is* the same logical node: references that bind by key —
+  a child's parent reference above all — resolve to the re-registered node.
+  Key binding is by string identity, never by the lifetime of the record that
+  once carried it ([adr 0014](../adr/0014-two-layer-identifier-representation.md)).
 - **Strict-replay obligation:** every node that a record view includes for strict
   comparison MUST have an `AuthorKey`. Nodes without one are excluded from strict
   comparison scope (they may still appear in agent views). Dynamic collections MUST use

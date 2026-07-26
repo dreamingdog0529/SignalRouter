@@ -161,9 +161,9 @@ adversary manipulates. Profile revisions therefore bound the **semantic**
 resources — live node count, per-node attribute count, distinct dynamic
 identifier vocabulary per registration surface, source and capability counts —
 and internal structures derive their capacities from those ceilings. Each
-semantic ceiling is enforced at its owning boundary with an answer from the
-guarantees taxonomy, like every other bound in §5. Reserved until the
-representation work lands: `Kernel.MaxLiveNodes`,
+semantic ceiling will be enforced, when its key lands, at its owning boundary
+with an answer from the guarantees taxonomy, like every other bound in §5.
+Reserved until the representation work lands: `Kernel.MaxLiveNodes`,
 `Kernel.MaxAttributesPerNode`, `Kernel.MaxDistinctDynamicNames`.
 
 ## 6. Artifact trust
