@@ -51,6 +51,12 @@ namespace SignalRouter.V2.Kernel
         private readonly List<Interaction> committingEvidence = new List<Interaction>();
         private readonly Dictionary<OperationId, WaitEntry> waits = new Dictionary<OperationId, WaitEntry>();
 
+        // Timeout ordering for the armed waits: due entries pop in O(log n)
+        // instead of a per-pump scan, and every resolution path removes its
+        // entry for real, so a wait armed without a timeout can never linger as
+        // a tombstone (performance-track finding A4).
+        private readonly DeadlineIndex<OperationId> waitDeadlines = new DeadlineIndex<OperationId>();
+
         private Interaction? active;
         private SubmissionMessage? stalledAdmission;
         private bool started;
@@ -1464,6 +1470,7 @@ namespace SignalRouter.V2.Kernel
             }
 
             waits.Add(message.Operation, entry);
+            waitDeadlines.Add(message.Operation, message.TimeoutAtLogicalTime);
         }
 
         private void ResolveWait(OperationId operation, PredicateResolution resolution)
@@ -1471,6 +1478,7 @@ namespace SignalRouter.V2.Kernel
             if (waits.TryGetValue(operation, out var entry))
             {
                 waits.Remove(operation);
+                waitDeadlines.Remove(operation);
                 Emit(EventKind.PredicateResolved, EventCausation.None, operation: operation);
                 entry.Observer.OnResolved(operation, resolution);
             }
@@ -1478,21 +1486,11 @@ namespace SignalRouter.V2.Kernel
 
         private void ResolveTimedOutWaits()
         {
-            List<OperationId>? timedOut = null;
-            foreach (var pair in waits)
+            // Pop-and-resolve is iteration-safe (no dictionary enumeration to
+            // invalidate) and deterministic: deadline order, arm order on ties.
+            while (waitDeadlines.TryPopExpired(currentLogicalNow, out var operation))
             {
-                if (pair.Value.TimeoutAtLogicalTime <= currentLogicalNow)
-                {
-                    (timedOut ??= new List<OperationId>()).Add(pair.Key);
-                }
-            }
-
-            if (timedOut != null)
-            {
-                foreach (var operation in timedOut)
-                {
-                    ResolveWait(operation, PredicateResolution.TimedOut);
-                }
+                ResolveWait(operation, PredicateResolution.TimedOut);
             }
         }
 
