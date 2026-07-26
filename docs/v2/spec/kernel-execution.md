@@ -173,14 +173,17 @@ Rules:
   and source-publication turns may advance `SourceRevision` between `Observing` and
   the durable commit of the terminal evidence, so the after-watermark alone cannot
   re-derive the after state. When a canonical-state codec is configured, the kernel
-  retains the record-view materialization pinned at `Observing` per interaction until
-  the terminal evidence commits, and offers it to the evidence coordinator with a
-  basis-match guarantee; without the codec, nothing is retained (recording is
-  unavailable anyway). A coordinator-requested fresh materialization takes an expected
-  basis and answers basis-mismatch explicitly instead of silently materializing a
-  different revision — the E3 response to a mismatch is re-materialization at the new
-  revision ([guarantees.md](guarantees.md) §5.3); the E4 response is to use the
-  retained materialization, never a fresh one.
+  retains a record-view materialization per interaction until the terminal evidence
+  commits — pinned at `Observing` for effect-bearing interactions, and captured at
+  the terminal decision itself for zero-effect terminals (rejections and pre-effect
+  faults or cancellations never enter `Observing`, yet every E4 carries an after
+  record-view, [guarantees.md](guarantees.md) §5.4). Without the codec, nothing is
+  retained (recording is unavailable anyway). A coordinator-requested fresh
+  materialization takes an expected basis and answers basis-mismatch explicitly
+  instead of silently materializing a different revision — the E3 response to a
+  mismatch is re-materialization at the new revision
+  ([guarantees.md](guarantees.md) §5.3); the E4 response is to use the retained
+  materialization, never a fresh one.
 
 ## 6. Pump contract
 

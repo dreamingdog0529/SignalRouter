@@ -73,6 +73,16 @@ ObservationSnapshot {
 snapshots are comparable only under the same `ViewContract` (or an explicit migration,
 [recording-replay.md](recording-replay.md) §5).
 
+**Unaddressed snapshots.** A runtime configured without the canonical-state codec
+(§5.1) produces snapshots whose `ContentId` leg is explicitly absent. An unaddressed
+snapshot still pins one revision-consistent materialization, so live pinned reads,
+pagination against the held pin, and predicate evaluation work unchanged; assertion
+answers then omit the `ContentId` field ([verification.md](verification.md) §3.3).
+Unaddressed snapshots MUST NOT participate in recording, the timeline, or any surface
+that references state by `ContentId` — absence is honest and never substituted with a
+placeholder identifier
+([adr 0011](../adr/0011-observation-materialization-and-state-store.md)).
+
 ## 3. Completeness
 
 `CompletenessMap` is local, not a global boolean. Each omission carries a reason:
@@ -102,15 +112,20 @@ Rules:
   `CompletenessMap` is a bounded, ordinally sorted set of `(regionPrefix, reason)`
   entries in which the prefix is a unique key; the longest matching prefix answers a
   path; regions without an entry are complete; the empty map means the materialization
-  is complete. When the entry bound would be exceeded, the overflowing entries coalesce
-  into a single root-region `BudgetTruncated` entry — a completeness entry is itself
-  never silently dropped ([guarantees.md](guarantees.md) §8).
+  is complete.
+- **Bounded coalescing.** The map reserves one slot for a root-region
+  `BudgetTruncated` entry. When an insertion would exceed the entry bound, entries are
+  folded into that root entry deterministically — deepest prefix first, ties broken by
+  ordinal order, last — until the map fits; the result never exceeds the bound. The
+  root entry is the honest record that finer-grained reasons were dropped; a
+  completeness condition is therefore never silently unrepresented, even when its
+  specific entry is ([guarantees.md](guarantees.md) §8).
 - **One mapping to `Unevaluable`.** The reason vocabulary here and the
   `Unevaluable(reason)` vocabulary of [guarantees.md](guarantees.md) §3.5 are one
   deliberate mirror; guarantees.md §3.5 is the single normative mapping (including the
   `Virtualized`/`BudgetTruncated` → `Incompleteness` collapse, which loses nothing
-  because the originating reason stays in the `CompletenessMap`). Implementations MUST
-  NOT maintain a second mapping table.
+  while the map is within bounds because the originating reason stays in its
+  `CompletenessMap` entry). Implementations MUST NOT maintain a second mapping table.
 
 ## 4. Delivery: snapshot + delta + resync
 
@@ -189,15 +204,19 @@ The runtime-owned `StateStore` core is an in-memory, content-addressed **cache**
   the seam yields the `ContentId`, the canonical payload bytes, and the exact encoded
   length in one answer, so downstream consumers can write and account for the blob
   without re-encoding. A runtime configured without the codec serves views, pinned
-  snapshots, and predicate evaluation normally, but retains no blobs, produces no
-  timeline, and cannot support recording — honest degradation, never placeholder
-  identifiers. Cross-domain concealment is enforced by the store's domain-keyed lookup
-  and by release-surface authorization; whether the codec additionally folds a keyed
-  secret into digest production is a `Codec.CanonicalState` decision (adr 0011, open
-  point).
-- **Pins are reference counts** keyed by `(blob, owning OperationId)`; releasing an
-  owner releases all of its pins. Unpinned blobs are evicted oldest-insertion-first
-  when a `Put` would exceed the store budget; pinned blobs are never evicted.
+  reads, and predicate evaluation as *unaddressed* snapshots (§2), but retains no
+  blobs, produces no timeline, and cannot support recording — honest degradation,
+  never placeholder identifiers. Cross-domain concealment is enforced by the store's
+  domain-keyed lookup and by release-surface authorization; whether the codec
+  additionally folds a keyed secret into digest production is a `Codec.CanonicalState`
+  decision (adr 0011, open point).
+- **Pins are reference counts** keyed by `(blob, lease owner)`, where the owner is a
+  discriminated lease identity: a snapshot-read operation, an interaction's retained
+  after-basis (its `RequestId`), a recording, or the reserved timeline owner.
+  Releasing an owner releases all of its pins; an interaction's after-basis pin
+  releases when its terminal evidence commits. Unpinned blobs are evicted
+  oldest-insertion-first when a `Put` would exceed the store budget; pinned blobs are
+  never evicted.
 - **Refusal is structured, never silent**: a `Put` that cannot fit answers with the
   reason (blob over its own bound, or the store budget unfit even after eviction), and
   each caller surfaces it per its lane and the failure matrix of

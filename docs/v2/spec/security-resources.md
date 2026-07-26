@@ -138,6 +138,7 @@ are named here and receive their defaults when the owning module lands.
 | `ObservationViews.MaxRegisteredContracts` | 64 | bootstrap-time bound |
 | `ObservationViews.MaxPinnedSnapshots` | 32 | deferred + active pins count together; overflow answers `CapacityExhausted` |
 | `ObservationViews.MaxMaterializationNodes` | 2048 | ceiling for every materialization including internal evaluation reads; overflow surfaces as `BudgetTruncated` completeness and evaluates as `Unevaluable(Incompleteness)` |
+| `ObservationViews.MaxMaterializationBytes` | 256 KiB | aggregate byte ceiling per materialization (codec-free views included, where `StateStore.MaxBlobBytes` cannot apply); overflow surfaces as `BudgetTruncated` completeness |
 | Reserved | — | `RecordingSink.*` (declared at open), `Protocol.*` (message/slot caps) |
 
 ## 6. Artifact trust
