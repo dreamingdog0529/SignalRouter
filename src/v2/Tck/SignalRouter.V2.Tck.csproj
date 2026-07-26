@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>SignalRouter.V2.Tck</AssemblyName>
+    <RootNamespace>SignalRouter.V2.Tck</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- The versioned, black-box TCK core (adapter-conformance.md §7.2):
+         deliberately free of any test-framework dependency so the same suite runs
+         under plain .NET CI and inside engine test runners (e.g. Unity) whose
+         bundled NUnit version this repo does not control. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AdapterSdk/SignalRouter.V2.AdapterSdk.csproj" />
+    <ProjectReference Include="../Contracts/SignalRouter.V2.Contracts.csproj" />
+    <ProjectReference Include="../Kernel/SignalRouter.V2.Kernel.csproj" />
+  </ItemGroup>
+</Project>
