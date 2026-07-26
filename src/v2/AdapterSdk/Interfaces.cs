@@ -89,6 +89,13 @@ namespace SignalRouter.V2.AdapterSdk
         void RegisterStateSource(StateSourceRegistration registration);
 
         void RegisterPredicateContract(PredicateContractRef contract, PredicateDefinition definition);
+
+        /// <summary>
+        /// Registers a view contract (observation-state.md §1, ADR 0011) — bootstrap
+        /// only, so a view contract can never change while a recording is active.
+        /// The `kernel-raw` identifier family is reserved and rejected.
+        /// </summary>
+        void RegisterViewContract(ViewContractDescriptor descriptor);
     }
 
     /// <summary>The receipt answering a runtime registration message (ADR 0010).</summary>

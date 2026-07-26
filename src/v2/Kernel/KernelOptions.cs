@@ -80,7 +80,15 @@ namespace SignalRouter.V2.Kernel
             int traceRingByteCapacity = 4 * 1024 * 1024,
             int maxArmedWaits = 256,
             int maxContinuationsPerParent = 32,
-            int maxRegisteredPredicateContracts = 1024)
+            int maxRegisteredPredicateContracts = 1024,
+            int observationBudgetBytes = 256 * 1024,
+            int observationBudgetNodes = 2048,
+            int maxRegisteredViewContracts = 64,
+            int maxPinnedSnapshots = 32,
+            int maxCompletenessEntries = 1024,
+            int maxObservationFieldBytes = 4096,
+            int maxMaterializationNodes = 2048,
+            int maxMaterializationBytes = 256 * 1024)
         {
             MonotonicClock = monotonicClock ?? throw new ArgumentNullException(nameof(monotonicClock));
             if (redactionKey == null || redactionKey.Length == 0)
@@ -104,7 +112,11 @@ namespace SignalRouter.V2.Kernel
                 recoveryIndexPendingCapacity < 1 || recoveryIndexTerminalCapacity < 1 ||
                 recoveryIndexTerminalRetentionLogicalTime < 1 || traceRingCapacity < 1 ||
                 traceRingByteCapacity < 1 || maxArmedWaits < 1 || maxContinuationsPerParent < 1 ||
-                maxRegisteredPredicateContracts < 1)
+                maxRegisteredPredicateContracts < 1 || observationBudgetBytes < 1 ||
+                observationBudgetNodes < 1 || maxRegisteredViewContracts < 1 ||
+                maxPinnedSnapshots < 1 || maxCompletenessEntries < 1 ||
+                maxObservationFieldBytes < 1 || maxMaterializationNodes < 1 ||
+                maxMaterializationBytes < 1)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(mailboxControlCapacity), "Every bound must be positive.");
@@ -141,6 +153,14 @@ namespace SignalRouter.V2.Kernel
             MaxArmedWaits = maxArmedWaits;
             MaxContinuationsPerParent = maxContinuationsPerParent;
             MaxRegisteredPredicateContracts = maxRegisteredPredicateContracts;
+            ObservationBudgetBytes = observationBudgetBytes;
+            ObservationBudgetNodes = observationBudgetNodes;
+            MaxRegisteredViewContracts = maxRegisteredViewContracts;
+            MaxPinnedSnapshots = maxPinnedSnapshots;
+            MaxCompletenessEntries = maxCompletenessEntries;
+            MaxObservationFieldBytes = maxObservationFieldBytes;
+            MaxMaterializationNodes = maxMaterializationNodes;
+            MaxMaterializationBytes = maxMaterializationBytes;
         }
 
         public IMonotonicClock MonotonicClock { get; }
@@ -176,6 +196,26 @@ namespace SignalRouter.V2.Kernel
         public int MaxContinuationsPerParent { get; }
 
         public int MaxRegisteredPredicateContracts { get; }
+
+        /// <summary>Per-pump snapshot/timeline materialization budget (security-resources.md §5.1).</summary>
+        public int ObservationBudgetBytes { get; }
+
+        public int ObservationBudgetNodes { get; }
+
+        public int MaxRegisteredViewContracts { get; }
+
+        /// <summary>Deferred and active snapshot pins count together toward this bound.</summary>
+        public int MaxPinnedSnapshots { get; }
+
+        public int MaxCompletenessEntries { get; }
+
+        /// <summary>Per-field ceiling in UTF-16 code units.</summary>
+        public int MaxObservationFieldBytes { get; }
+
+        /// <summary>Ceiling for every materialization, including internal evaluation reads.</summary>
+        public int MaxMaterializationNodes { get; }
+
+        public int MaxMaterializationBytes { get; }
 
         /// <summary>Default deny: false when the principal's kind has no bound domain.</summary>
         public bool TryResolveDomain(Principal principal, out SecurityDomainId domain)
