@@ -64,11 +64,15 @@ list was ranked by evidence, not intuition.
   order-sensitive equality, dictionary-key behavior); "missing versus empty" is
   expressed by the surrounding type (nullable or a presence flag), never by a
   distinguished default sentinel.
-- **The dependency axiom's scope is production code.** The
-  PackageReference-zero rule of [adr 0007](0007-codec-and-package-boundaries.md)
-  binds the shipped `src/v2` assemblies. Test hosts and the benchmark host are
-  leaf executables outside every consumer's restore path; their tooling
-  dependencies (NUnit, BenchmarkDotNet) are not violations.
+- **The dependency axiom's scope is exactly ADR 0007's.** The
+  PackageReference-zero rule binds the BCL-only core as
+  [adr 0007](0007-codec-and-package-boundaries.md) scopes it — `Contracts`,
+  `Kernel`, `ProtocolSession`, `AdapterSdk`; codec leaves own their declared
+  serializer dependencies and engine adapters their engine dependencies,
+  unchanged. What this ADR clarifies is the other side: test hosts and the
+  benchmark host are leaf executables outside every consumer's restore path,
+  and their tooling dependencies (NUnit, BenchmarkDotNet) are not violations
+  of anything.
 
 ## Consequences
 
@@ -78,10 +82,13 @@ list was ranked by evidence, not intuition.
   `bench/v2/BASELINE.md`, the running post-change record in
   `bench/v2/PROFILE-default.md` (the first `PerformanceConformanceProfile`
   draft) — never as numbers quoted only in an ADR. The gated properties so far:
-  status republication on change only, retained-state independence of the
-  quiescent pump (exact equality), zero-allocation trace-ring emission at
-  capacity, deadline-indexed expiry, and one shared wait-evaluation read per
-  sampled-free domain.
+  retained-state independence of the quiescent pump at the default terminal
+  capacity (exact equality — this also guards the publish-on-change fix, whose
+  regression would break the equality), the absolute quiescent-pump constant
+  (exactly one report instance), zero-allocation trace-ring emission at the
+  default ring capacity, and per-domain sharing of the wait-evaluation read (a
+  proportionality bound). The deadline index is benchmark-recorded (L2): its
+  win is time, which counters cannot gate.
 - The remaining structural costs (aggregate construction copies, codec staging,
   the pump report's own allocation) are the representation phase's work list,
   gated the same way.

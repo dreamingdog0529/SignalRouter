@@ -13,7 +13,8 @@ record is [`BASELINE.md`](BASELINE.md).
 | | |
 |---|---|
 | Profile | `default@0.1` (draft) |
-| Measured at | 2026-07-27, branch of the P1 series (post status-publish-skip, trace-ring, deadline-index, wait-shared-read, hot-path cleanups) |
+| Measured commit | `7cf7654c8947d040ce6565bfe303b107ca1d1a3b` (head of the P1 series: status-publish-skip, trace-ring, deadline-index, wait-shared-read, hot-path cleanups; the production tree is identical on the docs branch that records this file) |
+| Measured on | 2026-07-27 |
 | Machine | Intel Core i9-9900K (Coffee Lake, 8C/16T), Windows 11 25H2 |
 | Runtime | .NET 10.0.10, X64 RyuJIT x86-64-v3, Concurrent Workstation GC, no PGO pinning |
 | Build | Release |
@@ -40,9 +41,16 @@ otherwise.
 
 ## Gated properties (L1, in `tests/v2/SignalRouter.V2.Performance.Tests`)
 
+Each gate runs the exact workload of its row above:
+
 - Quiescent-pump allocation is independent of retained terminals (exact
-  equality, 0 vs 1024 retained).
-- Trace-ring emission at capacity allocates exactly zero bytes.
+  equality, 0 vs **4096** retained — the default terminal capacity).
+- The quiescent pump allocates exactly 56 B (one `PumpReport` instance; becomes
+  the zero gate when the report becomes a value type).
+- Trace-ring emission at capacity allocates exactly zero bytes (**8192**-entry
+  ring — the default ring capacity).
+- A 256-wait revision advance allocates less than 2× a 1-wait advance
+  (proportionality; per-wait re-materialization would be ~96×).
 
 ## Revision policy
 

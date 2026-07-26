@@ -45,11 +45,14 @@ publication), removing the urgency that motivated the original directive.
     alone detects staleness within one table, never a foreign table's handle.
   - **H3** Generations increment checked; a slot at generation ceiling retires
     permanently. Wrap-around ABA is structurally impossible, not improbable.
-    Retired slots consume capacity against the semantic ceilings of
-    [security-resources.md](../spec/security-resources.md) §5.2, and a table
-    whose ceiling is reached refuses further registration with an answer from
-    the guarantees taxonomy — it never grows unbounded and never recycles a
-    retired slot.
+    Retired slots are implementation tombstones: they count against the
+    table's own derived capacity, **never against the live semantic ceilings**
+    of [security-resources.md](../spec/security-resources.md) §5.2 (a runtime
+    with headroom in live nodes must not refuse registration merely for
+    historical churn). Table capacity derivation therefore includes churn
+    headroom; a table that exhausts it refuses further registration with an
+    answer from the guarantees taxonomy — it never grows unbounded and never
+    recycles a retired slot.
   - **H4** Handles are acquired and released only on the pump thread as portable
     messages commit — producers and decoders never mint handles.
   - **H5** Multi-registration commits are reserve → validate-all → commit with
