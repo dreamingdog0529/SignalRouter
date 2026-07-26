@@ -53,6 +53,10 @@ public class SubmitToTerminalBenchmarks
     public void IterationSetup()
     {
         world = BenchWorld.Create(nodeCount: 64, withCodec: true);
+        // Settle the initial checkpoint (bootstrap revisions materialize and
+        // encode on the first pumps) so the measured window contains only
+        // submission work.
+        world.PumpUntilIdle();
     }
 
     [Benchmark(OperationsPerInvoke = 512)]
@@ -87,7 +91,7 @@ public class SnapshotBenchmarks
     public void Setup()
     {
         world = BenchWorld.Create(Nodes, WithCodec);
-        world.VerifySnapshotSucceeds();
+        world.VerifySnapshotSucceeds(Nodes);
     }
 
     [Benchmark]

@@ -27,9 +27,16 @@ input to it.
   allocations, and Unity engine objects are outside every number here; the
   Unity-host tier (plan L3) is **unmeasured** until Adapter.Unity exists.
 - The bench world is flat (no parent hierarchy), all nodes visible, two
-  attributes and one capability per node; interactions terminate by executor
-  refusal (zero-effect). Hierarchy-depth cost and effect/completion
-  choreography are not exercised yet.
+  attributes and one capability per node, one revision-bound source published
+  once at setup; interactions terminate by executor refusal (zero-effect).
+  Hierarchy-depth cost and effect/completion choreography are not exercised
+  yet.
+- Setup settles the initial checkpoint and verifies one **complete**
+  (untruncated) snapshot at the advertised node count before anything is
+  measured — an earlier draft of this baseline measured a budget-truncated
+  2048-node projection with per-pump checkpoint retries and overstated that
+  row by ~2× (caught in review; the world now raises the materialization
+  ceilings and verification would throw).
 - `Allocated` is bytes per single operation (1 KB = 1024 B).
 
 ## Idle pump — quiescent cost vs. retained state
@@ -38,26 +45,26 @@ input to it.
 
 | RetainedTerminals | Mean | Allocated |
 |---:|---:|---:|
-| 0 | 221.0 ns | 280 B |
-| 4096 | 604.2 µs | 714,103 B |
+| 0 | 222.3 ns | 280 B |
+| 4096 | 636.0 µs | 714,103 B |
 
 The quiescent pump is **not** zero-allocation (280 B: `PumpReport` plus status
 publication machinery), and its cost scales with retained terminals —
-**2,700× slower and 2,550× more allocation** at the default terminal capacity,
-with Gen2 collections. This is findings A1/A4 (unconditional `PublishStatus`
-dictionary rebuild + full `ExpireTerminals` scan per pump) measured. Plan
-targets: idle-zero (L1 canary) and retained-state independence.
+**~2,860× slower and ~2,550× more allocation** at the default terminal
+capacity, with Gen2 collections. This is findings A1/A4 (unconditional
+`PublishStatus` dictionary rebuild + full `ExpireTerminals` scan per pump)
+measured. Plan targets: idle-zero (L1 canary) and retained-state independence.
 
 ## Submit → zero-effect terminal
 
 `SubmitToTerminalBenchmarks`: admission, canonicalization, state machine,
-terminal, status publication; fresh world per iteration, 512 ops/iteration
-(the RecoveryIndex grows 0→512 within an iteration, so this number includes a
-mild accumulation component).
+terminal, status publication; fresh settled world per iteration, 512
+ops/iteration (the RecoveryIndex grows 0→512 within an iteration, so this
+number includes a mild accumulation component).
 
 | Mean | Allocated |
 |---:|---:|
-| 165.7 µs | 272.91 KB |
+| 150.1 µs | 270.38 KB |
 
 A quarter megabyte to refuse one interaction. Includes per-admission
 `SHA256.Create()`/HMAC churn (B5) and the growing `PublishStatus` rebuild (A1).
@@ -65,25 +72,23 @@ A quarter megabyte to refuse one interaction. Includes per-admission
 ## Snapshot pin + release
 
 `SnapshotBenchmarks`: request one revision-consistent snapshot, pump to
-delivery, release the pin, pump. The busy-path headline (acceptance
-criterion 1).
+delivery, release the pin, pump. Setup verifies the snapshot is complete at
+the advertised node count. The busy-path headline (acceptance criterion 1).
 
 | Nodes | Codec | Mean | Allocated |
 |---:|---|---:|---:|
-| 64 | none | 49.5 µs | 109.58 KB |
-| 64 | canonical v1 | 82.7 µs | 152.32 KB |
-| 512 | none | 452.3 µs | 857.77 KB |
-| 512 | canonical v1 | 800.4 µs | 1,178.11 KB |
-| 2048 | none | 1.594 ms | 2,308.85 KB |
-| 2048 | canonical v1 | 11.124 ms | 9,569.02 KB |
+| 64 | none | 49.6 µs | 109.94 KB |
+| 64 | canonical v1 | 81.1 µs | 152.52 KB |
+| 512 | none | 462.9 µs | 858.13 KB |
+| 512 | canonical v1 | 783.4 µs | 1,198.31 KB |
+| 2048 | none | 2.625 ms | 3,435.25 KB |
+| 2048 | canonical v1 | 4.805 ms | 4,715.60 KB |
 
-~1.7 KB of allocation per materialized node before encoding (the multi-copy
-`ValueList` construction chain, findings B1/B4). At 2048 nodes with the codec
-the operation allocates **9.6 MB and triggers Gen2** — the with-codec delta
-(7,260 KB) is ~5.3× the direct encode cost below; the statically visible extra
-copies are the `PayloadWriter.ToArray` + `CanonicalStateResult` defensive-copy
-chain (finding B5, `Contracts/Observation/CanonicalState.cs:36-51`) plus the
-StateStore lease path.
+**~1.7 KB of allocation per materialized node before encoding** (the
+multi-copy `ValueList` construction chain, findings B1/B4), linear in node
+count. The with-codec delta tracks the direct encode cost below (at 2048
+nodes: 1,280 KB vs 1,360 KB direct) — the codec's own staging and copy chain
+(B5) dominates that delta, and Gen2 collections appear at 2048 nodes.
 
 ## Canonical-state encode (codec alone, no kernel)
 
@@ -107,10 +112,10 @@ world (acceptance criterion 3).
 
 | ArmedWaits | Mean | Allocated |
 |---:|---:|---:|
-| 1 | 691.2 µs | 1.07 MB |
-| 256 | 52.649 ms | 108.08 MB |
+| 1 | 717.6 µs | 1.07 MB |
+| 256 | 53.380 ms | 108.08 MB |
 
-**One revision advance with 256 armed waits costs 52.6 ms and 108 MB** —
+**One revision advance with 256 armed waits costs 53 ms and 108 MB** —
 finding A3 measured: every armed wait triggers a full node-store
 materialization after the turn. Plan target: one revision-bound
 materialization per domain, sampled overlay regenerated per read (D4) — the
@@ -126,8 +131,8 @@ machine). Agreement with MemoryDiagnoser confirms both instruments:
 |---|---:|---:|
 | Idle pump (0 terminals) | 280 B/op | 280 B/op |
 | Idle pump (1024 terminals) | 168,208 B/op | — (BDN row is 4096: 714,103 B) |
-| Submit → terminal | 206,256 B/op¹ | 279,459 B/op¹ |
-| Snapshot 512 nodes + codec | 1,227,003 B/op | 1,206,384 B/op |
+| Submit → terminal | 206,487 B/op¹ | 276,869 B/op¹ |
+| Snapshot 512 nodes + codec | 1,227,235 B/op | 1,227,069 B/op |
 
 ¹ Both include RecoveryIndex accumulation during measurement, at different
 retained counts (128 vs 512 ops per window) — the growth term differs, the
@@ -139,7 +144,7 @@ shape agrees.
 2. **Idle cost is O(retained)** (280 B → 714 KB) — A1 + A4.
 3. **Wait reevaluation is O(waits × nodes)** (1.07 MB → 108 MB) — A3.
 4. **Materialization allocates ~1.7 KB/node before encoding** — B1/B4.
-5. **The with-codec snapshot pays multiples of the direct encode** — B5.
+5. **A with-codec snapshot pays approximately one full encode on top** — B5.
 
 The P1 (algorithm) and P3/P4 (representation/codec) PRs each cite the rows
 they claim to move.

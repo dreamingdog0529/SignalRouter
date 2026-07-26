@@ -89,7 +89,13 @@ public sealed class BenchWorld
     {
         public int PinnedCount;
 
-        public void OnPinned(OperationId operation, PinnedSnapshot snapshot) => PinnedCount++;
+        public PinnedSnapshot? Last;
+
+        public void OnPinned(OperationId operation, PinnedSnapshot snapshot)
+        {
+            PinnedCount++;
+            Last = snapshot;
+        }
 
         public void OnRefused(OperationId operation, string reasonCode) =>
             throw new InvalidOperationException("Snapshot refused: " + reasonCode);
@@ -124,10 +130,14 @@ public sealed class BenchWorld
                 new PrincipalDomainBinding(Principal.WellKnownKinds.TestHarness, RecordDomain),
             }),
             RecordDomain,
-            // Budgets sized so the 2048-node world materializes completely -
-            // truncation would silently shrink the very work being measured.
+            // Budgets AND materialization ceilings sized so the 2048-node world
+            // materializes completely - truncation would silently shrink the
+            // very work being measured, and a truncated projection additionally
+            // makes the timeline checkpoint feed retry on every pump.
             observationBudgetBytes: 8 * 1024 * 1024,
             observationBudgetNodes: 4096,
+            maxMaterializationNodes: 4096,
+            maxMaterializationBytes: 8 * 1024 * 1024,
             canonicalStateCodec: withCodec ? new CanonicalStateCodec() : null);
         var runtime = new KernelRuntime(new RuntimeIncarnationId("bench-incarnation"), options);
 
@@ -189,7 +199,15 @@ public sealed class BenchWorld
             })));
 
         runtime.Start(new RefusingExecutor());
-        return new BenchWorld(runtime);
+        var world = new BenchWorld(runtime);
+
+        // Publish the source once and settle: an unpublished revision-bound
+        // source materializes as `SourceUnavailable` incompleteness, and the
+        // un-checkpointed bootstrap revisions would otherwise leak the initial
+        // materialize+encode into the first measured operation.
+        world.PublishInventory(0);
+        world.PumpUntilIdle();
+        return world;
     }
 
     public PumpReport Pump() =>
@@ -238,8 +256,12 @@ public sealed class BenchWorld
     public void ReleaseSnapshot(OperationId operation) =>
         Runtime.Control.ReleaseSnapshot(operation);
 
-    /// <summary>One verified snapshot round-trip; throws on refusal (setup sanity check).</summary>
-    public void VerifySnapshotSucceeds()
+    /// <summary>
+    /// One verified snapshot round-trip; throws on refusal, truncation, or a
+    /// wrong node count. A truncated snapshot would measure a smaller world
+    /// than advertised — and keep the checkpoint feed retrying every pump.
+    /// </summary>
+    public void VerifySnapshotSucceeds(int expectedNodes)
     {
         var observer = new CountingSnapshotObserver();
         var operation = Runtime.Control.RequestSnapshot(AgentView, Agent, "root", observer);
@@ -247,6 +269,19 @@ public sealed class BenchWorld
         if (observer.PinnedCount != 1)
         {
             throw new InvalidOperationException("Expected exactly one pinned snapshot.");
+        }
+
+        var snapshot = observer.Last!;
+        if (!snapshot.Snapshot.Completeness.IsComplete)
+        {
+            throw new InvalidOperationException(
+                "The verification snapshot is incomplete; the bench world must materialize fully.");
+        }
+
+        if (snapshot.Materialization.Nodes.Count != expectedNodes)
+        {
+            throw new InvalidOperationException(
+                $"Expected {expectedNodes} materialized nodes, got {snapshot.Materialization.Nodes.Count}.");
         }
 
         ReleaseSnapshot(operation);

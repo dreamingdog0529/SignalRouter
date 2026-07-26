@@ -66,7 +66,7 @@ public sealed class KernelAllocationCharacterizationTests
     public void SnapshotPinAndRelease512Nodes()
     {
         var world = BenchWorld.Create(nodeCount: 512, withCodec: true);
-        world.VerifySnapshotSucceeds();
+        world.VerifySnapshotSucceeds(expectedNodes: 512);
 
         var bytes = AllocationMeter.BytesPerOperation(
             () =>
