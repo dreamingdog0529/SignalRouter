@@ -161,9 +161,18 @@ namespace SignalRouter.V2.Kernel
 
                 if (!tornDown)
                 {
-                    recoveryIndex.ExpireTerminals(currentLogicalNow);
+                    // The status snapshot republishes on change only: admission,
+                    // terminal commit, and teardown publish at their mutation
+                    // sites, and retention expiry publishes here exactly when it
+                    // removed entries. A quiescent pump rebuilds nothing — the
+                    // idle cost no longer scales with retained terminals
+                    // (performance-track finding A1).
+                    if (recoveryIndex.ExpireTerminals(currentLogicalNow))
+                    {
+                        PublishStatus();
+                    }
+
                     ResolveTimedOutWaits();
-                    PublishStatus();
                 }
 
                 var turns = 0;
