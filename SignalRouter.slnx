@@ -6,6 +6,7 @@
   </Folder>
   <Folder Name="/src/v2/">
     <Project Path="src/v2/AdapterSdk/SignalRouter.V2.AdapterSdk.csproj" />
+    <Project Path="src/v2/Codec.CanonicalState/SignalRouter.V2.Codec.CanonicalState.csproj" />
     <Project Path="src/v2/Contracts/SignalRouter.V2.Contracts.csproj" />
     <Project Path="src/v2/Kernel/SignalRouter.V2.Kernel.csproj" />
     <Project Path="src/v2/ReferenceAdapter/SignalRouter.V2.ReferenceAdapter.csproj" />
@@ -18,6 +19,7 @@
   </Folder>
   <Folder Name="/tests/v2/">
     <Project Path="tests/v2/SignalRouter.V2.AdapterSdk.Tests/SignalRouter.V2.AdapterSdk.Tests.csproj" />
+    <Project Path="tests/v2/SignalRouter.V2.Codec.CanonicalState.Tests/SignalRouter.V2.Codec.CanonicalState.Tests.csproj" />
     <Project Path="tests/v2/SignalRouter.V2.Contracts.Tests/SignalRouter.V2.Contracts.Tests.csproj" />
     <Project Path="tests/v2/SignalRouter.V2.Kernel.Tests/SignalRouter.V2.Kernel.Tests.csproj" />
     <Project Path="tests/v2/SignalRouter.V2.ReferenceAdapter.Tests/SignalRouter.V2.ReferenceAdapter.Tests.csproj" />
