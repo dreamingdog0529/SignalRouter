@@ -114,7 +114,7 @@ are named here and receive their defaults when the owning module lands.
 | `Mailbox.MutationCapacity` | 256 | overflow refuses admission (`Rejected(CapacityExhausted)`) |
 | `Mailbox.SourcePublicationCapacity` | 512 entries / 16 MiB aggregate / 16 pending per source | overflow answers the publisher with an explicit refusal; the pending-per-source cap is also the clockless publication-rate bound |
 | `Pump.DefaultMaxTurns` | 64 | host-overridable per pump |
-| `Pump.ObservationBudget` | 256 KiB / 2048 nodes per pump | reserved — consumed by the observation module |
+| `Pump.ObservationBudget` | 256 KiB / 2048 nodes per pump | snapshot/timeline materialization budget; truncation surfaces as `BudgetTruncated`, deferral restarts against a fresh revision ([observation-state.md](observation-state.md) §4) |
 | `RecoveryIndex.PendingCapacity` | 4096 | pending entries are non-evictable; at capacity new admissions are refused |
 | `RecoveryIndex.TerminalRetention` | 300 s (logical clock) | terminals expire only by retention; if unexpired terminals reach `RecoveryIndex.TerminalCapacity` (4096), new admissions are refused — existing entries are never evicted ([guarantees.md](guarantees.md) §8) |
 | `KernelTrace.RingCapacity` | 8192 events / 4 MiB | loss permitted, gap-marked |
@@ -128,7 +128,18 @@ are named here and receive their defaults when the owning module lands.
 | `StateSources.MaxCollectionCardinality` | 4096 | |
 | `Kernel.MaxArmedWaits` | 256 | |
 | `Kernel.MaxContinuationsPerParent` | 32 | |
-| Reserved | — | `RecordingSink.*` (declared at open), `StateStore.*` (blob/chain/total), `Protocol.*` (message/slot caps), `Timeline.Retention`, `ObservationViews.*` (per-field/byte ceilings) |
+| `StateStore.MaxBlobBytes` | 1 MiB | a larger canonical materialization refuses with a structured answer ([observation-state.md](observation-state.md) §5.1) |
+| `StateStore.MaxTotalBytes` | 64 MiB | pin-aware GC: unpinned blobs evict oldest-insertion-first; pinned blobs are never evicted |
+| `StateStore.MaxChainLength` | 32 | reserved value — consumed when delta production lands with the recording module; recordings honor `min(profile, store)` |
+| `Timeline.RetentionEntries` | 128 | diagnostic checkpoint ring; eviction releases the entry's pin |
+| `Timeline.RetentionBytes` | 8 MiB | second bound on the same ring; **diagnostic retention never fails evidence** — timeline pins release oldest-first before an evidence `Put` is refused for budget |
+| `ObservationViews.MaxFieldBytes` | 4096 UTF-16 code units | per-field ceiling; oversized values surface as completeness, never truncate silently |
+| `ObservationViews.MaxCompletenessEntries` | 1024 | overflow coalesces into one root-region `BudgetTruncated` entry ([observation-state.md](observation-state.md) §3) |
+| `ObservationViews.MaxRegisteredContracts` | 64 | bootstrap-time bound |
+| `ObservationViews.MaxPinnedSnapshots` | 32 | deferred + active pins count together; overflow answers `CapacityExhausted` |
+| `ObservationViews.MaxMaterializationNodes` | 2048 | ceiling for every materialization including internal evaluation reads; overflow surfaces as `BudgetTruncated` completeness and evaluates as `Unevaluable(Incompleteness)` |
+| `ObservationViews.MaxMaterializationBytes` | 256 KiB | aggregate byte ceiling per materialization (codec-free views included, where `StateStore.MaxBlobBytes` cannot apply); overflow surfaces as `BudgetTruncated` completeness |
+| Reserved | — | `RecordingSink.*` (declared at open), `Protocol.*` (message/slot caps) |
 
 ## 6. Artifact trust
 

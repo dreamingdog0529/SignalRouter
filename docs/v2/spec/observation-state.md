@@ -35,6 +35,26 @@ Views over the same node store may differ in membership and attribute set. The r
 view and the agent view are independently versioned contracts; neither is derived from
 the other.
 
+**Registration.** View contracts are registered through the synchronous bootstrap
+registry before the runtime starts, like capability, source, and predicate contracts
+([kernel-execution.md](kernel-execution.md) §4, [adr 0010](../adr/0010-effect-protocol-and-kernel-host-contract.md));
+there is no runtime view registration, so a view contract can never change while a
+recording is active. A view contract descriptor declares its family (`Agent` or
+`Record`), its scope, its materialization bounds, and whether keyless nodes are
+included — a `Record`-family contract MUST exclude keyless nodes
+([semantic-model.md](semantic-model.md) §3.2). Identifiers in the `kernel-raw` family
+are reserved for the kernel's internal evaluation views and MUST NOT be registered.
+
+**Projection rules in v2.0.** A registered view projects the full comparison surface
+of its family: node role, hierarchy (parent links), attributes, capability
+declarations (contract reference and current availability), and the state sources the
+family's exposure opt-ins admit (§7.2) — the set strict replay comparison consumes
+([recording-replay.md](recording-replay.md) §5.2). Values are normalized by a fixed
+canonical ordering (ordinal by key or name; never locale-sensitive). The
+`ViewContractId@version` identifies exactly this descriptor-plus-normalization rule
+set; introducing richer projection rules is a new view contract version, never a
+reinterpretation of an existing one.
+
 ## 2. Snapshot identification
 
 A materialized snapshot is identified by:
@@ -52,6 +72,16 @@ ObservationSnapshot {
 `ContentId` alone never identifies an observation semantically; the tuple does. Two
 snapshots are comparable only under the same `ViewContract` (or an explicit migration,
 [recording-replay.md](recording-replay.md) §5).
+
+**Unaddressed snapshots.** A runtime configured without the canonical-state codec
+(§5.1) produces snapshots whose `ContentId` leg is explicitly absent. An unaddressed
+snapshot still pins one revision-consistent materialization, so live pinned reads,
+pagination against the held pin, and predicate evaluation work unchanged; assertion
+answers then omit the `ContentId` field ([verification.md](verification.md) §3.3).
+Unaddressed snapshots MUST NOT participate in recording, the timeline, or any surface
+that references state by `ContentId` — absence is honest and never substituted with a
+placeholder identifier
+([adr 0011](../adr/0011-observation-materialization-and-state-store.md)).
 
 ## 3. Completeness
 
@@ -77,27 +107,57 @@ Rules:
 - `Redacted` marks presence without content, so absence and redaction are never
   conflated (`absent` / `null` / `unknown` / `redacted` are four distinct comparator
   inputs, [recording-replay.md](recording-replay.md) §5.2).
+- **Regions.** A completeness region is a `FieldPath` prefix, matched segment-wise
+  (`nodes/save` covers `nodes/save/attributes/label`, never `nodes/save2`). A
+  `CompletenessMap` is a bounded, ordinally sorted set of `(regionPrefix, reason)`
+  entries in which the prefix is a unique key; the longest matching prefix answers a
+  path; regions without an entry are complete; the empty map means the materialization
+  is complete.
+- **Bounded coalescing.** The map reserves one slot for a root-region
+  `BudgetTruncated` entry. When an insertion would exceed the entry bound, entries are
+  folded into that root entry deterministically — deepest prefix first, ties broken by
+  ordinal order, last — until the map fits; the result never exceeds the bound. The
+  root entry is the honest record that finer-grained reasons were dropped; a
+  completeness condition is therefore never silently unrepresented, even when its
+  specific entry is ([guarantees.md](guarantees.md) §8).
+- **One mapping to `Unevaluable`.** The reason vocabulary here and the
+  `Unevaluable(reason)` vocabulary of [guarantees.md](guarantees.md) §3.5 are one
+  deliberate mirror; guarantees.md §3.5 is the single normative mapping (including the
+  `Virtualized`/`BudgetTruncated` → `Incompleteness` collapse, which loses nothing
+  while the map is within bounds because the originating reason stays in its
+  `CompletenessMap` entry). Implementations MUST NOT maintain a second mapping table.
 
 ## 4. Delivery: snapshot + delta + resync
 
 - **Pull is the default** for agents: an on-demand snapshot at the current revision.
   Paginated reads MUST pin one `ContentId`-identified snapshot so all pages describe one
   revision.
-- **Delta subscription** is the internal mechanism for recording and wait evaluation
-  (and MAY be exposed to advanced clients): deltas carry `ViewSequence`, the
-  `baseContentId → resultContentId` transition, and are gap-detectable. A subscriber
-  observing a `ViewSequence` gap MUST resynchronize from an authoritative snapshot;
-  deltas are never trusted across a gap.
+- **Delta subscription** is an internal mechanism (and MAY be exposed to advanced
+  clients in a later minor): deltas carry `ViewSequence`, the
+  `baseContentId → resultContentId` transition, and a deterministic patch payload from
+  which the result is reconstructible; they are gap-detectable. A subscriber observing
+  a `ViewSequence` gap MUST resynchronize from an authoritative snapshot; deltas are
+  never trusted across a gap. **Staging
+  ([adr 0011](../adr/0011-observation-materialization-and-state-store.md)):** v2.0
+  ships the snapshot path and a checkpoint-only timeline (§8); delta production lands
+  with the recording module, where the deterministic patch encoding and the chain
+  bounds of [recording-replay.md](recording-replay.md) §4 have their first consumer. A
+  chain entry without a reconstructible payload is not a delta and MUST NOT be labeled
+  one. Wait evaluation is not a subscriber: it satisfies this section by revision-gated
+  re-evaluation against pinned kernel reads ([verification.md](verification.md) §2.1).
 - A materialization is **revision-consistent**: every snapshot and delta is produced
   from a single `SourceRevision` via a revision-pinned read; work spanning multiple
   pumps either retains the pin or restarts. A snapshot MUST NOT mix revisions.
 - Every observable mutation MUST advance `SourceRevision` — an adapter conformance
   obligation verified by the TCK ([adapter-conformance.md](adapter-conformance.md) §1,
   §7). Delta *delivery* is still not assumed perfect: each delta carries the resulting
-  `SourceRevision` watermark and subscriptions emit periodic watermark heartbeats, so a
-  subscriber that observes the watermark advance without contiguous deltas treats it as
-  a gap and resynchronizes. Recording evidence never depends on subscription liveness:
-  the E3/E4 cuts are fresh, revision-stamped materializations
+  `SourceRevision` watermark, and watermark heartbeats are pump-boundary observations —
+  the kernel owns no timer ([kernel-execution.md](kernel-execution.md) §6), so in any
+  pump where a feed retained no entry it observes the current `SourceRevision`; an
+  advance without a contiguous entry is a gap, and the next successful materialization
+  is a resynchronizing checkpoint that carries the gap mark. Sub-pump heartbeat
+  precision is not promised. Recording evidence never depends on subscription
+  liveness: the E3/E4 cuts are fresh, revision-stamped materializations
   ([guarantees.md](guarantees.md) §5).
 - The **`ViewWatermark`** of a materialization or subscription is its view-side
   high-water mark: the highest `SourceRevision` whose mutations it has fully applied.
@@ -132,6 +192,46 @@ The `StateStore` is the content-addressed store for materialized observations
   ([guarantees.md](guarantees.md) §7).
 - `ContentId` structure, verification, and migration follow the artifact contract in
   [semantic-model.md](semantic-model.md) §5.
+
+### 5.1 The in-memory core and the durability boundary
+
+The runtime-owned `StateStore` core is an in-memory, content-addressed **cache**
+([architecture.md](../architecture.md) §2,
+[adr 0011](../adr/0011-observation-materialization-and-state-store.md)):
+
+- **Canonical encoding and `ContentId` production are injected** from the
+  `Codec.CanonicalState` leaf ([adr 0007](../adr/0007-codec-and-package-boundaries.md));
+  the seam yields the `ContentId`, the canonical payload bytes, and the exact encoded
+  length in one answer, so downstream consumers can write and account for the blob
+  without re-encoding. A runtime configured without the codec serves views, pinned
+  reads, and predicate evaluation as *unaddressed* snapshots (§2), but retains no
+  blobs, produces no timeline, and cannot support recording — honest degradation,
+  never placeholder identifiers. Cross-domain concealment is enforced by the store's
+  domain-keyed lookup and by release-surface authorization; whether the codec
+  additionally folds a keyed secret into digest production is a `Codec.CanonicalState`
+  decision (adr 0011, open point).
+- **Pins are reference counts** keyed by `(blob, lease owner)`, where the owner is a
+  discriminated lease identity: a snapshot-read operation, an interaction's retained
+  after-basis (its `RequestId`), a recording, or the reserved timeline owner.
+  Releasing an owner releases all of its pins; an interaction's after-basis pin
+  releases when its terminal evidence commits. Unpinned blobs are evicted
+  oldest-insertion-first when a `Put` would exceed the store budget; pinned blobs are
+  never evicted.
+- **Refusal is structured, never silent**: a `Put` that cannot fit answers with the
+  reason (blob over its own bound, or the store budget unfit even after eviction), and
+  each caller surfaces it per its lane and the failure matrix of
+  [guarantees.md](guarantees.md) §7 — before E1, the recording open fails
+  (`OpenFailed`); before E3, the interaction terminates
+  `Faulted(EvidenceUnavailable, effectPermitted = false)`; at E4, the true terminal is
+  preserved and only the recording fails; the diagnostic timeline records a gap.
+- **Diagnostic retention never fails evidence**: timeline pins are released
+  oldest-first before a `Put` on behalf of evidence is refused for budget reasons.
+- **The in-memory pin is not the durable commit.** The StateStore-first order of
+  [guarantees.md](guarantees.md) §5.1/§5.3 reads, end to end: canonical encode → cache
+  retain-and-pin → durable blob write and flush (the durable coordinator, with the
+  recording artifact) → evidence cut appended durably → `Ready`. The cache lease only
+  guarantees the bytes the evidence will reference; durability is the recording
+  module's obligation and `Ready` MUST NOT be answered before it holds.
 
 ## 6. The four stores and the shared algebra
 
@@ -190,7 +290,7 @@ governed by a `StateSourceContractId@version`
 | Class | Contract | Strict eligibility |
 |---|---|---|
 | `RevisionBoundStateSource` | The application **publishes** an immutable typed document (with causation) as a kernel message; adoption swaps the document and advances the shared `SourceRevision` atomically ([kernel-execution.md](kernel-execution.md) §4, [semantic-model.md](semantic-model.md) §4) — snapshots, watermarks, and pinned reads therefore identify source documents and node state in one revision order | Comparable under strict replay; assertable, including cross-source and node+source predicates |
-| `SampledStateSource` | The document is read at materialization time (may consult external state); carries a declared freshness bound | Diagnostic only: excluded from strict comparison scope and from cross-source atomic assertions; staleness surfaces as `Stale` completeness |
+| `SampledStateSource` | The document is read at materialization time (may consult external state); carries a declared freshness bound. Freshness is evaluated against the host-supplied logical clock of the pump in which materialization occurs; sub-pump precision is not promised ([kernel-execution.md](kernel-execution.md) §6) | Diagnostic only: excluded from strict comparison scope and from cross-source atomic assertions; staleness surfaces as `Stale` completeness |
 
 The distinction exists because strict comparison needs point-in-time consistency:
 only publication-through-the-kernel gives a document a place in the revision order.
@@ -222,8 +322,17 @@ sources — or a source and the node tree — describe the same moment.
 
 Because recording evidence and timeline diagnostics reference `StateStore`
 materializations, a bounded, queryable state history falls out of the same machinery:
-retained snapshots/deltas indexed by `(SourceRevision, LogicalOrder)`, surfaced through
-a read-only inspection tool ([protocol-topology.md](protocol-topology.md) §7). The
-timeline inherits the redaction and domain rules of §5 unchanged; retention is bounded
-by the `StateStore` budget ([security-resources.md](security-resources.md) §5). The
-timeline is a diagnostic surface; it carries no replay authority.
+retained entries indexed by `SourceRevision` plus a deterministic per-feed entry
+sequence, with the causing `LogicalOrder` carried as optional metadata — present for
+mutation-caused advances, absent for source-only publications and external mutations,
+which have no admission order to cite ([adr 0009](../adr/0009-evidence-ordering-and-open-reason-vocabularies.md)).
+Entries are surfaced through a read-only inspection tool
+([protocol-topology.md](protocol-topology.md) §7). The timeline inherits the redaction
+and domain rules of §5 unchanged — in particular, timeline entries expose record-view
+`ContentId`s, so the reading surface is principal-bound and default-deny: a principal
+whose domain is not the record domain receives no entries, indistinguishably from an
+empty timeline. Retention is doubly bounded (entry count and retained bytes,
+[security-resources.md](security-resources.md) §5); eviction releases the entry's pin.
+In v2.0 the timeline retains checkpoints only (§4 staging); a chain-length rule
+becomes relevant when deltas land. The timeline is a diagnostic surface; it carries no
+replay authority.

@@ -141,8 +141,10 @@ no longer available — never a fresh-state evaluation silently substituted.
 The tool answer carries the outcome (§2.3), per-clause expected/actual with clause IDs,
 bounded redacted witness paths, and the snapshot identification tuple
 (incarnation, revision, view contract, source table version, scope, `ContentId`,
-completeness). Per-clause structured explanations are diagnostic, not comparison
-material.
+completeness). On a runtime without the canonical-state codec the snapshot is
+unaddressed and the `ContentId` field is absent
+([observation-state.md](observation-state.md) §2). Per-clause structured explanations
+are diagnostic, not comparison material.
 
 While a recording is active, each evaluation is committed as one E8 cut
 ([guarantees.md](guarantees.md) §5.10) — but only if the predicate is **evaluable
