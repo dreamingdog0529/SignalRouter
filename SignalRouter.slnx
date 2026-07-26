@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/bench/v2/">
+    <Project Path="bench/v2/SignalRouter.V2.Benchmarks/SignalRouter.V2.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/SignalRouter.Core/SignalRouter.Core.csproj" />
     <Project Path="src/SignalRouter.McpHost/SignalRouter.McpHost.csproj" />
@@ -23,6 +26,7 @@
     <Project Path="tests/v2/SignalRouter.V2.Codec.CanonicalState.Tests/SignalRouter.V2.Codec.CanonicalState.Tests.csproj" />
     <Project Path="tests/v2/SignalRouter.V2.Contracts.Tests/SignalRouter.V2.Contracts.Tests.csproj" />
     <Project Path="tests/v2/SignalRouter.V2.Kernel.Tests/SignalRouter.V2.Kernel.Tests.csproj" />
+    <Project Path="tests/v2/SignalRouter.V2.Performance.Tests/SignalRouter.V2.Performance.Tests.csproj" />
     <Project Path="tests/v2/SignalRouter.V2.ReferenceAdapter.Tests/SignalRouter.V2.ReferenceAdapter.Tests.csproj" />
   </Folder>
 </Solution>

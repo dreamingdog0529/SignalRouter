@@ -72,3 +72,6 @@ src/SignalRouter.Unity/*.sln
 src/SignalRouter.Unity/*.slnx
 src/SignalRouter.Unity/Assets/Packages/
 src/SignalRouter.Unity/Assets/Packages.meta
+
+# BenchmarkDotNet output (bench/v2)
+BenchmarkDotNet.Artifacts/
