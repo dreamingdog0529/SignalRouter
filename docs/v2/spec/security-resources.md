@@ -64,6 +64,16 @@ hosts) MUST re-derive this analysis; the default posture never silently extends.
   domain-separated, cross-domain `ContentId` probes fail, and low-entropy values are
   not confirmable by content-address guessing
   ([observation-state.md](observation-state.md) §5).
+- **Content addressing is integrity, not confidentiality**
+  ([adr 0012](../adr/0012-canonical-state-representation-and-digest-policy.md)):
+  the registered digest (`"sha256"`, unkeyed) exists for verify-before-use, and
+  concealment is carried entirely by authorization. Normatively: every surface that
+  exposes a `ContentId` — store lookup, timeline, recording export, and any error or
+  trace detail — MUST demand the same authorization as reading the blob it names, and
+  MUST NOT act as an existence oracle (a probe with a guessed or foreign `ContentId`
+  answers exactly as a miss). A future profile that requires reader-concealed
+  identifiers registers a new keyed `digestAlgorithmId`; it never reinterprets
+  `"sha256"`.
 - The protocol accepts no type names, no reflection, no code, and no unconstrained
   filesystem paths. Artifact paths are normalized and confined to one configured root.
   Predicates are declarative ASTs referencing only registered contracts — never code

@@ -165,7 +165,14 @@ persistent reference inside recording artifacts, it is a versioned contract, not
 implementation detail:
 
 - **Structure:** `(digestAlgorithmId, canonicalRepresentationVersion, digest)`. Both the
-  algorithm and the canonical representation are explicit and versioned.
+  algorithm and the canonical representation are explicit and versioned. v2.0
+  registered values: `digestAlgorithmId = "sha256"` — unkeyed, unsalted SHA-256 over
+  the entire canonical payload (self-identifying header included), the digest being
+  the raw 32 octets, never a text rendering — and `canonicalRepresentationVersion = 1`,
+  the length-framed binary grammar fixed in
+  [adr 0012](../adr/0012-canonical-state-representation-and-digest-policy.md). A
+  representation version's byte grammar is immutable once shipped; evolution registers
+  a new version and re-addresses (Migration below).
 - **Role:** integrity verification, lookup, deduplication, and a fast equality path.
   `ContentId` equality implies semantic equality; **inequality implies nothing** — a
   differing `ContentId` routes to the typed semantic comparator, never directly to
