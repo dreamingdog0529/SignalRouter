@@ -1,0 +1,185 @@
+# API surface of SignalRouter.V2.Kernel
+
+sealed class SignalRouter.V2.Kernel.AdmissionEvidence
+  ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.CapabilityInvocation invocation, SignalRouter.V2.Contracts.ResolvedTarget resolvedTarget, SignalRouter.V2.Contracts.IdentityEnvelope envelope)
+  property Envelope : SignalRouter.V2.Contracts.IdentityEnvelope { get; }
+  property Fingerprint : SignalRouter.V2.Contracts.SemanticFingerprint { get; }
+  property Invocation : SignalRouter.V2.Contracts.CapabilityInvocation { get; }
+  property Order : SignalRouter.V2.Contracts.LogicalOrder { get; }
+  property Request : SignalRouter.V2.Contracts.RequestId { get; }
+  property ResolvedTarget : SignalRouter.V2.Contracts.ResolvedTarget { get; }
+
+sealed class SignalRouter.V2.Kernel.AssertionBatch
+  ctor(SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.PredicateContractRef> predicates, SignalRouter.V2.Contracts.Principal principal, SignalRouter.V2.Kernel.IAssertionObserver observer)
+  property Observer : SignalRouter.V2.Kernel.IAssertionObserver { get; }
+  property Predicates : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.PredicateContractRef> { get; }
+  property Principal : SignalRouter.V2.Contracts.Principal { get; }
+
+enum SignalRouter.V2.Kernel.EvidenceReadiness
+  : System.Int32
+  Fault = 2
+  Pending = 1
+  Ready = 0
+
+interface SignalRouter.V2.Kernel.IAssertionObserver
+  abstract method OnEvaluated(SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.PredicateEvaluationResult> results) : System.Void
+
+interface SignalRouter.V2.Kernel.IEvidenceCoordinator
+  abstract method CommitTerminalEvidence(SignalRouter.V2.Kernel.TerminalEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  abstract method PrepareAdmissionEvidence(SignalRouter.V2.Kernel.AdmissionEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  abstract method PrepareEffectPermit(SignalRouter.V2.Kernel.PermitEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+
+interface SignalRouter.V2.Kernel.IKernelControl
+  abstract method AcquireExclusiveControl(SignalRouter.V2.Contracts.SecurityDomainId holder) : System.Void
+  abstract method ArmWait(SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.Principal principal, System.Int64 timeoutAtLogicalTime, SignalRouter.V2.Kernel.IWaitObserver observer) : SignalRouter.V2.Contracts.OperationId
+  abstract method CancelWait(SignalRouter.V2.Contracts.OperationId operation) : System.Void
+  abstract method EvaluateAssertions(SignalRouter.V2.Kernel.AssertionBatch batch) : System.Void
+  abstract method ReleaseExclusiveControl() : System.Void
+  abstract method ReleaseSnapshot(SignalRouter.V2.Contracts.OperationId operation) : System.Void
+  abstract method RequestCancel(SignalRouter.V2.Contracts.RequestId request) : System.Void
+  abstract method RequestSnapshot(SignalRouter.V2.Contracts.ViewContractRef view, SignalRouter.V2.Contracts.Principal principal, System.String scope, SignalRouter.V2.Kernel.ISnapshotObserver observer) : SignalRouter.V2.Contracts.OperationId
+  abstract method TearDownIncarnation() : System.Void
+
+interface SignalRouter.V2.Kernel.IKernelQueries
+  abstract method Query(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.Principal principal) : SignalRouter.V2.Contracts.QueryAnswer
+
+interface SignalRouter.V2.Kernel.IRecordObservationServices
+  abstract method ReleaseRecording(SignalRouter.V2.Contracts.OperationId recording) : System.Void
+  abstract method TryGetAfterMaterialization(SignalRouter.V2.Contracts.RequestId request, out SignalRouter.V2.Kernel.RecordMaterialization? materialization) : System.Boolean
+  abstract method TryLease(SignalRouter.V2.Kernel.RecordMaterialization materialization, SignalRouter.V2.Contracts.OperationId recording) : SignalRouter.V2.Kernel.LeaseAnswer
+  abstract method TryMaterializeView(SignalRouter.V2.Contracts.ViewContractRef view, System.String scope, SignalRouter.V2.Contracts.SourceRevision? expectedBasis, out SignalRouter.V2.Kernel.RecordMaterialization? materialization, out System.Boolean basisMismatch) : System.Boolean
+  property CanAddress : System.Boolean { get; }
+
+interface SignalRouter.V2.Kernel.ISnapshotObserver
+  abstract method OnPinned(SignalRouter.V2.Contracts.OperationId operation, SignalRouter.V2.Kernel.PinnedSnapshot snapshot) : System.Void
+  abstract method OnRefused(SignalRouter.V2.Contracts.OperationId operation, System.String reasonCode) : System.Void
+
+interface SignalRouter.V2.Kernel.IWaitObserver
+  abstract method OnResolved(SignalRouter.V2.Contracts.OperationId operation, SignalRouter.V2.Contracts.PredicateResolution resolution) : System.Void
+
+sealed class SignalRouter.V2.Kernel.KernelFaultException
+  : System.Exception
+  implements System.Runtime.Serialization.ISerializable
+  ctor(System.String message)
+
+sealed class SignalRouter.V2.Kernel.KernelOptions
+  ctor(SignalRouter.V2.AdapterSdk.IMonotonicClock monotonicClock, System.Byte[] redactionKey, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Kernel.PrincipalDomainBinding> principalDomains, SignalRouter.V2.Contracts.SecurityDomainId recordDomain, System.Int32 mailboxControlCapacity = 4096, System.Int32 mailboxMaxOutstandingPostFenceOperations = 64, System.Int32 mailboxMutationCapacity = 256, System.Int32 sourcePublicationCapacity = 512, System.Int32 sourcePublicationAggregateBytes = 16777216, System.Int32 sourcePublicationPendingPerSource = 16, System.Int32 recoveryIndexPendingCapacity = 4096, System.Int32 recoveryIndexTerminalCapacity = 4096, System.Int64 recoveryIndexTerminalRetentionLogicalTime = 300, System.Int32 traceRingCapacity = 8192, System.Int32 traceRingByteCapacity = 4194304, System.Int32 maxArmedWaits = 256, System.Int32 maxContinuationsPerParent = 32, System.Int32 maxRegisteredPredicateContracts = 1024, System.Int32 observationBudgetBytes = 262144, System.Int32 observationBudgetNodes = 2048, System.Int32 maxRegisteredViewContracts = 64, System.Int32 maxPinnedSnapshots = 32, System.Int32 maxCompletenessEntries = 1024, System.Int32 maxObservationFieldBytes = 4096, System.Int32 maxMaterializationNodes = 2048, System.Int32 maxMaterializationBytes = 262144, SignalRouter.V2.Contracts.ICanonicalStateCodec? canonicalStateCodec = null, System.Int32 stateStoreMaxBlobBytes = 1048576, System.Int64 stateStoreMaxTotalBytes = 67108864, System.Int32 timelineRetentionEntries = 128, System.Int64 timelineRetentionBytes = 8388608)
+  method TryResolveDomain(SignalRouter.V2.Contracts.Principal principal, out SignalRouter.V2.Contracts.SecurityDomainId domain) : System.Boolean
+  property CanonicalStateCodec : SignalRouter.V2.Contracts.ICanonicalStateCodec? { get; }
+  property MailboxControlCapacity : System.Int32 { get; }
+  property MailboxMaxOutstandingPostFenceOperations : System.Int32 { get; }
+  property MailboxMutationCapacity : System.Int32 { get; }
+  property MaxArmedWaits : System.Int32 { get; }
+  property MaxCompletenessEntries : System.Int32 { get; }
+  property MaxContinuationsPerParent : System.Int32 { get; }
+  property MaxMaterializationBytes : System.Int32 { get; }
+  property MaxMaterializationNodes : System.Int32 { get; }
+  property MaxObservationFieldBytes : System.Int32 { get; }
+  property MaxPinnedSnapshots : System.Int32 { get; }
+  property MaxRegisteredPredicateContracts : System.Int32 { get; }
+  property MaxRegisteredViewContracts : System.Int32 { get; }
+  property MonotonicClock : SignalRouter.V2.AdapterSdk.IMonotonicClock { get; }
+  property ObservationBudgetBytes : System.Int32 { get; }
+  property ObservationBudgetNodes : System.Int32 { get; }
+  property RecordDomain : SignalRouter.V2.Contracts.SecurityDomainId { get; }
+  property RecoveryIndexPendingCapacity : System.Int32 { get; }
+  property RecoveryIndexTerminalCapacity : System.Int32 { get; }
+  property RecoveryIndexTerminalRetentionLogicalTime : System.Int64 { get; }
+  property SourcePublicationAggregateBytes : System.Int32 { get; }
+  property SourcePublicationCapacity : System.Int32 { get; }
+  property SourcePublicationPendingPerSource : System.Int32 { get; }
+  property StateStoreMaxBlobBytes : System.Int32 { get; }
+  property StateStoreMaxTotalBytes : System.Int64 { get; }
+  property TimelineRetentionBytes : System.Int64 { get; }
+  property TimelineRetentionEntries : System.Int32 { get; }
+  property TraceRingByteCapacity : System.Int32 { get; }
+  property TraceRingCapacity : System.Int32 { get; }
+
+sealed class SignalRouter.V2.Kernel.KernelRuntime
+  implements SignalRouter.V2.AdapterSdk.IPumpable
+  ctor(SignalRouter.V2.Contracts.RuntimeIncarnationId incarnation, SignalRouter.V2.Kernel.KernelOptions options, SignalRouter.V2.Kernel.IEvidenceCoordinator? evidenceCoordinator = null)
+  method Start(SignalRouter.V2.AdapterSdk.IEffectExecutor effectExecutor) : System.Void
+  property Bootstrap : SignalRouter.V2.AdapterSdk.IBootstrapRegistry { get; }
+  property Completions : SignalRouter.V2.AdapterSdk.IEffectCompletionSink { get; }
+  property Control : SignalRouter.V2.Kernel.IKernelControl { get; }
+  property Incarnation : SignalRouter.V2.Contracts.RuntimeIncarnationId { get; }
+  property Ingress : SignalRouter.V2.AdapterSdk.IIngressSink { get; }
+  property Queries : SignalRouter.V2.Kernel.IKernelQueries { get; }
+  property RecordObservation : SignalRouter.V2.Kernel.IRecordObservationServices { get; }
+  property Registry : SignalRouter.V2.AdapterSdk.INodeRegistry { get; }
+  property Timeline : SignalRouter.V2.Kernel.TimelineIndex { get; }
+  property Trace : SignalRouter.V2.Kernel.KernelTraceRing { get; }
+  virtual method Pump(SignalRouter.V2.AdapterSdk.PumpBudget budget) : SignalRouter.V2.AdapterSdk.PumpReport
+
+sealed class SignalRouter.V2.Kernel.KernelTraceRing
+  ctor(System.Int32 capacity, System.Int32 byteCapacity)
+  method Emit(SignalRouter.V2.Contracts.SemanticEvent semanticEvent) : System.Void
+  method Snapshot() : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.SemanticEvent>
+  property TotalDropped : System.Int64 { get; }
+
+enum SignalRouter.V2.Kernel.LeaseAnswer
+  : System.Int32
+  OverBlobBound = 2
+  OverBudget = 1
+  Retained = 0
+  Unaddressable = 3
+
+sealed class SignalRouter.V2.Kernel.NoOpEvidenceCoordinator
+  implements SignalRouter.V2.Kernel.IEvidenceCoordinator
+  static property Instance : SignalRouter.V2.Kernel.NoOpEvidenceCoordinator { get; }
+  virtual method CommitTerminalEvidence(SignalRouter.V2.Kernel.TerminalEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  virtual method PrepareAdmissionEvidence(SignalRouter.V2.Kernel.AdmissionEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  virtual method PrepareEffectPermit(SignalRouter.V2.Kernel.PermitEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+
+sealed class SignalRouter.V2.Kernel.PermitEvidence
+  ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.SourceRevision watermark)
+  property Order : SignalRouter.V2.Contracts.LogicalOrder { get; }
+  property Request : SignalRouter.V2.Contracts.RequestId { get; }
+  property Watermark : SignalRouter.V2.Contracts.SourceRevision { get; }
+
+sealed class SignalRouter.V2.Kernel.PinnedSnapshot
+  ctor(SignalRouter.V2.Contracts.ObservationSnapshot snapshot, SignalRouter.V2.Contracts.ObservationMaterialization materialization)
+  property Lookup : SignalRouter.V2.Contracts.IObservationLookup { get; }
+  property Materialization : SignalRouter.V2.Contracts.ObservationMaterialization { get; }
+  property Snapshot : SignalRouter.V2.Contracts.ObservationSnapshot { get; }
+
+readonly struct SignalRouter.V2.Kernel.PrincipalDomainBinding
+  implements System.IEquatable<SignalRouter.V2.Kernel.PrincipalDomainBinding>
+  ctor(System.String principalKind, SignalRouter.V2.Contracts.SecurityDomainId domain)
+  operator op_Equality(SignalRouter.V2.Kernel.PrincipalDomainBinding left, SignalRouter.V2.Kernel.PrincipalDomainBinding right) : System.Boolean
+  operator op_Inequality(SignalRouter.V2.Kernel.PrincipalDomainBinding left, SignalRouter.V2.Kernel.PrincipalDomainBinding right) : System.Boolean
+  property Domain : SignalRouter.V2.Contracts.SecurityDomainId { get; }
+  property PrincipalKind : System.String { get; }
+  virtual method Equals(SignalRouter.V2.Kernel.PrincipalDomainBinding other) : System.Boolean
+  virtual method Equals(System.Object? obj) : System.Boolean
+  virtual method GetHashCode() : System.Int32
+
+sealed class SignalRouter.V2.Kernel.RecordMaterialization
+  property Canonical : SignalRouter.V2.Contracts.CanonicalStateResult { get; }
+  property Materialization : SignalRouter.V2.Contracts.ObservationMaterialization { get; }
+  property Snapshot : SignalRouter.V2.Contracts.ObservationSnapshot { get; }
+
+sealed class SignalRouter.V2.Kernel.TerminalEvidence
+  ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.InteractionOutcome outcome, System.Boolean effectPermitted, System.Boolean effectStarted, SignalRouter.V2.Contracts.RejectionReason? rejectionReason, SignalRouter.V2.Contracts.FaultCode? faultCode, SignalRouter.V2.Contracts.CancellationPhase? cancellationPhase, SignalRouter.V2.Contracts.PostconditionResult? postcondition, SignalRouter.V2.Contracts.SourceRevision afterWatermark, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.ContinuationRequest> continuations)
+  property AfterWatermark : SignalRouter.V2.Contracts.SourceRevision { get; }
+  property CancellationPhase : SignalRouter.V2.Contracts.CancellationPhase? { get; }
+  property Continuations : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.ContinuationRequest> { get; }
+  property EffectPermitted : System.Boolean { get; }
+  property EffectStarted : System.Boolean { get; }
+  property FaultCode : SignalRouter.V2.Contracts.FaultCode? { get; }
+  property Order : SignalRouter.V2.Contracts.LogicalOrder { get; }
+  property Outcome : SignalRouter.V2.Contracts.InteractionOutcome { get; }
+  property Postcondition : SignalRouter.V2.Contracts.PostconditionResult? { get; }
+  property RejectionReason : SignalRouter.V2.Contracts.RejectionReason? { get; }
+  property Request : SignalRouter.V2.Contracts.RequestId { get; }
+
+sealed class SignalRouter.V2.Kernel.TimelineEntry
+  property AfterGap : System.Boolean { get; }
+  property CausingOrder : SignalRouter.V2.Contracts.LogicalOrder? { get; }
+  property ContentId : SignalRouter.V2.Contracts.ContentId { get; }
+  property EntrySequence : System.UInt64 { get; }
+  property LogicalTime : System.Int64 { get; }
+  property Revision : SignalRouter.V2.Contracts.SourceRevision { get; }
+
+sealed class SignalRouter.V2.Kernel.TimelineIndex
+  method Snapshot(SignalRouter.V2.Contracts.Principal principal) : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Kernel.TimelineEntry>

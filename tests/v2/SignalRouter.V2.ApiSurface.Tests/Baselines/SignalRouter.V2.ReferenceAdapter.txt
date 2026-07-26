@@ -1,0 +1,91 @@
+# API surface of SignalRouter.V2.ReferenceAdapter
+
+sealed class SignalRouter.V2.ReferenceAdapter.FrameTickClock
+  implements SignalRouter.V2.AdapterSdk.IMonotonicClock
+  ctor()
+  property Now : System.Int64 { get; }
+
+sealed class SignalRouter.V2.ReferenceAdapter.ReferenceAdapterHost
+  method TearDown() : System.Void
+  property Ingress : SignalRouter.V2.ReferenceAdapter.ReferenceIngress { get; }
+  property PumpHost : SignalRouter.V2.ReferenceAdapter.ReferencePumpHost { get; }
+  property Runtime : SignalRouter.V2.Kernel.KernelRuntime { get; }
+  static method Create(System.Func<SignalRouter.V2.AdapterSdk.IEffectExecutor, SignalRouter.V2.AdapterSdk.IEffectExecutor>? decorateExecutor = null) : SignalRouter.V2.ReferenceAdapter.ReferenceAdapterHost
+
+sealed class SignalRouter.V2.ReferenceAdapter.ReferenceEffectExecutor
+  implements SignalRouter.V2.AdapterSdk.IEffectExecutor
+  const field SlowEffectFrames : System.Int32 = 2
+  ctor(SignalRouter.V2.AdapterSdk.INodeRegistry registry, SignalRouter.V2.Contracts.NodeRef target)
+  virtual method Attach(SignalRouter.V2.AdapterSdk.IEffectCompletionSink completionSink) : System.Void
+  virtual method Detach() : System.Void
+  virtual method Execute(SignalRouter.V2.AdapterSdk.EffectRequest request) : SignalRouter.V2.AdapterSdk.EffectAdoption
+  virtual method RequestCancel(SignalRouter.V2.AdapterSdk.EffectPermitToken permit) : System.Void
+
+sealed class SignalRouter.V2.ReferenceAdapter.ReferenceIngress
+  implements SignalRouter.V2.AdapterSdk.IIngressSource
+  ctor()
+  method Publish(SignalRouter.V2.Contracts.SourceDocument document) : SignalRouter.V2.AdapterSdk.PublicationAnswer
+  method SimulateExternalMutation() : System.Void
+  method SimulateManagedClick(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.AdapterSdk.ISubmissionObserver observer, SignalRouter.V2.Contracts.Principal principal, SignalRouter.V2.Contracts.Provenance provenance) : System.Void
+  virtual method Attach(SignalRouter.V2.AdapterSdk.IIngressSink ingressSink) : System.Void
+  virtual method Detach() : System.Void
+
+sealed class SignalRouter.V2.ReferenceAdapter.ReferenceNodeSource
+  implements SignalRouter.V2.AdapterSdk.INodeSource
+  ctor()
+  property TargetNode : SignalRouter.V2.Contracts.NodeRef { get; }
+  virtual method Attach(SignalRouter.V2.AdapterSdk.IBootstrapRegistry bootstrap, SignalRouter.V2.AdapterSdk.INodeRegistry registry) : System.Void
+  virtual method Detach() : System.Void
+
+sealed class SignalRouter.V2.ReferenceAdapter.ReferencePumpHost
+  implements SignalRouter.V2.AdapterSdk.IPumpHost
+  ctor(SignalRouter.V2.ReferenceAdapter.ReferenceEffectExecutor executor, SignalRouter.V2.ReferenceAdapter.FrameTickClock clock)
+  method DriveFrames(System.Int32 frames) : System.Int32
+  property LogicalNow : SignalRouter.V2.AdapterSdk.LogicalTime { get; }
+  virtual method Attach(SignalRouter.V2.AdapterSdk.IPumpable pumpable) : System.Void
+  virtual method Detach() : System.Void
+
+sealed class SignalRouter.V2.ReferenceAdapter.ReferenceTckHarness
+  implements SignalRouter.V2.Tck.ITckHarness
+  ctor(SignalRouter.V2.ReferenceAdapter.ReferenceAdapterHost host)
+  property AgentDomain : SignalRouter.V2.Contracts.SecurityDomainId { get; }
+  property AgentPrincipal : SignalRouter.V2.Contracts.Principal { get; }
+  property CountAtLeastOne : SignalRouter.V2.Contracts.PredicateContractRef { get; }
+  property CountAtLeastTwo : SignalRouter.V2.Contracts.PredicateContractRef { get; }
+  property Descriptor : SignalRouter.V2.AdapterSdk.AdapterDescriptor { get; }
+  property HumanPrincipal : SignalRouter.V2.Contracts.Principal { get; }
+  property LogicalNow : SignalRouter.V2.AdapterSdk.LogicalTime { get; }
+  property MutatingCapability : SignalRouter.V2.Contracts.CapabilityContractRef { get; }
+  property RevisionBoundSource : SignalRouter.V2.Contracts.StateSourceKey { get; }
+  property Runtime : SignalRouter.V2.Kernel.KernelRuntime { get; }
+  property SlowCapability : SignalRouter.V2.Contracts.CapabilityContractRef { get; }
+  property VisibleTargetKey : SignalRouter.V2.Contracts.AuthorKey { get; }
+  virtual method DriveFrames(System.Int32 frames) : System.Int32
+  virtual method PublishCount(System.Int64 count) : SignalRouter.V2.AdapterSdk.PublicationAnswer
+  virtual method PublishUndeclaredField() : SignalRouter.V2.AdapterSdk.PublicationAnswer
+  virtual method SimulateExternalMutation() : System.Void
+  virtual method SimulateManagedInput(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.AdapterSdk.ISubmissionObserver observer, System.Boolean asHuman) : System.Void
+  virtual method TearDown() : System.Void
+
+sealed class SignalRouter.V2.ReferenceAdapter.ReferenceTckHarnessFactory
+  implements SignalRouter.V2.Tck.ITckHarnessFactory
+  ctor(System.Func<SignalRouter.V2.AdapterSdk.IEffectExecutor, SignalRouter.V2.AdapterSdk.IEffectExecutor>? decorateExecutor = null)
+  virtual method Create() : SignalRouter.V2.Tck.ITckHarness
+
+static class SignalRouter.V2.ReferenceAdapter.ReferenceWorld
+  const field ManagedInputClass : System.String = "synthetic-click"
+  const field ObservedInputClass : System.String = "external-scene-mutation"
+  static property Descriptor : SignalRouter.V2.AdapterSdk.AdapterDescriptor { get; }
+  static readonly field Agent : SignalRouter.V2.Contracts.Principal
+  static readonly field AgentDomain : SignalRouter.V2.Contracts.SecurityDomainId
+  static readonly field AppliedProfile : SignalRouter.V2.Contracts.CompletionProfileRef
+  static readonly field CountAtLeastOne : SignalRouter.V2.Contracts.PredicateContractRef
+  static readonly field CountAtLeastTwo : SignalRouter.V2.Contracts.PredicateContractRef
+  static readonly field CounterSource : SignalRouter.V2.Contracts.StateSourceKey
+  static readonly field FrameCommittedProfile : SignalRouter.V2.Contracts.CompletionProfileRef
+  static readonly field Human : SignalRouter.V2.Contracts.Principal
+  static readonly field HumanDomain : SignalRouter.V2.Contracts.SecurityDomainId
+  static readonly field RecordDomain : SignalRouter.V2.Contracts.SecurityDomainId
+  static readonly field SetLabel : SignalRouter.V2.Contracts.CapabilityContractRef
+  static readonly field SlowSetLabel : SignalRouter.V2.Contracts.CapabilityContractRef
+  static readonly field TargetKey : SignalRouter.V2.Contracts.AuthorKey
