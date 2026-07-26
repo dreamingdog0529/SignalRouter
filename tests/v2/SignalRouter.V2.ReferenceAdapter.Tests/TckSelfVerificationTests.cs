@@ -46,6 +46,36 @@ public sealed class TckSelfVerificationTests
     }
 
     [Test]
+    public void AThrowingExecutorFailsTheSyncAdoptionCheck()
+    {
+        var report = TckSuite.Run(new ReferenceTckHarnessFactory(
+            executor => new BadHarnesses.ThrowingExecutor(executor)));
+
+        Assert.That(report.Aggregate, Is.EqualTo(TckAggregate.Failed));
+        Assert.That(
+            Check(report, "sync-adoption-logical-bound").Status,
+            Is.EqualTo(TckCheckStatus.Failed),
+            "an executor that throws instead of returning an adoption must not pass the sync bound");
+    }
+
+    [Test]
+    public void WrongProfileEvidenceFailsTheCompletionChecks()
+    {
+        var report = TckSuite.Run(new ReferenceTckHarnessFactory(
+            executor => new BadHarnesses.WrongEvidenceExecutor(executor)));
+
+        Assert.That(report.Aggregate, Is.EqualTo(TckAggregate.Failed));
+        Assert.That(
+            Check(report, "effect-exactly-once-completion").Status,
+            Is.EqualTo(TckCheckStatus.Failed),
+            "the kernel rejects evidence of an unbound profile and the suite must read that rejection");
+        Assert.That(
+            Check(report, "completion-within-declared-frames").Status,
+            Is.EqualTo(TckCheckStatus.Failed),
+            "a rejected completion never becomes a Succeeded terminal within the declared frames");
+    }
+
+    [Test]
     public void AMisclassifiedManagedInputFailsTheClassificationCheck()
     {
         var report = TckSuite.Run(new BadHarnesses.WrappingFactory(

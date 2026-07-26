@@ -228,12 +228,18 @@ namespace SignalRouter.V2.Tck
         private static void CheckSyncAdoption(ITckHarness harness)
         {
             Submit(harness, harness.MutatingCapability, "tck-sync");
-            harness.DriveFrames(1);
-            // The logical form of the sync bound: Execute adopted-or-refused within the
-            // pump that dispatched it. The wall-clock value the descriptor declares
-            // (SyncExecutionBoundMilliseconds) is measured at tier 3.
+            harness.DriveFrames(DeclaredMaxFrames(harness, harness.MutatingCapability));
+            // The logical form of the sync bound: Execute returned an adoption within
+            // the pump that dispatched it. The permit trace alone cannot prove that —
+            // the kernel emits it before calling the executor — so the check also
+            // demands the Succeeded terminal only a returned adoption can produce.
+            // The wall-clock value (SyncExecutionBoundMilliseconds) is measured at tier 3.
             Require(HasTrace(harness, "EffectPermitted"),
-                "Execute must adopt synchronously within the dispatching pump (adapter-conformance.md §3)");
+                "the submission must reach effect dispatch (adapter-conformance.md §3)");
+            var answer = harness.Runtime.Queries.Query(new RequestId("tck-sync"), harness.AgentPrincipal);
+            Require(answer.Equals(QueryAnswer.Terminal(InteractionOutcome.Succeeded)),
+                "Execute must return Adopted synchronously and the effect must succeed — " +
+                "a throwing or deferring executor cannot produce this terminal; observed " + answer);
         }
 
         private static void CheckContamination(ITckHarness harness, TckOptions options)
@@ -415,9 +421,9 @@ namespace SignalRouter.V2.Tck
         private static void RequireTerminal(ITckHarness harness, string requestId, string boundDescription)
         {
             var answer = harness.Runtime.Queries.Query(new RequestId(requestId), harness.AgentPrincipal);
-            Require(answer.Kind == QueryAnswerKind.Terminal,
-                "completion must arrive within " + boundDescription +
-                " (adapter-conformance.md §4); observed " + answer);
+            Require(answer.Equals(QueryAnswer.Terminal(InteractionOutcome.Succeeded)),
+                "a Succeeded terminal with the bound profile's evidence must arrive within " +
+                boundDescription + " (adapter-conformance.md §4); observed " + answer);
         }
 
         private static void RequireDeclaredClass(ITckHarness harness, InputClass classification)

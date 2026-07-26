@@ -87,8 +87,10 @@ only after the permit evidence is ready ([guarantees.md](guarantees.md) §5.3,
 **Permit-token lifecycle (normative):** `issued → adopted → fenced → completed`.
 Refusal ends the lifecycle at `adopted`; profiles with completion-implied fences may
 collapse `fenced` into `completed`. A duplicate fence or completion message for a
-token, a message for an unknown token, and a message carrying a token from a previous
-`RuntimeIncarnationId` are protocol violations: the kernel rejects the message,
+token, a message for an unknown token, a successful completion whose evidence names a
+profile other than the one bound at admission (or, for the standard profiles of §4,
+an evidence kind other than the profile's own), and a message carrying a token from a
+previous `RuntimeIncarnationId` are protocol violations: the kernel rejects the message,
 traces it, and never lets it alter interaction state. The guarantee this protocol
 provides is at-most-once dispatch within an incarnation plus exactly-once completion
 messaging — never effect-exactly-once across crashes

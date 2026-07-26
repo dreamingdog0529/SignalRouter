@@ -69,6 +69,11 @@ namespace SignalRouter.V2.ReferenceAdapter
             clock.Advance();
             pumpable.Pump(new PumpBudget(
                 TurnsPerPhase, deadline: long.MaxValue, new LogicalTime(logicalNow), phase));
+
+            // The engine's frame work for this phase runs after the pump returned:
+            // adopted effects apply (and, at the fence phase, report FrameCommitted)
+            // only once the dispatching pump is out of the way.
+            executor.AfterPhase(phase);
         }
     }
 }

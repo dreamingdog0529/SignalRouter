@@ -73,6 +73,66 @@ internal static class BadHarnesses
         }
     }
 
+    /// <summary>Throws from Execute — never returns an adoption, violating the sync bound's logical form.</summary>
+    internal sealed class ThrowingExecutor : IEffectExecutor
+    {
+        private readonly IEffectExecutor inner;
+
+        internal ThrowingExecutor(IEffectExecutor inner) => this.inner = inner;
+
+        public void Attach(IEffectCompletionSink sink) => inner.Attach(sink);
+
+        public void Detach() => inner.Detach();
+
+        public EffectAdoption Execute(EffectRequest request) =>
+            throw new System.InvalidOperationException("engine call exploded");
+
+        public void RequestCancel(EffectPermitToken permit) => inner.RequestCancel(permit);
+    }
+
+    /// <summary>Rewrites successful completions to carry evidence of an unbound profile.</summary>
+    internal sealed class WrongEvidenceExecutor : IEffectExecutor
+    {
+        private readonly IEffectExecutor inner;
+
+        internal WrongEvidenceExecutor(IEffectExecutor inner) => this.inner = inner;
+
+        public void Attach(IEffectCompletionSink sink) => inner.Attach(new RewritingSink(sink));
+
+        public void Detach() => inner.Detach();
+
+        public EffectAdoption Execute(EffectRequest request) => inner.Execute(request);
+
+        public void RequestCancel(EffectPermitToken permit) => inner.RequestCancel(permit);
+
+        private sealed class RewritingSink : IEffectCompletionSink
+        {
+            private static readonly CompletionProfileRef Unbound = new(
+                new CompletionProfileId("AdapterAcknowledged"), new ContractVersion(1, 0));
+
+            private readonly IEffectCompletionSink inner;
+
+            internal RewritingSink(IEffectCompletionSink inner) => this.inner = inner;
+
+            public void ReportFenceReached(EffectPermitToken permit) => inner.ReportFenceReached(permit);
+
+            public void ReportCompletion(EffectCompletion completion)
+            {
+                if (completion.Resolution.Kind != EffectResolutionKind.Succeeded)
+                {
+                    inner.ReportCompletion(completion);
+                    return;
+                }
+
+                inner.ReportCompletion(new EffectCompletion(
+                    completion.Permit,
+                    EffectResolution.Succeeded(new CompletionEvidence(
+                        Unbound, CompletionEvidenceKind.AdapterAcknowledged, default)),
+                    completion.Continuations));
+            }
+        }
+    }
+
     /// <summary>Delegates everything; subclasses override one behavior to sabotage it.</summary>
     internal abstract class DelegatingHarness : ITckHarness
     {

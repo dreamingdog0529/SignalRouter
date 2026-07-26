@@ -116,6 +116,13 @@ public sealed class ReferenceAdapterConformanceTests
             host.PumpHost.DriveFrames(ReferenceEffectExecutor.SlowEffectFrames);
             Assert.That(
                 host.Runtime.Queries.Query(new RequestId("slow-1"), ReferenceWorld.Agent),
+                Is.EqualTo(QueryAnswer.Pending),
+                "FrameCommitted evidence is reported only after the fence phase, so the " +
+                "terminal cannot commit in the maturing frame itself");
+
+            host.PumpHost.DriveFrames(1);
+            Assert.That(
+                host.Runtime.Queries.Query(new RequestId("slow-1"), ReferenceWorld.Agent),
                 Is.EqualTo(QueryAnswer.Terminal(InteractionOutcome.Succeeded)));
         }
         finally

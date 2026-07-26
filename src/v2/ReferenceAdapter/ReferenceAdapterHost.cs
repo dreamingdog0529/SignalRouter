@@ -14,6 +14,8 @@ namespace SignalRouter.V2.ReferenceAdapter
     /// </summary>
     public sealed class ReferenceAdapterHost
     {
+        private static int incarnationCounter;
+
         private readonly ReferenceNodeSource nodeSource;
         private bool tornDown;
 
@@ -55,7 +57,12 @@ namespace SignalRouter.V2.ReferenceAdapter
                         Principal.WellKnownKinds.LocalUser, ReferenceWorld.HumanDomain),
                 }),
                 ReferenceWorld.RecordDomain);
-            var runtime = new KernelRuntime(new RuntimeIncarnationId("reference-incarnation-1"), options);
+            // Every runtime incarnation gets a unique id: a NodeRef or permit
+            // retained across a teardown must read as stale, never resolve into a
+            // later world (guarantees.md §6.1).
+            var incarnation = System.Threading.Interlocked.Increment(ref incarnationCounter);
+            var runtime = new KernelRuntime(
+                new RuntimeIncarnationId("reference-incarnation-" + incarnation), options);
 
             var nodeSource = new ReferenceNodeSource();
             nodeSource.Attach(runtime.Bootstrap, runtime.Registry);
