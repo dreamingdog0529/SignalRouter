@@ -226,6 +226,13 @@ The runtime-owned `StateStore` core is an in-memory, content-addressed **cache**
   release-surface authorization, and by the rule that every surface exposing a
   `ContentId` demands the same authorization as reading its blob
   ([security-resources.md](security-resources.md) §4).
+- **A blob resolved by `ContentId` carries no temporal authority.** Because the
+  temporal legs are outside the canonical content, deduplication can retain a
+  materialization first produced at an earlier revision; its in-memory basis legs
+  are creation provenance only. A consumer resolving state by `ContentId` MUST
+  reattach `RuntimeIncarnationId` and `SourceRevision` from the referencing
+  snapshot/cut tuple — the decode seam takes them as arguments for exactly this
+  reason ([adr 0012](../adr/0012-canonical-state-representation-and-digest-policy.md)).
 - **Pins are reference counts** keyed by `(blob, lease owner)`, where the owner is a
   discriminated lease identity: a snapshot-read operation, an interaction's retained
   after-basis (its `RequestId`), a recording, or the reserved timeline owner.

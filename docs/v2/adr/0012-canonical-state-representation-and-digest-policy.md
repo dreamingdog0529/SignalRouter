@@ -128,6 +128,15 @@ completeness := bool(rootTruncated) varuint(count) (str(region) str(reasonCode))
   attribute update that leaves the visible state identical produces the same
   `ContentId`, the idempotent `Put` deduplicates, and pin reference-counting carries
   multiple timeline entries over one blob.
+- **Deduplication makes the cached object's temporal legs provenance, not
+  authority.** The `StateStore` retains the first-retained materialization; after a
+  same-`ContentId` re-materialization at a later revision, a lookup by `ContentId`
+  returns an object whose in-memory basis still carries the first retention's
+  incarnation/revision. That is consistent with this ADR, not a bug: any consumer
+  resolving state by `ContentId` MUST reattach the temporal legs from the
+  referencing tuple or cut and MUST NOT read them from the cached object — exactly
+  what `Decode(payload, incarnation, revision)` forces on the durable path
+  (observation-state.md §5.1).
 - `ICanonicalStateCodec`'s documentation is synchronized with this ADR (digest over
   the canonical bytes embedding the projection identity; temporal legs
   tuple-authoritative; the no-throw contract scoped to Contracts-valid, in-bounds
