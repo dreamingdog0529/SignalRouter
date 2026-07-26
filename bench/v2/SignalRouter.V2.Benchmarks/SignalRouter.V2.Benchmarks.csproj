@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!--
+      Bench host: net10.0, like the test projects. The production assemblies it
+      measures stay netstandard2.1; the PackageReference-zero constraint applies
+      to src/v2 only (ADR 0013 scope), so BenchmarkDotNet here is not a
+      violation. Benchmarks MUST run with `-c Release` - BenchmarkDotNet
+      refuses Debug builds.
+    -->
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Optimize>true</Optimize>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/v2/AdapterSdk/SignalRouter.V2.AdapterSdk.csproj" />
+    <ProjectReference Include="../../../src/v2/Codec.CanonicalState/SignalRouter.V2.Codec.CanonicalState.csproj" />
+    <ProjectReference Include="../../../src/v2/Contracts/SignalRouter.V2.Contracts.csproj" />
+    <ProjectReference Include="../../../src/v2/Kernel/SignalRouter.V2.Kernel.csproj" />
+  </ItemGroup>
+</Project>

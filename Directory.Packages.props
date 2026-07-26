@@ -3,6 +3,8 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Bench host only (bench/v2); never referenced by shipped assemblies. -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <!-- The MCP host only; never enters Unity's restore path, so the newer
          System.Text.Json it pulls transitively cannot conflict with the 8.0

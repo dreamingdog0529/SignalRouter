@@ -38,6 +38,31 @@ jobs:
       - name: Test
         run: dotnet test ./SignalRouter.slnx --no-build
 
+  # Release configuration: the allocation-measurement harness
+  # (tests/v2/SignalRouter.V2.Performance.Tests) only reads representative
+  # numbers from optimized code, and the exact-zero gates of the performance
+  # track (docs/v2 plan P6) will run here. Debug jobs cannot serve that role.
+  build-and-test-release:
+    name: Build and test (Release)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Create local package feed directory
+        run: mkdir -p ../.local-feed
+
+      - name: Build
+        run: dotnet build ./SignalRouter.slnx -c Release
+
+      - name: Test
+        run: dotnet test ./SignalRouter.slnx -c Release --no-build
+
   # The descriptor store applies owner-only permissions per OS (ADR 0008): Unix
   # 0700/0600 is covered by build-and-test on ubuntu, and this job covers the
   # Windows inheritance-disabled DACL path on a real Windows runner.
