@@ -44,6 +44,11 @@ public sealed class RuntimeEquivalenceTests
 
         private long logicalNow = 100;
 
+        private readonly ExposurePolicy visibleToAll = new(ValueList<SecurityDomainId>.From(new[]
+        {
+            KernelFixture.AgentDomain, KernelFixture.HumanDomain, KernelFixture.RecordDomain,
+        }));
+
         internal World(bool reversedBootstrap, bool churn)
         {
             var options = new KernelOptions(
@@ -73,10 +78,6 @@ public sealed class RuntimeEquivalenceTests
                 KernelFixture.Invoke, ArgumentSchema.Empty, precondition: null,
                 KernelFixture.Applied, postcondition: null));
 
-            var visibleToAll = new ExposurePolicy(ValueList<SecurityDomainId>.From(new[]
-            {
-                KernelFixture.AgentDomain, KernelFixture.HumanDomain, KernelFixture.RecordDomain,
-            }));
             var steps = new Action[]
             {
                 () => Runtime.Bootstrap.RegisterNode(new NodeRegistration(
@@ -159,6 +160,24 @@ public sealed class RuntimeEquivalenceTests
 
                 PumpUntilIdle();
             }
+
+            // Both worlds register the same post-start node LAST: in the churned
+            // world it occupies a recycled slot freed by the unregistered dummies,
+            // in the pristine world a fresh one — real slot reuse, same visible
+            // world either way.
+            var lateObserver = new RecordingRegistrationObserver();
+            Runtime.Registry.Register(new NodeRegistration(
+                new AuthorKey("late"),
+                NodeRole.Button,
+                parent: null,
+                ValueList<NodeAttribute>.From(new[]
+                {
+                    new NodeAttribute("marker", FieldValue.Of("fresh"), Sensitivity.Standard),
+                }),
+                ValueList<CapabilityDeclaration>.Empty,
+                visibleToAll), lateObserver);
+            PumpUntilIdle();
+            Assert.That(lateObserver.Receipts.Single().Succeeded, Is.True);
         }
 
         internal void PumpUntilIdle(int maxPumps = 16)
@@ -211,16 +230,29 @@ public sealed class RuntimeEquivalenceTests
             return observer.Pinned.Single().Snapshot;
         }
 
-        internal List<string> TraceKinds()
+        /// <summary>
+        /// Every observer-visible field of every trace event — an internal-order
+        /// leak into causation, request, operation, order, or revision must fail
+        /// the equivalence assertion, not just a changed kind.
+        /// </summary>
+        internal List<string> TraceRendering()
         {
-            var kinds = new List<string>();
+            var events = new List<string>();
             foreach (var semanticEvent in Runtime.Trace.Snapshot())
             {
-                kinds.Add(semanticEvent.Kind.Value +
-                    (semanticEvent.DetailCode == null ? "" : ":" + semanticEvent.DetailCode));
+                events.Add(string.Join("|",
+                    semanticEvent.Kind.Value,
+                    semanticEvent.Incarnation.Value,
+                    semanticEvent.Causation.ToString(),
+                    semanticEvent.Request?.Value ?? "-",
+                    semanticEvent.Operation?.Value ?? "-",
+                    semanticEvent.Order?.ToString() ?? "-",
+                    semanticEvent.Revision?.Value.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture) ?? "-",
+                    semanticEvent.DetailCode ?? "-"));
             }
 
-            return kinds;
+            return events;
         }
     }
 
@@ -237,8 +269,8 @@ public sealed class RuntimeEquivalenceTests
             Is.EqualTo(forward.Runtime.Queries.Query(new RequestId("r1"), KernelFixture.Agent)),
             "query answers are portable");
         Assert.That(
-            reversed.TraceKinds(), Is.EqualTo(forward.TraceKinds()),
-            "the trace kind sequence is portable");
+            reversed.TraceRendering(), Is.EqualTo(forward.TraceRendering()),
+            "the full trace event sequence is portable");
 
         var forwardPin = forward.Pin();
         var reversedPin = reversed.Pin();
@@ -275,6 +307,10 @@ public sealed class RuntimeEquivalenceTests
             churnedPin.Lookup.Lookup(new FieldPath("nodes/churn-0/attributes/label")),
             Is.EqualTo(FieldLookup.OutOfScope),
             "an unregistered node answers exactly like one that never existed");
+        Assert.That(
+            churnedPin.Lookup.Lookup(new FieldPath("nodes/late/attributes/marker")),
+            Is.EqualTo(FieldLookup.Present(FieldValue.Of("fresh"))),
+            "the node in the recycled slot serves its own record, not a stale one");
     }
 
     [Test]

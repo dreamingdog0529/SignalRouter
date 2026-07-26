@@ -165,14 +165,15 @@ internal static class ApiSurfaceRenderer
 
         foreach (var constructor in type.GetConstructors(declared).Where(IsSurface))
         {
-            lines.Add("ctor(" + RenderParameters(constructor.GetParameters()) + ")");
+            lines.Add(Accessibility(constructor) + " ctor(" + RenderParameters(constructor.GetParameters()) + ")");
         }
 
         foreach (var method in type.GetMethods(declared).Where(method => IsSurface(method) && !method.IsSpecialName))
         {
             lines.Add(
+                Accessibility(method) + " " +
                 (method.IsStatic ? "static " : "") +
-                (method.IsAbstract ? "abstract " : method.IsVirtual && !IsInterfaceImplementation(type) ? "virtual " : "") +
+                SlotModifier(type, method) +
                 "method " + RenderMethodSignature(method));
         }
 
@@ -181,7 +182,7 @@ internal static class ApiSurfaceRenderer
                      .Where(method => IsSurface(method) && method.IsSpecialName &&
                          method.Name.StartsWith("op_", StringComparison.Ordinal)))
         {
-            lines.Add("operator " + RenderMethodSignature(method));
+            lines.Add(Accessibility(method) + " operator " + RenderMethodSignature(method));
         }
 
         foreach (var property in type.GetProperties(declared))
@@ -195,24 +196,29 @@ internal static class ApiSurfaceRenderer
                 continue;
             }
 
+            // Accessibility is rendered per accessor (a public getter with a
+            // protected setter is a real shape) and the virtual-slot semantics
+            // come from whichever accessor is on the surface.
             var accessors = new List<string>();
             if (surfaceGet)
             {
-                accessors.Add("get");
+                accessors.Add(Accessibility(getter!) + " get");
             }
 
             if (surfaceSet)
             {
-                accessors.Add(IsInitOnly(setter!) ? "init" : "set");
+                accessors.Add(Accessibility(setter!) + " " + (IsInitOnly(setter!) ? "init" : "set"));
             }
 
             var indexParameters = property.GetIndexParameters();
             var name = indexParameters.Length > 0
                 ? "this[" + RenderParameters(indexParameters) + "]"
                 : property.Name;
-            var isStatic = (getter ?? setter)!.IsStatic;
+            var slotSource = surfaceGet ? getter! : setter!;
             lines.Add(
-                (isStatic ? "static " : "") + "property " + name + " : " +
+                (slotSource.IsStatic ? "static " : "") +
+                SlotModifier(type, slotSource) +
+                "property " + name + " : " +
                 RenderNullable(new NullabilityInfoContext().Create(property)) +
                 " { " + string.Join("; ", accessors) + "; }");
         }
@@ -222,7 +228,7 @@ internal static class ApiSurfaceRenderer
             var prefix = field.IsLiteral ? "const "
                 : field.IsStatic ? field.IsInitOnly ? "static readonly " : "static "
                 : field.IsInitOnly ? "readonly " : "";
-            var line = prefix + "field " + field.Name + " : " +
+            var line = Accessibility(field) + " " + prefix + "field " + field.Name + " : " +
                 RenderNullable(new NullabilityInfoContext().Create(field));
             if (field.IsLiteral)
             {
@@ -241,7 +247,10 @@ internal static class ApiSurfaceRenderer
             }
 
             lines.Add(
-                (adder.IsStatic ? "static " : "") + "event " + eventInfo.Name + " : " +
+                Accessibility(adder) + " " +
+                (adder.IsStatic ? "static " : "") +
+                SlotModifier(type, adder) +
+                "event " + eventInfo.Name + " : " +
                 FriendlyName(eventInfo.EventHandlerType!));
         }
 
@@ -249,7 +258,43 @@ internal static class ApiSurfaceRenderer
         return lines;
     }
 
-    private static bool IsInterfaceImplementation(Type type) => type.IsInterface;
+    private static string Accessibility(MethodBase method) =>
+        method.IsPublic ? "public"
+        : method.IsFamilyOrAssembly ? "protected internal"
+        : "protected";
+
+    private static string Accessibility(FieldInfo field) =>
+        field.IsPublic ? "public"
+        : field.IsFamilyOrAssembly ? "protected internal"
+        : "protected";
+
+    /// <summary>
+    /// The virtual-slot semantics of a member: abstract / virtual / override /
+    /// sealed override. A sealed override still has IsVirtual true, so IsFinal and
+    /// the NewSlot flag are what actually distinguish the shapes; an implicit
+    /// interface implementation (newslot + final) introduces no overridable slot
+    /// and renders unmarked, as in C# source.
+    /// </summary>
+    private static string SlotModifier(Type declaringType, MethodInfo method)
+    {
+        if (declaringType.IsInterface || !method.IsVirtual)
+        {
+            return "";
+        }
+
+        var newSlot = (method.Attributes & MethodAttributes.NewSlot) != 0;
+        if (method.IsAbstract)
+        {
+            return newSlot ? "abstract " : "abstract override ";
+        }
+
+        if (method.IsFinal)
+        {
+            return newSlot ? "" : "sealed override ";
+        }
+
+        return newSlot ? "virtual " : "override ";
+    }
 
     private static string RenderMethodSignature(MethodInfo method)
     {

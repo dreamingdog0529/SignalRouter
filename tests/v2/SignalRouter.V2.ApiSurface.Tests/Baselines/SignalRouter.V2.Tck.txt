@@ -1,27 +1,27 @@
 # API surface of SignalRouter.V2.Tck
 
 interface SignalRouter.V2.Tck.ITckHarness
-  abstract method DriveFrames(System.Int32 frames) : System.Int32
-  abstract method PublishCount(System.Int64 count) : SignalRouter.V2.AdapterSdk.PublicationAnswer
-  abstract method PublishUndeclaredField() : SignalRouter.V2.AdapterSdk.PublicationAnswer
-  abstract method SimulateExternalMutation() : System.Void
-  abstract method SimulateManagedInput(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.AdapterSdk.ISubmissionObserver observer, System.Boolean asHuman) : System.Void
-  abstract method TearDown() : System.Void
-  property AgentDomain : SignalRouter.V2.Contracts.SecurityDomainId { get; }
-  property AgentPrincipal : SignalRouter.V2.Contracts.Principal { get; }
-  property CountAtLeastOne : SignalRouter.V2.Contracts.PredicateContractRef { get; }
-  property CountAtLeastTwo : SignalRouter.V2.Contracts.PredicateContractRef { get; }
-  property Descriptor : SignalRouter.V2.AdapterSdk.AdapterDescriptor { get; }
-  property HumanPrincipal : SignalRouter.V2.Contracts.Principal { get; }
-  property LogicalNow : SignalRouter.V2.AdapterSdk.LogicalTime { get; }
-  property MutatingCapability : SignalRouter.V2.Contracts.CapabilityContractRef { get; }
-  property RevisionBoundSource : SignalRouter.V2.Contracts.StateSourceKey { get; }
-  property Runtime : SignalRouter.V2.Kernel.KernelRuntime { get; }
-  property SlowCapability : SignalRouter.V2.Contracts.CapabilityContractRef { get; }
-  property VisibleTargetKey : SignalRouter.V2.Contracts.AuthorKey { get; }
+  property AgentDomain : SignalRouter.V2.Contracts.SecurityDomainId { public get; }
+  property AgentPrincipal : SignalRouter.V2.Contracts.Principal { public get; }
+  property CountAtLeastOne : SignalRouter.V2.Contracts.PredicateContractRef { public get; }
+  property CountAtLeastTwo : SignalRouter.V2.Contracts.PredicateContractRef { public get; }
+  property Descriptor : SignalRouter.V2.AdapterSdk.AdapterDescriptor { public get; }
+  property HumanPrincipal : SignalRouter.V2.Contracts.Principal { public get; }
+  property LogicalNow : SignalRouter.V2.AdapterSdk.LogicalTime { public get; }
+  property MutatingCapability : SignalRouter.V2.Contracts.CapabilityContractRef { public get; }
+  property RevisionBoundSource : SignalRouter.V2.Contracts.StateSourceKey { public get; }
+  property Runtime : SignalRouter.V2.Kernel.KernelRuntime { public get; }
+  property SlowCapability : SignalRouter.V2.Contracts.CapabilityContractRef { public get; }
+  property VisibleTargetKey : SignalRouter.V2.Contracts.AuthorKey { public get; }
+  public method DriveFrames(System.Int32 frames) : System.Int32
+  public method PublishCount(System.Int64 count) : SignalRouter.V2.AdapterSdk.PublicationAnswer
+  public method PublishUndeclaredField() : SignalRouter.V2.AdapterSdk.PublicationAnswer
+  public method SimulateExternalMutation() : System.Void
+  public method SimulateManagedInput(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.AdapterSdk.ISubmissionObserver observer, System.Boolean asHuman) : System.Void
+  public method TearDown() : System.Void
 
 interface SignalRouter.V2.Tck.ITckHarnessFactory
-  abstract method Create() : SignalRouter.V2.Tck.ITckHarness
+  public method Create() : SignalRouter.V2.Tck.ITckHarness
 
 enum SignalRouter.V2.Tck.TckAggregate
   : System.Int32
@@ -30,13 +30,13 @@ enum SignalRouter.V2.Tck.TckAggregate
   Passed = 0
 
 sealed class SignalRouter.V2.Tck.TckCheckResult
-  ctor(System.String checkId, System.String obligation, System.Boolean required, SignalRouter.V2.Tck.TckCheckStatus status, System.String? detail)
-  property CheckId : System.String { get; }
-  property Detail : System.String? { get; }
-  property Obligation : System.String { get; }
-  property Required : System.Boolean { get; }
-  property Status : SignalRouter.V2.Tck.TckCheckStatus { get; }
-  virtual method ToString() : System.String
+  property CheckId : System.String { public get; }
+  property Detail : System.String? { public get; }
+  property Obligation : System.String { public get; }
+  property Required : System.Boolean { public get; }
+  property Status : SignalRouter.V2.Tck.TckCheckStatus { public get; }
+  public ctor(System.String checkId, System.String obligation, System.Boolean required, SignalRouter.V2.Tck.TckCheckStatus status, System.String? detail)
+  public override method ToString() : System.String
 
 enum SignalRouter.V2.Tck.TckCheckStatus
   : System.Int32
@@ -45,15 +45,15 @@ enum SignalRouter.V2.Tck.TckCheckStatus
   Skipped = 2
 
 sealed class SignalRouter.V2.Tck.TckOptions
-  ctor(System.Int32 quiescenceFrameBound = 64)
-  property QuiescenceFrameBound : System.Int32 { get; }
+  property QuiescenceFrameBound : System.Int32 { public get; }
+  public ctor(System.Int32 quiescenceFrameBound = 64)
 
 sealed class SignalRouter.V2.Tck.TckReport
-  ctor(System.String version, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Tck.TckCheckResult> checks)
-  property Aggregate : SignalRouter.V2.Tck.TckAggregate { get; }
-  property Checks : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Tck.TckCheckResult> { get; }
-  property Version : System.String { get; }
+  property Aggregate : SignalRouter.V2.Tck.TckAggregate { public get; }
+  property Checks : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Tck.TckCheckResult> { public get; }
+  property Version : System.String { public get; }
+  public ctor(System.String version, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Tck.TckCheckResult> checks)
 
 static class SignalRouter.V2.Tck.TckSuite
-  const field Version : System.String = "tck-core-0.x"
-  static method Run(SignalRouter.V2.Tck.ITckHarnessFactory factory, SignalRouter.V2.Tck.TckOptions? options = null) : SignalRouter.V2.Tck.TckReport
+  public const field Version : System.String = "tck-core-0.x"
+  public static method Run(SignalRouter.V2.Tck.ITckHarnessFactory factory, SignalRouter.V2.Tck.TckOptions? options = null) : SignalRouter.V2.Tck.TckReport
