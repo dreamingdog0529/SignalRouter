@@ -5,10 +5,13 @@ principles redesign of the same mission — semantic UI projection, structured c
 deterministic record/replay, and MCP agent control — with an engine-agnostic,
 dependency-free core.
 
-**Status: design only.** Nothing in this directory is implemented. The v1 documents
-([../design.md](../design.md), [../adr/](../adr/)) remain the sole authority for the
-current implementation and are intentionally untouched; v2 shares no compatibility
-with v1's API, protocol, or artifacts, and this set renumbers its ADRs from 0001.
+**Status: under implementation.** The design set is normative for the v2
+implementation in `src/v2/` (Contracts, AdapterSdk, Kernel, TCK, reference
+adapter, and `Codec.CanonicalState` are shipped; recording/replay and the outer
+modules are staged). The v1 documents ([../design.md](../design.md),
+[../adr/](../adr/)) describe the v1 implementation only; v2 shares no
+compatibility with v1's API, protocol, or artifacts, and this set renumbers its
+ADRs from 0001.
 
 ## Reading order
 
@@ -39,6 +42,8 @@ with v1's API, protocol, or artifacts, and this set renumbers its ADRs from 0001
    exposure, bounds, artifact trust, release gating
 9. [spec/verification.md](spec/verification.md) — predicate model, assertions (E8),
    fidelity vs. verdict, verification cases, seal conditions, CI runner and reports
+10. [spec/performance.md](spec/performance.md) — guarantee layers, quiescence and
+    proportionality, the measurement contract, `PerformanceConformanceProfile`
 
 ## Architecture decision records
 
@@ -54,6 +59,8 @@ with v1's API, protocol, or artifacts, and this set renumbers its ADRs from 0001
 10. [adr/0010-effect-protocol-and-kernel-host-contract.md](adr/0010-effect-protocol-and-kernel-host-contract.md)
 11. [adr/0011-observation-materialization-and-state-store.md](adr/0011-observation-materialization-and-state-store.md)
 12. [adr/0012-canonical-state-representation-and-digest-policy.md](adr/0012-canonical-state-representation-and-digest-policy.md)
+13. [adr/0013-performance-normativity-and-allocation-policy.md](adr/0013-performance-normativity-and-allocation-policy.md)
+14. [adr/0014-two-layer-identifier-representation.md](adr/0014-two-layer-identifier-representation.md)
 
 ## Provenance
 
