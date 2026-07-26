@@ -13,14 +13,17 @@ namespace SignalRouter.V2.AdapterSdk
 
     /// <summary>
     /// One submission (kernel-execution.md §3): the caller-assigned `RequestId`, the
-    /// invocation with its ephemeral typed payload, and the identity envelope. The
-    /// kernel derives the authoritative fingerprint from the canonicalized payload.
+    /// invoked capability and target with the ephemeral typed payload, and the
+    /// identity envelope. The submitter never supplies a fingerprint or argument
+    /// digest — the kernel derives both from the canonicalized payload and builds
+    /// the recording-safe <c>CapabilityInvocation</c> itself (ADR 0010).
     /// </summary>
     public sealed class IntentSubmission
     {
         public IntentSubmission(
             RequestId request,
-            CapabilityInvocation invocation,
+            CapabilityContractRef capability,
+            TargetReference target,
             InvocationPayload payload,
             IdentityEnvelope envelope,
             ISubmissionObserver? observer)
@@ -30,8 +33,19 @@ namespace SignalRouter.V2.AdapterSdk
                 throw new ArgumentException("Submission requires a non-default RequestId.", nameof(request));
             }
 
+            if (capability.IsDefault)
+            {
+                throw new ArgumentException("Submission requires a non-default capability.", nameof(capability));
+            }
+
+            if (target.IsDefault)
+            {
+                throw new ArgumentException("Submission requires a non-default target.", nameof(target));
+            }
+
             Request = request;
-            Invocation = invocation ?? throw new ArgumentNullException(nameof(invocation));
+            Capability = capability;
+            Target = target;
             Payload = payload ?? throw new ArgumentNullException(nameof(payload));
             Envelope = envelope ?? throw new ArgumentNullException(nameof(envelope));
             Observer = observer;
@@ -39,7 +53,9 @@ namespace SignalRouter.V2.AdapterSdk
 
         public RequestId Request { get; }
 
-        public CapabilityInvocation Invocation { get; }
+        public CapabilityContractRef Capability { get; }
+
+        public TargetReference Target { get; }
 
         /// <summary>Ephemeral (kernel-execution.md §3): never stored, lifetime ends at terminal.</summary>
         public InvocationPayload Payload { get; }

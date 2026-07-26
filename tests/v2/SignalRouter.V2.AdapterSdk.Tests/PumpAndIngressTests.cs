@@ -50,15 +50,19 @@ public sealed class PumpAndIngressTests
     [Test]
     public void SubmissionsCarryPayloadAndEnvelope()
     {
+        // The submitter names the capability and target; the kernel derives the
+        // fingerprint and digest itself (ADR 0010).
         var submission = new IntentSubmission(
             SdkTestData.Request("r1"),
-            SdkTestData.Invocation,
+            SdkTestData.Capability,
+            TargetReference.ForKey(new AuthorKey("save")),
             InvocationPayload.Empty,
             SdkTestData.Envelope,
             observer: null);
         Assert.That(submission.Observer, Is.Null);
         AssertEx.Throws<ArgumentException>(() => _ = new IntentSubmission(
-            default, SdkTestData.Invocation, InvocationPayload.Empty, SdkTestData.Envelope, null));
+            default, SdkTestData.Capability, TargetReference.ForKey(new AuthorKey("save")),
+            InvocationPayload.Empty, SdkTestData.Envelope, null));
     }
 
     [Test]

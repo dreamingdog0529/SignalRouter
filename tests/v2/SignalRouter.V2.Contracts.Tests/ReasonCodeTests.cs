@@ -16,7 +16,13 @@ public sealed class ReasonCodeTests
         Assert.That(RejectionReason.RequestIdConflict.Value, Is.EqualTo("RequestIdConflict"));
         Assert.That(RejectionReason.CapacityExhausted.Value, Is.EqualTo("CapacityExhausted"));
         Assert.That(RejectionReason.ReentrantDispatch.Value, Is.EqualTo("ReentrantDispatch"));
+        Assert.That(RejectionReason.TargetNotFound.Value, Is.EqualTo("TargetNotFound"));
+        Assert.That(RejectionReason.CapabilityUnavailable.Value, Is.EqualTo("CapabilityUnavailable"));
+        Assert.That(RejectionReason.PreconditionFailed.Value, Is.EqualTo("PreconditionFailed"));
+        Assert.That(RejectionReason.IncarnationMismatch.Value, Is.EqualTo("IncarnationMismatch"));
+        Assert.That(RejectionReason.UnkeyedTarget.Value, Is.EqualTo("UnkeyedTarget"));
         Assert.That(RejectionReason.RequestIdConflict.IsCanonical, Is.True);
+        Assert.That(RejectionReason.TargetNotFound.IsCanonical, Is.True);
     }
 
     [Test]
