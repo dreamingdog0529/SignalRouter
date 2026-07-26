@@ -13,10 +13,7 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../../src/v2/Kernel/SignalRouter.V2.Kernel.csproj" />
-    <!-- Test-only edge: integration coverage of the production codec through the
-         kernel seam. The src-level module boundaries (architecture.md §2) are
-         untouched — the kernel itself never references the leaf. -->
     <ProjectReference Include="../../../src/v2/Codec.CanonicalState/SignalRouter.V2.Codec.CanonicalState.csproj" />
+    <ProjectReference Include="../../../src/v2/Contracts/SignalRouter.V2.Contracts.csproj" />
   </ItemGroup>
 </Project>

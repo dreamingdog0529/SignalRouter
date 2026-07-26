@@ -31,7 +31,11 @@ promise when control turns keep advancing the revision.
   support recording: honest degradation. Whether digest production additionally folds
   a keyed secret (identifier-level cross-domain concealment on top of the store's
   domain-keyed lookup and release-surface authorization) is decided with
-  `Codec.CanonicalState` (open point, item 4).
+  `Codec.CanonicalState` (open point, item 4). *Resolved by
+  [adr 0012](0012-canonical-state-representation-and-digest-policy.md), which
+  partially supersedes this paragraph: no keyed secret — portable keyless
+  verification wins, and concealment is normalized at the authorization surfaces
+  ([security-resources.md](../spec/security-resources.md) §4).*
 - **The `StateStore` core is an in-memory cache; durability is the recording
   module's.** Pins are reference counts keyed by `(blob, owning OperationId)`; GC
   evicts unpinned blobs oldest-insertion-first at over-budget `Put`; refusals are

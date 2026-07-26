@@ -253,6 +253,14 @@ namespace SignalRouter.V2.Contracts
             // Ordinal normalization: logically identical documents materialize
             // identically regardless of publication or schema order.
             var sortedFields = new List<NamedField>(fields);
+            foreach (var field in sortedFields)
+            {
+                if (field.IsDefault)
+                {
+                    throw new ArgumentException("Fields must be non-default.", nameof(fields));
+                }
+            }
+
             sortedFields.Sort((left, right) => string.CompareOrdinal(left.Name, right.Name));
             for (var i = 1; i < sortedFields.Count; i++)
             {
@@ -263,12 +271,29 @@ namespace SignalRouter.V2.Contracts
             }
 
             var sortedRedacted = new List<string>(redactedFieldNames);
+            foreach (var name in sortedRedacted)
+            {
+                ContractGrammar.ValidateIdentifier(name, nameof(redactedFieldNames));
+            }
+
             sortedRedacted.Sort(StringComparer.Ordinal);
             for (var i = 1; i < sortedRedacted.Count; i++)
             {
                 if (string.Equals(sortedRedacted[i - 1], sortedRedacted[i], StringComparison.Ordinal))
                 {
                     throw new ArgumentException("Duplicate redacted field name.", nameof(redactedFieldNames));
+                }
+            }
+
+            // The four comparator states are disjoint: a field name is present with
+            // a value, redacted, or absent — never present and redacted at once
+            // (observation-state.md §3).
+            foreach (var field in sortedFields)
+            {
+                if (sortedRedacted.BinarySearch(field.Name, StringComparer.Ordinal) >= 0)
+                {
+                    throw new ArgumentException(
+                        $"Field '{field.Name}' cannot be both present and redacted.", nameof(fields));
                 }
             }
 
