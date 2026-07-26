@@ -39,4 +39,30 @@ public sealed class AllocationRegressionGates
             loadedBytes, Is.EqualTo(pristineBytes),
             "the quiescent pump must not allocate proportionally to retained state (plan L0)");
     }
+
+    /// <summary>
+    /// P1b (finding A2): a steady-state emit into a full trace ring is
+    /// allocation-free — eviction is O(1) slot reuse and the gap marker carries
+    /// its count as an integer. Before the fix this was ~64 KB per emit
+    /// (a full rebuild of the 8192-entry ring plus the marker string).
+    /// </summary>
+    [Test]
+    public void TraceRingEmitAtCapacityAllocatesZero()
+    {
+        var ring = new SignalRouter.V2.Kernel.KernelTraceRing(capacity: 64, byteCapacity: 1024 * 1024);
+        var semanticEvent = new SignalRouter.V2.Contracts.SemanticEvent(
+            new SignalRouter.V2.Contracts.EventKind("StateTransition"),
+            new SignalRouter.V2.Contracts.RuntimeIncarnationId("gate-incarnation"),
+            SignalRouter.V2.Contracts.EventCausation.None,
+            detailCode: "GateProbe");
+        for (var i = 0; i < 80; i++)
+        {
+            ring.Emit(semanticEvent);
+        }
+
+        var bytes = AllocationMeter.BytesPerOperation(() => ring.Emit(semanticEvent));
+
+        TestContext.Out.WriteLine($"[allocation-gate] trace ring emit at capacity: {bytes} B/op");
+        Assert.That(bytes, Is.EqualTo(0), "emission at capacity is eviction by slot reuse, never a rebuild");
+    }
 }

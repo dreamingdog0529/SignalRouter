@@ -1715,8 +1715,9 @@ namespace SignalRouter.V2.Kernel
             SourceRevision? revision = null,
             string? detailCode = null)
         {
-            trace.Emit(new SemanticEvent(
-                kind, Incarnation, causation, request, operation, order, revision, detailCode));
+            // Field-wise emission: no SemanticEvent allocation per trace event
+            // (the ring materializes public events only when snapshotted).
+            trace.Emit(kind, Incarnation, causation, request, operation, order, revision, detailCode);
         }
 
         // ── Interaction record ───────────────────────────────────────────────
