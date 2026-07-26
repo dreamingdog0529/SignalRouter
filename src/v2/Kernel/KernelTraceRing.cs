@@ -70,6 +70,9 @@ namespace SignalRouter.V2.Kernel
 
         private const int GapReservedBytes = 96;
 
+        /// <summary>Cached: the property mints a fresh validated instance per access.</summary>
+        private static readonly EventKind TraceGapKind = EventKind.TraceGap;
+
         private readonly object gate = new object();
         private readonly TraceEntry[] slots;
         private readonly int capacity;
@@ -179,7 +182,11 @@ namespace SignalRouter.V2.Kernel
 
                     ref var evicted = ref slots[head];
                     virtualBytes -= evicted.EstimatedBytes;
-                    if (evicted.GapDroppedCount == 0)
+
+                    // Kind-based, as historically: a caller-emitted TraceGap
+                    // through the public API is bookkeeping too, never a
+                    // counted loss.
+                    if (!evicted.Kind.Equals(TraceGapKind))
                     {
                         droppedNow++;
                     }

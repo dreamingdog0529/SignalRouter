@@ -121,6 +121,26 @@ public sealed class KernelTraceRingTests
     }
 
     [Test]
+    public void ACallerEmittedGapKindIsBookkeepingNotACountedLoss()
+    {
+        // The public API accepts TraceGap-kind events; evicting one must not
+        // inflate TotalDropped (kind-based accounting, as always).
+        var ring = new KernelTraceRing(capacity: 4, byteCapacity: 1024 * 1024);
+        ring.Emit(new SemanticEvent(
+            new EventKind("TraceGap"), Incarnation, EventCausation.None, detailCode: "Dropped9"));
+        for (var i = 0; i < 4; i++)
+        {
+            ring.Emit(Event("E" + i));
+        }
+
+        Assert.That(ring.TotalDropped, Is.EqualTo(1), "only E0 was a real loss");
+        Assert.That(Rendered(ring), Is.EqualTo(new[]
+        {
+            "TraceGap:Dropped1", "StateTransition:E1", "StateTransition:E2", "StateTransition:E3",
+        }));
+    }
+
+    [Test]
     public void SnapshotIsAPointInTimeCopy()
     {
         var ring = new KernelTraceRing(capacity: 8, byteCapacity: 1024 * 1024);
