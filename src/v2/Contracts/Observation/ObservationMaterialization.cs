@@ -249,8 +249,31 @@ namespace SignalRouter.V2.Contracts
 
             Key = key;
             Contract = contract;
-            Fields = fields;
-            RedactedFieldNames = redactedFieldNames;
+
+            // Ordinal normalization: logically identical documents materialize
+            // identically regardless of publication or schema order.
+            var sortedFields = new List<NamedField>(fields);
+            sortedFields.Sort((left, right) => string.CompareOrdinal(left.Name, right.Name));
+            for (var i = 1; i < sortedFields.Count; i++)
+            {
+                if (string.Equals(sortedFields[i - 1].Name, sortedFields[i].Name, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException("Duplicate field name.", nameof(fields));
+                }
+            }
+
+            var sortedRedacted = new List<string>(redactedFieldNames);
+            sortedRedacted.Sort(StringComparer.Ordinal);
+            for (var i = 1; i < sortedRedacted.Count; i++)
+            {
+                if (string.Equals(sortedRedacted[i - 1], sortedRedacted[i], StringComparison.Ordinal))
+                {
+                    throw new ArgumentException("Duplicate redacted field name.", nameof(redactedFieldNames));
+                }
+            }
+
+            Fields = ValueList<NamedField>.From(sortedFields);
+            RedactedFieldNames = ValueList<string>.From(sortedRedacted);
             Omission = omission;
         }
 

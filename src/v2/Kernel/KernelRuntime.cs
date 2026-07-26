@@ -882,6 +882,17 @@ namespace SignalRouter.V2.Kernel
                 return;
             }
 
+            // A narrower request must stay inside the registered contract's scope:
+            // the requested scope is either the contract's own, or a registered,
+            // domain-visible descendant of it. Unknown, invisible, and
+            // out-of-contract scopes all answer the same code — no descendant or
+            // existence oracle.
+            if (!IsRequestableScope(message.Scope, descriptor, domain))
+            {
+                message.Observer.OnRefused(message.Operation, "ViewUnavailable");
+                return;
+            }
+
             // Deferred and active pins count together toward the bound.
             if (pinnedSnapshots.Count + deferredSnapshots.Count >= options.MaxPinnedSnapshots)
             {
@@ -922,6 +933,25 @@ namespace SignalRouter.V2.Kernel
                 result.Materialization);
             pinnedSnapshots[message.Operation] = pinned;
             message.Observer.OnPinned(message.Operation, pinned);
+        }
+
+        private bool IsRequestableScope(
+            string requestedScope, ViewContractDescriptor descriptor, SecurityDomainId domain)
+        {
+            if (string.Equals(requestedScope, descriptor.Scope, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (string.Equals(requestedScope, ViewContractDescriptor.RootScope, StringComparison.Ordinal))
+            {
+                // 'root' widens any non-root contract scope; never permitted.
+                return false;
+            }
+
+            return nodeStore.TryResolveByKey(new AuthorKey(requestedScope), out var record) &&
+                record.Registration.Exposure.IsVisibleTo(domain) &&
+                ObservationProjector.IsInScope(nodeStore, record, descriptor.Scope);
         }
 
         /// <summary>The incarnation is over: every late control operation gets an explicit answer or trace, never silent state changes.</summary>

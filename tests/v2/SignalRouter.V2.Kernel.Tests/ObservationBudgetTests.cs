@@ -92,6 +92,124 @@ public sealed class ObservationBudgetTests
             "the restart delivered the complete snapshot the leftover budget could not");
     }
 
+    private sealed class ScriptedSampledReader : ISampledSourceReader
+    {
+        internal SampledDocument? Reading { get; set; }
+
+        public SampledDocument? Read() => Reading;
+    }
+
+    private static KernelFixture BuildWithSampledSource(
+        ScriptedSampledReader reader, int maxObservationFieldBytes = 4096)
+    {
+        var fixture = new KernelFixture(
+            maxObservationFieldBytes: maxObservationFieldBytes, start: false);
+        fixture.Runtime.Bootstrap.RegisterStateSource(new StateSourceRegistration(
+            new StateSourceKey("sampled"),
+            new StateSourceContractDescriptor(
+                new StateSourceContractRef(
+                    new StateSourceContractId("sampled"), new ContractVersion(1, 0)),
+                ValueList<SourceFieldSchema>.From(new[]
+                {
+                    new SourceFieldSchema("phase", FieldType.String, Sensitivity.Standard),
+                }),
+                agentVisible: true,
+                recordVisible: true,
+                maxDocumentBytes: 256),
+            StateSourceClass.Sampled,
+            reader,
+            freshnessBoundLogicalTime: 50));
+        var probe = new PredicateContractRef(
+            new PredicateContractId("phaseProbe"), new ContractVersion(1, 0));
+        fixture.Runtime.Bootstrap.RegisterPredicateContract(probe, new PredicateDefinition(
+            ValueList<PredicateClause>.From(new[]
+            {
+                new PredicateClause(new ClauseId("c0"), new ComparisonExpression(
+                    new FieldPath("sources/sampled/phase"),
+                    ComparisonOperator.Eq,
+                    PredicateOperand.Of("loading"))),
+            })));
+        fixture.Runtime.Start(fixture.Executor);
+        return fixture;
+    }
+
+    private static PredicateEvaluationOutcome ProbePhase(KernelFixture fixture)
+    {
+        var observer = new RecordingAssertionObserver();
+        fixture.Runtime.Control.EvaluateAssertions(new AssertionBatch(
+            ValueList<PredicateContractRef>.From(new[]
+            {
+                new PredicateContractRef(
+                    new PredicateContractId("phaseProbe"), new ContractVersion(1, 0)),
+            }),
+            KernelFixture.Agent,
+            observer));
+        fixture.PumpUntilIdle();
+        return observer.Results!.Single().Outcome;
+    }
+
+    [Test]
+    public void ANonConformingSampledReadingIsNeverPartiallyExposed()
+    {
+        // codex review: sampled readings get the same contract validation an
+        // adoption gets — an undeclared or mistyped field means no usable document.
+        var reader = new ScriptedSampledReader
+        {
+            Reading = new SampledDocument(
+                new SourceDocument(ValueList<NamedField>.From(new[]
+                {
+                    new NamedField("phase", FieldValue.Of("loading")),
+                    new NamedField("undeclared", FieldValue.Of(1L)),
+                })),
+                producedAtLogicalTime: 100),
+        };
+        var fixture = BuildWithSampledSource(reader);
+
+        Assert.That(
+            ProbePhase(fixture),
+            Is.EqualTo(PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.SourceUnavailable)));
+
+        reader.Reading = new SampledDocument(
+            new SourceDocument(ValueList<NamedField>.From(new[]
+            {
+                new NamedField("phase", FieldValue.Of(42L)),
+            })),
+            producedAtLogicalTime: 100);
+        Assert.That(
+            ProbePhase(fixture),
+            Is.EqualTo(PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.SourceUnavailable)),
+            "a mistyped field is a contract violation, not a value");
+
+        reader.Reading = new SampledDocument(
+            new SourceDocument(ValueList<NamedField>.From(new[]
+            {
+                new NamedField("phase", FieldValue.Of("loading")),
+            })),
+            producedAtLogicalTime: 100);
+        Assert.That(ProbePhase(fixture), Is.EqualTo(PredicateEvaluationOutcome.Satisfied));
+    }
+
+    [Test]
+    public void AnOversizedSourceFieldFollowsTheSamePerFieldCeiling()
+    {
+        // codex review: the per-field ceiling applies to source values exactly as
+        // to node attributes — omitted and marked, never retained oversized.
+        var reader = new ScriptedSampledReader
+        {
+            Reading = new SampledDocument(
+                new SourceDocument(ValueList<NamedField>.From(new[]
+                {
+                    new NamedField("phase", FieldValue.Of("this-phase-name-exceeds-the-ceiling")),
+                })),
+                producedAtLogicalTime: 100),
+        };
+        var fixture = BuildWithSampledSource(reader, maxObservationFieldBytes: 8);
+
+        Assert.That(
+            ProbePhase(fixture),
+            Is.EqualTo(PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.Incompleteness)));
+    }
+
     [Test]
     public void AnOversizedFieldSurfacesAsCompletenessAndEvaluatesUnevaluable()
     {

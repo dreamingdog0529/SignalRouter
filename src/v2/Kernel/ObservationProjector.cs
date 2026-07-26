@@ -76,7 +76,7 @@ namespace SignalRouter.V2.Kernel
                     continue;
                 }
 
-                if (!InScope(store, record, descriptor.Scope))
+                if (!IsInScope(store, record, descriptor.Scope))
                 {
                     continue;
                 }
@@ -111,7 +111,7 @@ namespace SignalRouter.V2.Kernel
             {
                 if (!record.Registration.Parent.HasValue ||
                     !record.Registration.Exposure.IsVisibleTo(domain) ||
-                    !InScope(store, record, descriptor.Scope))
+                    !IsInScope(store, record, descriptor.Scope))
                 {
                     continue;
                 }
@@ -186,20 +186,30 @@ namespace SignalRouter.V2.Kernel
                     childCount));
             }
 
-            // Sources: family selects the exposure opt-in (observation-state.md §7.2).
-            var sources = new List<MaterializedSource>();
+            // Sources: family selects the exposure opt-in (observation-state.md
+            // §7.2). Candidates sort by key before the budget cut so registration
+            // order never changes snapshot membership.
+            var sourceCandidates = new List<StateSourceRegistration>();
             foreach (var registration in sourceTable.Registrations)
             {
                 var visible = descriptor.Family == ViewFamily.Record
                     ? registration.Descriptor.RecordVisible
                     : registration.Descriptor.AgentVisible;
-                if (!visible)
+                if (visible)
                 {
-                    continue;
+                    sourceCandidates.Add(registration);
                 }
+            }
 
+            sourceCandidates.Sort((left, right) =>
+                string.CompareOrdinal(left.Key.Value, right.Key.Value));
+
+            var sources = new List<MaterializedSource>();
+            foreach (var registration in sourceCandidates)
+            {
                 var materialized = MaterializeSource(
-                    sourceTable, registration, logicalNow, out var cost);
+                    sourceTable, registration, logicalNow, effectiveFieldBytes,
+                    completeness, out var cost);
                 if (bytesUsed + cost > budget.MaxBytes)
                 {
                     truncated = true;
@@ -231,6 +241,8 @@ namespace SignalRouter.V2.Kernel
             SourceSlotTable sourceTable,
             StateSourceRegistration registration,
             long logicalNow,
+            int maxFieldUnits,
+            List<CompletenessEntry> completeness,
             out int approximateBytes)
         {
             var descriptor = registration.Descriptor;
@@ -268,6 +280,14 @@ namespace SignalRouter.V2.Kernel
                 {
                     omission = CompletenessReason.Stale;
                 }
+                else if (!ConformsToContract(descriptor, reading.Document))
+                {
+                    // A sampled reading gets the same contract validation an
+                    // adoption gets (declared fields, matching types, the byte
+                    // ceiling); a non-conforming reading produced no usable
+                    // document and is never partially exposed.
+                    omission = CompletenessReason.SourceUnavailable;
+                }
                 else
                 {
                     document = reading.Document;
@@ -280,7 +300,8 @@ namespace SignalRouter.V2.Kernel
             {
                 // Redaction at value production: sensitive fields never enter the
                 // materialized copy (the slot table already redacts revision-bound
-                // adoptions; sampled readings are redacted here).
+                // adoptions; sampled readings are redacted here). Oversized values
+                // follow the same per-field ceiling as node attributes.
                 foreach (var field in document.Fields)
                 {
                     var sensitive = false;
@@ -293,11 +314,21 @@ namespace SignalRouter.V2.Kernel
                         }
                     }
 
-                    if (!sensitive)
+                    if (sensitive)
                     {
-                        fields.Add(field);
-                        approximateBytes += 2 * field.Name.Length + ValueUnits(field.Value) * 2 + 16;
+                        continue;
                     }
+
+                    if (ValueUnits(field.Value) > maxFieldUnits)
+                    {
+                        completeness.Add(new CompletenessEntry(
+                            new FieldPath("sources/" + registration.Key.Value + "/" + field.Name),
+                            CompletenessReason.BudgetTruncated));
+                        continue;
+                    }
+
+                    fields.Add(field);
+                    approximateBytes += 2 * field.Name.Length + ValueUnits(field.Value) * 2 + 16;
                 }
             }
 
@@ -309,7 +340,57 @@ namespace SignalRouter.V2.Kernel
                 omission);
         }
 
-        private static bool InScope(NodeStore store, NodeRecord record, string scope)
+        /// <summary>The adoption-time contract checks, applied to a sampled reading (observation-state.md §7.2).</summary>
+        private static bool ConformsToContract(StateSourceContractDescriptor descriptor, SourceDocument document)
+        {
+            var totalBytes = 32;
+            foreach (var field in document.Fields)
+            {
+                SourceFieldSchema? declared = null;
+                foreach (var schema in descriptor.Fields)
+                {
+                    if (string.Equals(schema.Name, field.Name, StringComparison.Ordinal))
+                    {
+                        declared = schema;
+                        break;
+                    }
+                }
+
+                if (declared == null)
+                {
+                    return false; // undeclared field
+                }
+
+                if (field.Value.Kind != FieldValueKind.Null &&
+                    !TypeMatches(declared.Value.Type, field.Value.Kind))
+                {
+                    return false; // runtime type contradicts the schema
+                }
+
+                totalBytes += 2 * field.Name.Length + ValueUnits(field.Value) * 2 + 16;
+            }
+
+            return totalBytes <= descriptor.MaxDocumentBytes;
+        }
+
+        private static bool TypeMatches(FieldType declared, FieldValueKind actual)
+        {
+            switch (declared)
+            {
+                case FieldType.String:
+                    return actual == FieldValueKind.String;
+                case FieldType.Integer:
+                    return actual == FieldValueKind.Integer;
+                case FieldType.Boolean:
+                    return actual == FieldValueKind.Boolean;
+                case FieldType.Float:
+                    return actual == FieldValueKind.Float;
+                default:
+                    return false;
+            }
+        }
+
+        internal static bool IsInScope(NodeStore store, NodeRecord record, string scope)
         {
             if (string.Equals(scope, ViewContractDescriptor.RootScope, StringComparison.Ordinal))
             {

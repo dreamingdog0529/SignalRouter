@@ -111,6 +111,37 @@ public sealed class ObservationTypesTests
     }
 
     [Test]
+    public void SourceFieldsNormalizeOrdinallyRegardlessOfInputOrder()
+    {
+        // codex review: logically identical documents must materialize identically
+        // — field order is publication noise, never observation identity.
+        var contract = new StateSourceContractRef(
+            new StateSourceContractId("inventory"), new ContractVersion(1, 0));
+        var shuffled = new MaterializedSource(
+            new StateSourceKey("inventory"), contract,
+            ValueList<NamedField>.From(new[]
+            {
+                new NamedField("zeta", FieldValue.Of(1L)),
+                new NamedField("alpha", FieldValue.Of(2L)),
+            }),
+            ValueList<string>.From(new[] { "z-secret", "a-secret" }),
+            omission: null);
+        var ordered = new MaterializedSource(
+            new StateSourceKey("inventory"), contract,
+            ValueList<NamedField>.From(new[]
+            {
+                new NamedField("alpha", FieldValue.Of(2L)),
+                new NamedField("zeta", FieldValue.Of(1L)),
+            }),
+            ValueList<string>.From(new[] { "a-secret", "z-secret" }),
+            omission: null);
+
+        Assert.That(shuffled, Is.EqualTo(ordered));
+        Assert.That(shuffled.Fields[0].Name, Is.EqualTo("alpha"));
+        Assert.That(shuffled.RedactedFieldNames[0], Is.EqualTo("a-secret"));
+    }
+
+    [Test]
     public void TheMaterializationRejectsDuplicateKeysAndSortsMembers()
     {
         var node = new MaterializedNode(

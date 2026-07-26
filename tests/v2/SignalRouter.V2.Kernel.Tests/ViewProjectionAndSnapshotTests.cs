@@ -255,6 +255,56 @@ public sealed class ViewProjectionAndSnapshotTests
     }
 
     [Test]
+    public void ARequestCanNarrowButNeverWidenTheRegisteredScope()
+    {
+        // codex review: a 'root' request against a 'panel'-scoped contract must
+        // not project the whole tree; only registered, visible descendants of the
+        // contract scope are requestable — every other scope answers the one code.
+        var fixture = new KernelFixture(start: false);
+        fixture.Runtime.Bootstrap.RegisterViewContract(new ViewContractDescriptor(
+            AgentView, ViewFamily.Agent, "panel",
+            maxNodes: 256, maxFieldBytes: 4096, includeKeylessNodes: false));
+        var visibleToAgent = new ExposurePolicy(
+            ValueList<SecurityDomainId>.From(new[] { KernelFixture.AgentDomain }));
+        fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
+            new AuthorKey("panel"), NodeRole.Container, parent: null,
+            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty, visibleToAgent));
+        fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
+            new AuthorKey("inside"), NodeRole.Button, new AuthorKey("panel"),
+            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty, visibleToAgent));
+        fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
+            new AuthorKey("hidden-inside"), NodeRole.Button, new AuthorKey("panel"),
+            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty,
+            ExposurePolicy.Hidden));
+        fixture.Runtime.Start(fixture.Executor);
+
+        var widened = new RecordingSnapshotObserver();
+        fixture.Runtime.Control.RequestSnapshot(AgentView, KernelFixture.Agent, "root", widened);
+        var outside = new RecordingSnapshotObserver();
+        fixture.Runtime.Control.RequestSnapshot(AgentView, KernelFixture.Agent, "save", outside);
+        var hidden = new RecordingSnapshotObserver();
+        fixture.Runtime.Control.RequestSnapshot(
+            AgentView, KernelFixture.Agent, "hidden-inside", hidden);
+        var unknown = new RecordingSnapshotObserver();
+        fixture.Runtime.Control.RequestSnapshot(
+            AgentView, KernelFixture.Agent, "never-registered", unknown);
+        fixture.PumpUntilIdle();
+
+        Assert.That(widened.Refused.Single().Reason, Is.EqualTo("ViewUnavailable"));
+        Assert.That(outside.Refused.Single().Reason, Is.EqualTo("ViewUnavailable"));
+        Assert.That(
+            hidden.Refused.Single().Reason, Is.EqualTo("ViewUnavailable"),
+            "a hidden descendant and an unknown key answer identically — no existence oracle");
+        Assert.That(unknown.Refused.Single().Reason, Is.EqualTo("ViewUnavailable"));
+
+        var narrowed = Pin(fixture, AgentView, KernelFixture.Agent, scope: "inside");
+        Assert.That(
+            narrowed.Materialization.Nodes.Select(node => node.Key.Value),
+            Is.EqualTo(new[] { "inside" }),
+            "a registered, visible descendant narrows the contract scope");
+    }
+
+    [Test]
     public void TeardownAnswersEveryObserverExactlyOnce()
     {
         var fixture = BuildWithViews();
