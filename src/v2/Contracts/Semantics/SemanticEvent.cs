@@ -106,31 +106,48 @@ namespace SignalRouter.V2.Contracts
             this.value = ContractGrammar.ValidateCode(value, nameof(value));
         }
 
-        public static EventKind Admitted => new EventKind("Admitted");
+        // The reserved kinds are validated once and cached: every emit site
+        // reads these, and a property that minted a fresh instance re-ran the
+        // code-grammar scan on each access (performance-track finding A7).
+        private static readonly EventKind AdmittedKind = new EventKind("Admitted");
+        private static readonly EventKind StateTransitionKind = new EventKind("StateTransition");
+        private static readonly EventKind EffectPermittedKind = new EventKind("EffectPermitted");
+        private static readonly EventKind EffectFenceReachedKind = new EventKind("EffectFenceReached");
+        private static readonly EventKind TerminalCommittedKind = new EventKind("TerminalCommitted");
+        private static readonly EventKind SourcePublicationAdoptedKind = new EventKind("SourcePublicationAdopted");
+        private static readonly EventKind PredicateArmedKind = new EventKind("PredicateArmed");
+        private static readonly EventKind PredicateResolvedKind = new EventKind("PredicateResolved");
+        private static readonly EventKind AssertionEvaluatedKind = new EventKind("AssertionEvaluated");
+        private static readonly EventKind HumanIntentBlockedKind = new EventKind("HumanIntentBlocked");
+        private static readonly EventKind ContaminationObservedKind = new EventKind("ContaminationObserved");
+        private static readonly EventKind IncarnationLifecycleKind = new EventKind("IncarnationLifecycle");
+        private static readonly EventKind TraceGapKind = new EventKind("TraceGap");
 
-        public static EventKind StateTransition => new EventKind("StateTransition");
+        public static EventKind Admitted => AdmittedKind;
 
-        public static EventKind EffectPermitted => new EventKind("EffectPermitted");
+        public static EventKind StateTransition => StateTransitionKind;
 
-        public static EventKind EffectFenceReached => new EventKind("EffectFenceReached");
+        public static EventKind EffectPermitted => EffectPermittedKind;
 
-        public static EventKind TerminalCommitted => new EventKind("TerminalCommitted");
+        public static EventKind EffectFenceReached => EffectFenceReachedKind;
 
-        public static EventKind SourcePublicationAdopted => new EventKind("SourcePublicationAdopted");
+        public static EventKind TerminalCommitted => TerminalCommittedKind;
 
-        public static EventKind PredicateArmed => new EventKind("PredicateArmed");
+        public static EventKind SourcePublicationAdopted => SourcePublicationAdoptedKind;
 
-        public static EventKind PredicateResolved => new EventKind("PredicateResolved");
+        public static EventKind PredicateArmed => PredicateArmedKind;
 
-        public static EventKind AssertionEvaluated => new EventKind("AssertionEvaluated");
+        public static EventKind PredicateResolved => PredicateResolvedKind;
 
-        public static EventKind HumanIntentBlocked => new EventKind("HumanIntentBlocked");
+        public static EventKind AssertionEvaluated => AssertionEvaluatedKind;
 
-        public static EventKind ContaminationObserved => new EventKind("ContaminationObserved");
+        public static EventKind HumanIntentBlocked => HumanIntentBlockedKind;
 
-        public static EventKind IncarnationLifecycle => new EventKind("IncarnationLifecycle");
+        public static EventKind ContaminationObserved => ContaminationObservedKind;
 
-        public static EventKind TraceGap => new EventKind("TraceGap");
+        public static EventKind IncarnationLifecycle => IncarnationLifecycleKind;
+
+        public static EventKind TraceGap => TraceGapKind;
 
         public bool IsDefault => value == null;
 

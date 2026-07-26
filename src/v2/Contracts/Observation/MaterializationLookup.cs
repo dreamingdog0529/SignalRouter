@@ -120,12 +120,28 @@ namespace SignalRouter.V2.Contracts
 
         private bool TryFindNode(string key, out MaterializedNode node)
         {
-            foreach (var candidate in materialization.Nodes)
+            // Nodes are ordinally sorted at construction
+            // (ObservationMaterialization invariant): binary search, not a scan.
+            var nodes = materialization.Nodes;
+            var low = 0;
+            var high = nodes.Count - 1;
+            while (low <= high)
             {
-                if (string.Equals(candidate.Key.Value, key, StringComparison.Ordinal))
+                var middle = low + ((high - low) >> 1);
+                var comparison = string.CompareOrdinal(nodes[middle].Key.Value, key);
+                if (comparison == 0)
                 {
-                    node = candidate;
+                    node = nodes[middle];
                     return true;
+                }
+
+                if (comparison < 0)
+                {
+                    low = middle + 1;
+                }
+                else
+                {
+                    high = middle - 1;
                 }
             }
 
@@ -135,12 +151,27 @@ namespace SignalRouter.V2.Contracts
 
         private bool TryFindSource(string key, out MaterializedSource source)
         {
-            foreach (var candidate in materialization.Sources)
+            // Sources share the same construction-time ordinal sort.
+            var sources = materialization.Sources;
+            var low = 0;
+            var high = sources.Count - 1;
+            while (low <= high)
             {
-                if (string.Equals(candidate.Key.Value, key, StringComparison.Ordinal))
+                var middle = low + ((high - low) >> 1);
+                var comparison = string.CompareOrdinal(sources[middle].Key.Value, key);
+                if (comparison == 0)
                 {
-                    source = candidate;
+                    source = sources[middle];
                     return true;
+                }
+
+                if (comparison < 0)
+                {
+                    low = middle + 1;
+                }
+                else
+                {
+                    high = middle - 1;
                 }
             }
 

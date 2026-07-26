@@ -62,6 +62,8 @@ namespace SignalRouter.V2.Kernel
         private bool started;
         private bool sampledVisibleToAgent;
         private bool sampledVisibleToRecord;
+        private ViewContractDescriptor? kernelRawRecordView;
+        private ViewContractDescriptor? kernelRawAgentView;
         private bool tornDown;
         private int pumping;
         private long lastMonotonic = long.MinValue;
@@ -320,13 +322,16 @@ namespace SignalRouter.V2.Kernel
         {
             var awaitingCompletion = active != null &&
                 active.State == InteractionState.WaitingCompletion;
+            // One lock acquisition for all three depths (they were previously
+            // read twice each, six lock round-trips per pump).
+            mailbox.ReadDepths(out var controlDepth, out var publicationDepth, out var submissionDepth);
             // A lane blocked on the adapter makes queued mutation work
             // non-processable; the report never claims otherwise.
             var workRemaining =
-                mailbox.ControlDepth > 0 ||
-                mailbox.SubmissionDepth > 0 ||
+                controlDepth > 0 ||
+                submissionDepth > 0 ||
                 (!tornDown && (
-                    mailbox.PublicationDepth > 0 ||
+                    publicationDepth > 0 ||
                     stalledAdmission != null ||
                     committingEvidence.Count > 0 ||
                     deferredSnapshots.Count > 0 ||
@@ -334,9 +339,9 @@ namespace SignalRouter.V2.Kernel
             return new PumpReport(
                 turns,
                 workRemaining,
-                mailbox.ControlDepth,
-                mailbox.PublicationDepth,
-                mailbox.SubmissionDepth,
+                controlDepth,
+                publicationDepth,
+                submissionDepth,
                 awaitingCompletion,
                 awaitingFramePhase: null);
         }
@@ -777,7 +782,12 @@ namespace SignalRouter.V2.Kernel
                 var interaction = committingEvidence[i];
                 if (TryCommitEvidence(interaction))
                 {
-                    committingEvidence.RemoveAt(i);
+                    // Swap-remove: retry order among parked commits is
+                    // unspecified (cross-request evidence interleave is normal,
+                    // guarantees.md §6.2) and this stays deterministic.
+                    var last = committingEvidence.Count - 1;
+                    committingEvidence[i] = committingEvidence[last];
+                    committingEvidence.RemoveAt(last);
                     return true;
                 }
             }
@@ -1700,13 +1710,12 @@ namespace SignalRouter.V2.Kernel
         /// </summary>
         private MaterializationLookup PinReader(SecurityDomainId domain)
         {
-            var descriptor = new ViewContractDescriptor(
-                kernelView,
-                domain.Equals(options.RecordDomain) ? ViewFamily.Record : ViewFamily.Agent,
-                ViewContractDescriptor.RootScope,
-                options.MaxMaterializationNodes,
-                options.MaxObservationFieldBytes,
-                includeKeylessNodes: false);
+            // The two kernel-raw descriptors are parameterized by options alone —
+            // built once, reused for every evaluation read.
+            var record = domain.Equals(options.RecordDomain);
+            var descriptor = record
+                ? kernelRawRecordView ??= BuildKernelRawView(ViewFamily.Record)
+                : kernelRawAgentView ??= BuildKernelRawView(ViewFamily.Agent);
             var result = ObservationProjector.Materialize(
                 nodeStore, sourceTable, descriptor, domain, currentLogicalNow,
                 new ObservationBudget(options.MaxMaterializationBytes, options.MaxMaterializationNodes),
@@ -1714,6 +1723,15 @@ namespace SignalRouter.V2.Kernel
                 options.MaxCompletenessEntries);
             return new MaterializationLookup(result.Materialization);
         }
+
+        private ViewContractDescriptor BuildKernelRawView(ViewFamily family) =>
+            new ViewContractDescriptor(
+                kernelView,
+                family,
+                ViewContractDescriptor.RootScope,
+                options.MaxMaterializationNodes,
+                options.MaxObservationFieldBytes,
+                includeKeylessNodes: false);
 
         private void PublishStatus()
         {
@@ -2123,10 +2141,49 @@ namespace SignalRouter.V2.Kernel
                 var bytes = 64;
                 foreach (var field in document.Fields)
                 {
-                    bytes += 32 + (field.Name.Length * 2) + (field.Value.ToString().Length * 2);
+                    bytes += 32 + (field.Name.Length * 2) + (RenderedLength(field.Value) * 2);
                 }
 
                 return bytes;
+            }
+
+            /// <summary>
+            /// The length <see cref="FieldValue.ToString"/> would render, without
+            /// building the string — byte accounting stays exactly what it was.
+            /// Floats keep the real rendering: "R" length is not computable
+            /// arithmetically, and float-bearing publications are rare.
+            /// </summary>
+            private static int RenderedLength(FieldValue value)
+            {
+                switch (value.Kind)
+                {
+                    case FieldValueKind.String:
+                        return value.AsString.Length;
+                    case FieldValueKind.Integer:
+                        return DecimalDigits(value.AsInteger);
+                    case FieldValueKind.Boolean:
+                        return value.AsBoolean ? 4 : 5;
+                    case FieldValueKind.Float:
+                        return value.ToString().Length;
+                    default:
+                        return 4; // "null"
+                }
+            }
+
+            private static int DecimalDigits(long value)
+            {
+                if (value == long.MinValue)
+                {
+                    return 20; // |-9223372036854775808|
+                }
+
+                var digits = value < 0 ? 2 : 1;
+                for (var magnitude = value < 0 ? -value : value; magnitude >= 10; magnitude /= 10)
+                {
+                    digits++;
+                }
+
+                return digits;
             }
         }
 
