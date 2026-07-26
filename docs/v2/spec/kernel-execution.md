@@ -168,6 +168,19 @@ Rules:
   thread during the synchronous executor call; follow-up work uses continuations (§9).
 - Effect handlers MUST NOT branch on `LogicalOrder`, `RequestId`, or the identity
   envelope; replay cannot reproduce them.
+- **Exact after-basis for evidence
+  ([adr 0011](../adr/0011-observation-materialization-and-state-store.md)):** control
+  and source-publication turns may advance `SourceRevision` between `Observing` and
+  the durable commit of the terminal evidence, so the after-watermark alone cannot
+  re-derive the after state. When a canonical-state codec is configured, the kernel
+  retains the record-view materialization pinned at `Observing` per interaction until
+  the terminal evidence commits, and offers it to the evidence coordinator with a
+  basis-match guarantee; without the codec, nothing is retained (recording is
+  unavailable anyway). A coordinator-requested fresh materialization takes an expected
+  basis and answers basis-mismatch explicitly instead of silently materializing a
+  different revision — the E3 response to a mismatch is re-materialization at the new
+  revision ([guarantees.md](guarantees.md) §5.3); the E4 response is to use the
+  retained materialization, never a fresh one.
 
 ## 6. Pump contract
 
