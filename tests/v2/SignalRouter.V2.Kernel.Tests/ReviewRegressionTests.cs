@@ -92,6 +92,34 @@ public sealed class ReviewRegressionTests
     }
 
     [Test]
+    public void ACompletionWithMismatchedEvidenceIsRejectedNotApplied()
+    {
+        // adapter-conformance.md §3: a successful completion must carry the bound
+        // profile's evidence; a mismatch is a protocol violation and the correct
+        // completion can still follow.
+        var fixture = new KernelFixture();
+        fixture.Submit("r1");
+        fixture.PumpUntilIdle();
+
+        fixture.Executor.CompleteLast(EffectResolution.Succeeded(Ack()));
+        fixture.PumpUntilIdle();
+        Assert.That(fixture.TraceKinds(), Has.Some.Contains("CompletionRejected"));
+        Assert.That(fixture.Query("r1").Kind, Is.EqualTo(QueryAnswerKind.Pending));
+
+        // Wrong evidence kind under the right (standard) profile: same rejection.
+        fixture.Executor.CompleteLast(EffectResolution.Succeeded(
+            new CompletionEvidence(
+                KernelFixture.Applied, CompletionEvidenceKind.AdapterAcknowledged, default)));
+        fixture.PumpUntilIdle();
+        Assert.That(
+            fixture.TraceKinds().Count(k => k.Contains("CompletionRejected")), Is.EqualTo(2));
+
+        fixture.Executor.CompleteLast(EffectResolution.Succeeded(Applied()));
+        fixture.PumpUntilIdle();
+        Assert.That(fixture.Query("r1"), Is.EqualTo(QueryAnswer.Terminal(InteractionOutcome.Succeeded)));
+    }
+
+    [Test]
     public void PublicationsAreValidatedAgainstTheirContract()
     {
         var fixture = new KernelFixture();

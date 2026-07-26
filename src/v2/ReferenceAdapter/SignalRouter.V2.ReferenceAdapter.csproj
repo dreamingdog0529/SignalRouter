@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>SignalRouter.V2.ReferenceAdapter</AssemblyName>
+    <RootNamespace>SignalRouter.V2.ReferenceAdapter</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- The in-process reference adapter: the executable model of
+         adapter-conformance.md against a synthetic two-phase frame loop, and the
+         TCK's known-good subject. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AdapterSdk/SignalRouter.V2.AdapterSdk.csproj" />
+    <ProjectReference Include="../Contracts/SignalRouter.V2.Contracts.csproj" />
+    <ProjectReference Include="../Kernel/SignalRouter.V2.Kernel.csproj" />
+    <ProjectReference Include="../Tck/SignalRouter.V2.Tck.csproj" />
+  </ItemGroup>
+</Project>

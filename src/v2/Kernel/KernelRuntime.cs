@@ -915,6 +915,22 @@ namespace SignalRouter.V2.Kernel
                 return;
             }
 
+            // A successful completion must carry the evidence of the profile bound
+            // at admission; for the standard profiles the evidence kind is the
+            // profile's own (adapter-conformance.md §3-§4). Anything else is a
+            // protocol violation, never a state change.
+            if (completion.Resolution.Kind == EffectResolutionKind.Succeeded)
+            {
+                var evidence = completion.Resolution.CompletionEvidence;
+                if (!evidence.Profile.Equals(active.Descriptor.CompletionProfile) ||
+                    (IsStandardProfile(evidence.Profile) &&
+                        evidence.Kind.Value != evidence.Profile.Id.Value))
+                {
+                    EmitProtocolViolation(completion.Permit, "CompletionRejected");
+                    return;
+                }
+            }
+
             active.Completion = completion;
             if (FenceEntailedBy(active.Descriptor.CompletionProfile))
             {
@@ -931,6 +947,13 @@ namespace SignalRouter.V2.Kernel
         {
             var id = profile.Id.Value;
             return id == "Applied" || id == "FrameCommitted" || id == "PostconditionSatisfied";
+        }
+
+        private static bool IsStandardProfile(CompletionProfileRef profile)
+        {
+            var id = profile.Id.Value;
+            return id == "Applied" || id == "FrameCommitted" ||
+                id == "PostconditionSatisfied" || id == "AdapterAcknowledged";
         }
 
         private bool IsLivePermit(EffectPermitToken permit)
