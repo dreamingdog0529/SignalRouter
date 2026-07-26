@@ -32,6 +32,15 @@ namespace SignalRouter.V2.Kernel
         private readonly Dictionary<PredicateContractRef, PredicateDefinition> predicateContracts =
             new Dictionary<PredicateContractRef, PredicateDefinition>();
 
+        private readonly Dictionary<ViewContractRef, ViewContractDescriptor> viewContracts =
+            new Dictionary<ViewContractRef, ViewContractDescriptor>();
+
+        private readonly Dictionary<OperationId, PinnedSnapshot> pinnedSnapshots =
+            new Dictionary<OperationId, PinnedSnapshot>();
+
+        private readonly Queue<SnapshotRequestMessage> deferredSnapshots =
+            new Queue<SnapshotRequestMessage>();
+
         private readonly Queue<Interaction> admitted = new Queue<Interaction>();
         private readonly List<Interaction> committingEvidence = new List<Interaction>();
         private readonly Dictionary<OperationId, WaitEntry> waits = new Dictionary<OperationId, WaitEntry>();
@@ -47,6 +56,9 @@ namespace SignalRouter.V2.Kernel
         private long waitCounter;
         private ulong lastWaitEvaluationRevision;
         private long currentLogicalNow;
+        private int pumpObservationBytesRemaining;
+        private int pumpObservationNodesRemaining;
+        private bool deferredSnapshotServed;
         private SecurityDomainId gateHolder;
         private bool gated;
         private IEffectExecutor? executor;
@@ -123,6 +135,9 @@ namespace SignalRouter.V2.Kernel
 
                 CheckMonotonic();
                 currentLogicalNow = budget.LogicalNow.Value;
+                pumpObservationBytesRemaining = options.ObservationBudgetBytes;
+                pumpObservationNodesRemaining = options.ObservationBudgetNodes;
+                deferredSnapshotServed = false;
 
                 if (!tornDown)
                 {
@@ -153,6 +168,16 @@ namespace SignalRouter.V2.Kernel
 
         private bool RunOneTurn()
         {
+            // A deferred snapshot restarts against the fresh pump budget before any
+            // newly adopted control work — oldest first, once per pump, so
+            // continuous control traffic can never starve it (ADR 0011).
+            if (!tornDown && !deferredSnapshotServed && deferredSnapshots.Count > 0)
+            {
+                deferredSnapshotServed = true;
+                ProcessSnapshotRequest(deferredSnapshots.Dequeue());
+                return true;
+            }
+
             if (mailbox.TryDequeueControl(out var control))
             {
                 ProcessControl(control);
@@ -256,6 +281,7 @@ namespace SignalRouter.V2.Kernel
                     mailbox.PublicationDepth > 0 ||
                     stalledAdmission != null ||
                     committingEvidence.Count > 0 ||
+                    deferredSnapshots.Count > 0 ||
                     (!awaitingCompletion && (admitted.Count > 0 || active != null))));
             return new PumpReport(
                 turns,
@@ -826,10 +852,76 @@ namespace SignalRouter.V2.Kernel
                     gated = gate.Acquire;
                     gateHolder = gate.Acquire ? gate.Holder : default;
                     break;
+                case SnapshotRequestMessage snapshotRequest:
+                    ProcessSnapshotRequest(snapshotRequest);
+                    break;
+                case ReleaseSnapshotMessage release:
+                    pinnedSnapshots.Remove(release.Operation);
+                    break;
                 case TeardownMessage:
                     ProcessTeardown();
                     break;
             }
+        }
+
+        private void ProcessSnapshotRequest(SnapshotRequestMessage message)
+        {
+            if (tornDown)
+            {
+                message.Observer.OnRefused(message.Operation, "TornDown");
+                return;
+            }
+
+            // Unbound principal, unregistered view, and family/domain mismatch are
+            // observationally identical (existence concealment, guarantees.md §3.5).
+            if (!options.TryResolveDomain(message.Principal, out var domain) ||
+                !viewContracts.TryGetValue(message.View, out var descriptor) ||
+                (descriptor.Family == ViewFamily.Record) != domain.Equals(options.RecordDomain))
+            {
+                message.Observer.OnRefused(message.Operation, "ViewUnavailable");
+                return;
+            }
+
+            // Deferred and active pins count together toward the bound.
+            if (pinnedSnapshots.Count + deferredSnapshots.Count >= options.MaxPinnedSnapshots)
+            {
+                message.Observer.OnRefused(message.Operation, "CapacityExhausted");
+                return;
+            }
+
+            var effective = string.Equals(message.Scope, descriptor.Scope, StringComparison.Ordinal)
+                ? descriptor
+                : new ViewContractDescriptor(
+                    descriptor.Contract, descriptor.Family, message.Scope,
+                    descriptor.MaxNodes, descriptor.MaxFieldBytes, descriptor.IncludeKeylessNodes);
+            var budget = new ObservationBudget(
+                Math.Min(pumpObservationBytesRemaining, options.MaxMaterializationBytes),
+                Math.Min(pumpObservationNodesRemaining, options.MaxMaterializationNodes));
+            var partialBudget =
+                pumpObservationBytesRemaining < options.ObservationBudgetBytes ||
+                pumpObservationNodesRemaining < options.ObservationBudgetNodes;
+            var result = ObservationProjector.Materialize(
+                nodeStore, sourceTable, effective, domain, currentLogicalNow, budget,
+                options.MaxObservationFieldBytes, options.MaxCompletenessEntries);
+            if (result.Truncated && partialBudget)
+            {
+                // Mid-pump budget pressure: restart against a fresh pump budget and
+                // a fresh revision rather than deliver an avoidably truncated
+                // snapshot (observation-state.md §4, ADR 0011 restart policy).
+                deferredSnapshots.Enqueue(message);
+                return;
+            }
+
+            pumpObservationBytesRemaining =
+                Math.Max(0, pumpObservationBytesRemaining - result.ApproximateBytes);
+            pumpObservationNodesRemaining =
+                Math.Max(0, pumpObservationNodesRemaining - result.Materialization.Nodes.Count);
+            var pinned = new PinnedSnapshot(
+                new ObservationSnapshot(
+                    result.Materialization.Basis, default, result.Materialization.Completeness),
+                result.Materialization);
+            pinnedSnapshots[message.Operation] = pinned;
+            message.Observer.OnPinned(message.Operation, pinned);
         }
 
         /// <summary>The incarnation is over: every late control operation gets an explicit answer or trace, never silent state changes.</summary>
@@ -863,6 +955,9 @@ namespace SignalRouter.V2.Kernel
                     break;
                 case CompletionMessage completion:
                     EmitProtocolViolation(completion.Completion.Permit, "CompletionRejected");
+                    break;
+                case SnapshotRequestMessage snapshotRequest:
+                    snapshotRequest.Observer.OnRefused(snapshotRequest.Operation, "TornDown");
                     break;
             }
         }
@@ -1183,6 +1278,16 @@ namespace SignalRouter.V2.Kernel
                 ResolveWait(operation, PredicateResolution.Cancelled);
             }
 
+            // Every deferred snapshot observer is answered exactly once; active
+            // pins are released with the incarnation.
+            foreach (var deferred in deferredSnapshots)
+            {
+                deferred.Observer.OnRefused(deferred.Operation, "TornDown");
+            }
+
+            deferredSnapshots.Clear();
+            pinnedSnapshots.Clear();
+
             PublishStatus();
             Emit(EventKind.IncarnationLifecycle, EventCausation.None, detailCode: "TornDown");
         }
@@ -1225,10 +1330,29 @@ namespace SignalRouter.V2.Kernel
 
         // ── Observation ──────────────────────────────────────────────────────
 
-        private PinnedObservationReader PinReader(SecurityDomainId domain)
+        /// <summary>
+        /// Pins the kernel's internal evaluation read: one materialization under the
+        /// reserved kernel-raw view — Record family for the record domain, Agent
+        /// family otherwise, preserving the per-domain source-exposure selection.
+        /// Evaluation reads are bounded by the materialization ceilings, not the
+        /// per-pump snapshot budget (kernel-execution.md §6); overflow surfaces as
+        /// completeness and evaluates as Unevaluable, never a partial answer.
+        /// </summary>
+        private MaterializationLookup PinReader(SecurityDomainId domain)
         {
-            return new PinnedObservationReader(
-                nodeStore, sourceTable, domain, options.RecordDomain, kernelView, "root", currentLogicalNow);
+            var descriptor = new ViewContractDescriptor(
+                kernelView,
+                domain.Equals(options.RecordDomain) ? ViewFamily.Record : ViewFamily.Agent,
+                ViewContractDescriptor.RootScope,
+                options.MaxMaterializationNodes,
+                options.MaxObservationFieldBytes,
+                includeKeylessNodes: false);
+            var result = ObservationProjector.Materialize(
+                nodeStore, sourceTable, descriptor, domain, currentLogicalNow,
+                new ObservationBudget(options.MaxMaterializationBytes, options.MaxMaterializationNodes),
+                options.MaxObservationFieldBytes,
+                options.MaxCompletenessEntries);
+            return new MaterializationLookup(result.Materialization);
         }
 
         private void PublishStatus()
@@ -1459,6 +1583,35 @@ namespace SignalRouter.V2.Kernel
             {
                 RequireBootstrapPhase();
                 runtime.sourceTable.Register(registration);
+            }
+
+            public void RegisterViewContract(ViewContractDescriptor descriptor)
+            {
+                RequireBootstrapPhase();
+                if (descriptor == null)
+                {
+                    throw new ArgumentNullException(nameof(descriptor));
+                }
+
+                if (descriptor.Contract.Id.Value.StartsWith("kernel-raw", StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        "The kernel-raw identifier family is reserved (observation-state.md 1).",
+                        nameof(descriptor));
+                }
+
+                if (runtime.viewContracts.Count >= runtime.options.MaxRegisteredViewContracts)
+                {
+                    throw new ArgumentException(
+                        "Registered view contracts are at capacity.", nameof(descriptor));
+                }
+
+                if (runtime.viewContracts.ContainsKey(descriptor.Contract))
+                {
+                    throw new ArgumentException("Duplicate view contract.", nameof(descriptor));
+                }
+
+                runtime.viewContracts.Add(descriptor.Contract, descriptor);
             }
 
             public void RegisterPredicateContract(PredicateContractRef contract, PredicateDefinition definition)
@@ -1733,6 +1886,43 @@ namespace SignalRouter.V2.Kernel
             public void TearDownIncarnation()
             {
                 runtime.mailbox.EnqueueControl(new TeardownMessage());
+            }
+
+            public OperationId RequestSnapshot(
+                ViewContractRef view, Principal principal, string scope, ISnapshotObserver observer)
+            {
+                if (view.IsDefault)
+                {
+                    throw new ArgumentException("A non-default view is required.", nameof(view));
+                }
+
+                if (principal == null)
+                {
+                    throw new ArgumentNullException(nameof(principal));
+                }
+
+                ContractGrammar.ValidateIdentifier(scope, nameof(scope));
+                if (observer == null)
+                {
+                    throw new ArgumentNullException(nameof(observer));
+                }
+
+                var operation = new OperationId(
+                    "snapshot-" + Interlocked.Increment(ref runtime.waitCounter)
+                        .ToString(System.Globalization.CultureInfo.InvariantCulture));
+                runtime.mailbox.EnqueueControl(new SnapshotRequestMessage(
+                    operation, view, principal, scope, observer));
+                return operation;
+            }
+
+            public void ReleaseSnapshot(OperationId operation)
+            {
+                if (operation.IsDefault)
+                {
+                    throw new ArgumentException("A non-default operation is required.", nameof(operation));
+                }
+
+                runtime.mailbox.EnqueueControl(new ReleaseSnapshotMessage(operation));
             }
         }
     }

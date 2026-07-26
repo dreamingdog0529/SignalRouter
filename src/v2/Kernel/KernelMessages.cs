@@ -69,6 +69,18 @@ namespace SignalRouter.V2.Kernel
 
         /// <summary>Thread-safe: incarnation teardown (kernel-execution.md §10); processed as a lifecycle message.</summary>
         void TearDownIncarnation();
+
+        /// <summary>
+        /// Thread-safe: pin one revision-consistent snapshot of a registered view
+        /// (observation-state.md §4, control lane). Answered split-phase through the
+        /// observer; deferred under budget pressure and retried at the next pump
+        /// before newly adopted control work.
+        /// </summary>
+        OperationId RequestSnapshot(
+            ViewContractRef view, Principal principal, string scope, ISnapshotObserver observer);
+
+        /// <summary>Thread-safe: release a pinned snapshot.</summary>
+        void ReleaseSnapshot(OperationId operation);
     }
 
     internal abstract class ControlMessage
@@ -220,6 +232,43 @@ namespace SignalRouter.V2.Kernel
 
     internal sealed class TeardownMessage : ControlMessage
     {
+    }
+
+    internal sealed class SnapshotRequestMessage : ControlMessage
+    {
+        internal SnapshotRequestMessage(
+            OperationId operation,
+            ViewContractRef view,
+            Principal principal,
+            string scope,
+            ISnapshotObserver observer)
+        {
+            Operation = operation;
+            View = view;
+            Principal = principal;
+            Scope = scope;
+            Observer = observer;
+        }
+
+        internal OperationId Operation { get; }
+
+        internal ViewContractRef View { get; }
+
+        internal Principal Principal { get; }
+
+        internal string Scope { get; }
+
+        internal ISnapshotObserver Observer { get; }
+    }
+
+    internal sealed class ReleaseSnapshotMessage : ControlMessage
+    {
+        internal ReleaseSnapshotMessage(OperationId operation)
+        {
+            Operation = operation;
+        }
+
+        internal OperationId Operation { get; }
     }
 
     internal sealed class SourcePublicationMessage

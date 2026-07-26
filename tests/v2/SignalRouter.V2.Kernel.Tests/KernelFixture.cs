@@ -51,6 +51,20 @@ internal sealed class RecordingAssertionObserver : IAssertionObserver
     public void OnEvaluated(ValueList<PredicateEvaluationResult> results) => Results = results;
 }
 
+/// <summary>Records split-phase snapshot answers.</summary>
+internal sealed class RecordingSnapshotObserver : ISnapshotObserver
+{
+    internal List<(OperationId Operation, PinnedSnapshot Snapshot)> Pinned { get; } = new();
+
+    internal List<(OperationId Operation, string Reason)> Refused { get; } = new();
+
+    public void OnPinned(OperationId operation, PinnedSnapshot snapshot) =>
+        Pinned.Add((operation, snapshot));
+
+    public void OnRefused(OperationId operation, string reasonCode) =>
+        Refused.Add((operation, reasonCode));
+}
+
 /// <summary>
 /// A scripted effect executor: adopts (or refuses/throws) synchronously and lets
 /// tests deliver fences and completions through the attached sink.
@@ -151,6 +165,10 @@ internal sealed class KernelFixture
         PredicateDefinition? invokePostcondition = null,
         CompletionProfileRef? invokeProfile = null,
         IEvidenceCoordinator? coordinator = null,
+        int observationBudgetBytes = 256 * 1024,
+        int observationBudgetNodes = 2048,
+        int maxPinnedSnapshots = 32,
+        int maxObservationFieldBytes = 4096,
         bool start = true)
     {
         var options = new KernelOptions(
@@ -168,7 +186,11 @@ internal sealed class KernelFixture
             recoveryIndexTerminalCapacity: terminalCapacity,
             recoveryIndexTerminalRetentionLogicalTime: terminalRetention,
             traceRingCapacity: traceCapacity,
-            sourcePublicationPendingPerSource: perSourcePending);
+            sourcePublicationPendingPerSource: perSourcePending,
+            observationBudgetBytes: observationBudgetBytes,
+            observationBudgetNodes: observationBudgetNodes,
+            maxPinnedSnapshots: maxPinnedSnapshots,
+            maxObservationFieldBytes: maxObservationFieldBytes);
         Runtime = new KernelRuntime(new RuntimeIncarnationId("incarnation-1"), options, coordinator);
 
         var visibleToAll = new ExposurePolicy(ValueList<SecurityDomainId>.From(new[]
