@@ -88,7 +88,12 @@ namespace SignalRouter.V2.Kernel
             int maxCompletenessEntries = 1024,
             int maxObservationFieldBytes = 4096,
             int maxMaterializationNodes = 2048,
-            int maxMaterializationBytes = 256 * 1024)
+            int maxMaterializationBytes = 256 * 1024,
+            ICanonicalStateCodec? canonicalStateCodec = null,
+            int stateStoreMaxBlobBytes = 1024 * 1024,
+            long stateStoreMaxTotalBytes = 64L * 1024 * 1024,
+            int timelineRetentionEntries = 128,
+            long timelineRetentionBytes = 8L * 1024 * 1024)
         {
             MonotonicClock = monotonicClock ?? throw new ArgumentNullException(nameof(monotonicClock));
             if (redactionKey == null || redactionKey.Length == 0)
@@ -116,7 +121,9 @@ namespace SignalRouter.V2.Kernel
                 observationBudgetNodes < 1 || maxRegisteredViewContracts < 1 ||
                 maxPinnedSnapshots < 1 || maxCompletenessEntries < 1 ||
                 maxObservationFieldBytes < 1 || maxMaterializationNodes < 1 ||
-                maxMaterializationBytes < 1)
+                maxMaterializationBytes < 1 || stateStoreMaxBlobBytes < 1 ||
+                stateStoreMaxTotalBytes < 1 || timelineRetentionEntries < 1 ||
+                timelineRetentionBytes < 1)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(mailboxControlCapacity), "Every bound must be positive.");
@@ -161,6 +168,11 @@ namespace SignalRouter.V2.Kernel
             MaxObservationFieldBytes = maxObservationFieldBytes;
             MaxMaterializationNodes = maxMaterializationNodes;
             MaxMaterializationBytes = maxMaterializationBytes;
+            CanonicalStateCodec = canonicalStateCodec;
+            StateStoreMaxBlobBytes = stateStoreMaxBlobBytes;
+            StateStoreMaxTotalBytes = stateStoreMaxTotalBytes;
+            TimelineRetentionEntries = timelineRetentionEntries;
+            TimelineRetentionBytes = timelineRetentionBytes;
         }
 
         public IMonotonicClock MonotonicClock { get; }
@@ -216,6 +228,22 @@ namespace SignalRouter.V2.Kernel
         public int MaxMaterializationNodes { get; }
 
         public int MaxMaterializationBytes { get; }
+
+        /// <summary>
+        /// The injected canonical-state codec (ADR 0011). Null degrades honestly:
+        /// unaddressed snapshots, no StateStore retention, no timeline, no
+        /// recording support — never placeholder identifiers.
+        /// </summary>
+        public ICanonicalStateCodec? CanonicalStateCodec { get; }
+
+        public int StateStoreMaxBlobBytes { get; }
+
+        public long StateStoreMaxTotalBytes { get; }
+
+        public int TimelineRetentionEntries { get; }
+
+        /// <summary>Second bound on the timeline ring; diagnostic retention never fails evidence.</summary>
+        public long TimelineRetentionBytes { get; }
 
         /// <summary>Default deny: false when the principal's kind has no bound domain.</summary>
         public bool TryResolveDomain(Principal principal, out SecurityDomainId domain)

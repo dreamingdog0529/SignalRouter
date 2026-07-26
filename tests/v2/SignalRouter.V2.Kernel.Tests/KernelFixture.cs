@@ -51,6 +51,72 @@ internal sealed class RecordingAssertionObserver : IAssertionObserver
     public void OnEvaluated(ValueList<PredicateEvaluationResult> results) => Results = results;
 }
 
+/// <summary>
+/// A deterministic test canonical-state codec: a stable string rendering of the
+/// materialization, FNV-1a-64 hashed. Legitimate because the Contracts-level
+/// meaning of ContentId is reference + equality only; real canonical encoding
+/// arrives with Codec.CanonicalState (item 4).
+/// </summary>
+internal sealed class TestCanonicalStateCodec : ICanonicalStateCodec
+{
+    public CanonicalStateResult Encode(ObservationMaterialization materialization)
+    {
+        var text = new System.Text.StringBuilder();
+        var basis = materialization.Basis;
+        text.Append(basis.Incarnation).Append('|').Append(basis.Revision.Value)
+            .Append('|').Append(basis.View).Append('|').Append(basis.Domain)
+            .Append('|').Append(basis.Scope).Append('\n');
+        foreach (var node in materialization.Nodes)
+        {
+            text.Append("n:").Append(node.Key.Value).Append('|').Append(node.Role)
+                .Append('|').Append(node.Parent?.Value ?? "-")
+                .Append('|').Append(node.VisibleChildCount);
+            foreach (var attribute in node.Attributes)
+            {
+                text.Append('|').Append(attribute.Name).Append('=')
+                    .Append(attribute.Redacted ? "<redacted>" : attribute.Value.ToString());
+            }
+
+            foreach (var capability in node.Capabilities)
+            {
+                text.Append('|').Append(capability.Contract).Append(':').Append(capability.Available);
+            }
+
+            text.Append('\n');
+        }
+
+        foreach (var source in materialization.Sources)
+        {
+            text.Append("s:").Append(source.Key.Value).Append('|').Append(source.Omission?.ToString() ?? "-");
+            foreach (var field in source.Fields)
+            {
+                text.Append('|').Append(field.Name).Append('=').Append(field.Value.ToString());
+            }
+
+            text.Append('\n');
+        }
+
+        text.Append("c:").Append(materialization.Completeness.ToString());
+        var payload = System.Text.Encoding.UTF8.GetBytes(text.ToString());
+
+        var hash = 14695981039346656037UL;
+        foreach (var b in payload)
+        {
+            hash ^= b;
+            hash *= 1099511628211UL;
+        }
+
+        var digest = new byte[8];
+        for (var i = 0; i < 8; i++)
+        {
+            digest[i] = (byte)(hash >> (8 * i));
+        }
+
+        return new CanonicalStateResult(
+            new ContentId("fnv1a64", 1, DigestValue.From(digest)), payload);
+    }
+}
+
 /// <summary>Records split-phase snapshot answers.</summary>
 internal sealed class RecordingSnapshotObserver : ISnapshotObserver
 {
@@ -169,6 +235,11 @@ internal sealed class KernelFixture
         int observationBudgetNodes = 2048,
         int maxPinnedSnapshots = 32,
         int maxObservationFieldBytes = 4096,
+        ICanonicalStateCodec? codec = null,
+        int stateStoreMaxBlobBytes = 1024 * 1024,
+        long stateStoreMaxTotalBytes = 64L * 1024 * 1024,
+        int timelineRetentionEntries = 128,
+        long timelineRetentionBytes = 8L * 1024 * 1024,
         bool start = true)
     {
         var options = new KernelOptions(
@@ -190,7 +261,12 @@ internal sealed class KernelFixture
             observationBudgetBytes: observationBudgetBytes,
             observationBudgetNodes: observationBudgetNodes,
             maxPinnedSnapshots: maxPinnedSnapshots,
-            maxObservationFieldBytes: maxObservationFieldBytes);
+            maxObservationFieldBytes: maxObservationFieldBytes,
+            canonicalStateCodec: codec,
+            stateStoreMaxBlobBytes: stateStoreMaxBlobBytes,
+            stateStoreMaxTotalBytes: stateStoreMaxTotalBytes,
+            timelineRetentionEntries: timelineRetentionEntries,
+            timelineRetentionBytes: timelineRetentionBytes);
         Runtime = new KernelRuntime(new RuntimeIncarnationId("incarnation-1"), options, coordinator);
 
         var visibleToAll = new ExposurePolicy(ValueList<SecurityDomainId>.From(new[]

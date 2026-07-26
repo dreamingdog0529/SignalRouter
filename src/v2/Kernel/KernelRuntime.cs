@@ -41,6 +41,12 @@ namespace SignalRouter.V2.Kernel
         private readonly Queue<SnapshotRequestMessage> deferredSnapshots =
             new Queue<SnapshotRequestMessage>();
 
+        private readonly StateStore stateStore;
+        private readonly TimelineIndex timeline;
+
+        private readonly Dictionary<RequestId, RecordMaterialization> afterBases =
+            new Dictionary<RequestId, RecordMaterialization>();
+
         private readonly Queue<Interaction> admitted = new Queue<Interaction>();
         private readonly List<Interaction> committingEvidence = new List<Interaction>();
         private readonly Dictionary<OperationId, WaitEntry> waits = new Dictionary<OperationId, WaitEntry>();
@@ -59,6 +65,11 @@ namespace SignalRouter.V2.Kernel
         private int pumpObservationBytesRemaining;
         private int pumpObservationNodesRemaining;
         private bool deferredSnapshotServed;
+        private ulong timelineObservedRevision;
+        private bool timelineGapPending;
+        private ulong timelineSequence;
+        private ulong lastCauseRevision;
+        private LogicalOrder? lastCause;
         private SecurityDomainId gateHolder;
         private bool gated;
         private IEffectExecutor? executor;
@@ -81,11 +92,14 @@ namespace SignalRouter.V2.Kernel
             statusBoard = new StatusBoard();
             trace = new KernelTraceRing(options.TraceRingCapacity, options.TraceRingByteCapacity);
             kernelView = new ViewContractRef(new ViewContractId(KernelViewId), new ContractVersion(1, 0));
+            stateStore = new StateStore(options.StateStoreMaxBlobBytes, options.StateStoreMaxTotalBytes);
+            timeline = new TimelineIndex(stateStore, options);
             Bootstrap = new BootstrapRegistry(this);
             Registry = new NodeRegistryFacade(this);
             Ingress = new IngressSink(this);
             Completions = new CompletionSink(this);
             Control = new ControlFacade(this);
+            RecordObservation = new RecordObservationFacade(this);
         }
 
         public RuntimeIncarnationId Incarnation => nodeStore.Incarnation;
@@ -103,6 +117,12 @@ namespace SignalRouter.V2.Kernel
         public IKernelControl Control { get; }
 
         public KernelTraceRing Trace => trace;
+
+        /// <summary>The diagnostic state timeline (observation-state.md §8); reading is principal-bound default-deny.</summary>
+        public TimelineIndex Timeline => timeline;
+
+        /// <summary>The StateStore-first capability the recording module consumes (ADR 0011). Pump-thread only.</summary>
+        public IRecordObservationServices RecordObservation { get; }
 
         /// <summary>Wires the adapter surfaces and freezes the bootstrap registry.</summary>
         public void Start(IEffectExecutor effectExecutor)
@@ -156,6 +176,11 @@ namespace SignalRouter.V2.Kernel
 
                     turns++;
                     ReevaluateWaitsIfRevisionAdvanced();
+                }
+
+                if (!tornDown)
+                {
+                    RunCheckpointFeed(budget);
                 }
 
                 return BuildReport(turns);
@@ -667,6 +692,12 @@ namespace SignalRouter.V2.Kernel
             recoveryIndex.CommitTerminal(interaction.Request, details.Outcome, currentLogicalNow);
             PublishStatus();
 
+            // The exact after-basis (kernel-execution.md §5, ADR 0011): captured at
+            // the terminal decision — after the true terminal is committed, so a
+            // codec failure degrades the recording alone — and retained until the
+            // terminal evidence commits. E4 uses this, never a fresh materialization.
+            CaptureAfterBasis(interaction);
+
             // The ephemeral payload's lifetime ends at the terminal
             // (kernel-execution.md §3).
             interaction.Payload = null;
@@ -733,6 +764,17 @@ namespace SignalRouter.V2.Kernel
 
         private void FinishTerminal(Interaction interaction)
         {
+            // The terminal evidence has its final answer (Ready or Fault): the
+            // retained after-basis is released; a Pending retry keeps it held.
+            if (afterBases.TryGetValue(interaction.Request, out var retainedBasis))
+            {
+                afterBases.Remove(interaction.Request);
+                stateStore.Release(
+                    options.RecordDomain,
+                    retainedBasis.Snapshot.ContentId,
+                    LeaseOwner.OfRequest(interaction.Request));
+            }
+
             var evidence = interaction.PendingTerminal!;
             Emit(
                 EventKind.TerminalCommitted, EventCausation.OfRequest(interaction.Request),
@@ -856,7 +898,7 @@ namespace SignalRouter.V2.Kernel
                     ProcessSnapshotRequest(snapshotRequest);
                     break;
                 case ReleaseSnapshotMessage release:
-                    pinnedSnapshots.Remove(release.Operation);
+                    ReleasePinnedSnapshot(release.Operation);
                     break;
                 case TeardownMessage:
                     ProcessTeardown();
@@ -927,12 +969,232 @@ namespace SignalRouter.V2.Kernel
                 Math.Max(0, pumpObservationBytesRemaining - result.ApproximateBytes);
             pumpObservationNodesRemaining =
                 Math.Max(0, pumpObservationNodesRemaining - result.Materialization.Nodes.Count);
+
+            // With a codec, ordinary pinned snapshots are addressed and retained
+            // under the operation's lease; without one — or when the cache cannot
+            // hold the blob — the snapshot is honestly unaddressed.
+            var contentId = default(ContentId);
+            if (options.CanonicalStateCodec != null)
+            {
+                try
+                {
+                    var canonical = options.CanonicalStateCodec.Encode(result.Materialization);
+                    if (stateStore.TryPut(
+                            domain, canonical.Id, result.Materialization, canonical.Length) ==
+                        PutAnswer.Retained)
+                    {
+                        stateStore.TryPin(domain, canonical.Id, LeaseOwner.Of(message.Operation));
+                        contentId = canonical.Id;
+                    }
+                }
+                catch (Exception)
+                {
+                    // A throwing codec degrades addressing alone, never the read.
+                    Emit(EventKind.StateTransition, EventCausation.None, detailCode: "SnapshotUnaddressed");
+                }
+            }
+
             var pinned = new PinnedSnapshot(
                 new ObservationSnapshot(
-                    result.Materialization.Basis, default, result.Materialization.Completeness),
+                    result.Materialization.Basis, contentId, result.Materialization.Completeness),
                 result.Materialization);
             pinnedSnapshots[message.Operation] = pinned;
             message.Observer.OnPinned(message.Operation, pinned);
+        }
+
+        private void ReleasePinnedSnapshot(OperationId operation)
+        {
+            if (!pinnedSnapshots.TryGetValue(operation, out var pinned))
+            {
+                return;
+            }
+
+            pinnedSnapshots.Remove(operation);
+            if (pinned.Snapshot.IsAddressed)
+            {
+                stateStore.Release(
+                    pinned.Snapshot.Basis.Domain, pinned.Snapshot.ContentId, LeaseOwner.Of(operation));
+            }
+        }
+
+        // ── Record materialization, the checkpoint feed, and the after-basis ──
+
+        /// <summary>Materializes and canonically encodes one Record-family view at the current revision.</summary>
+        private RecordMaterialization MaterializeRecord(
+            ViewContractDescriptor descriptor, ObservationBudget budget, out ProjectionResult projection)
+        {
+            projection = ObservationProjector.Materialize(
+                nodeStore, sourceTable, descriptor, options.RecordDomain, currentLogicalNow,
+                budget, options.MaxObservationFieldBytes, options.MaxCompletenessEntries);
+            var canonical = options.CanonicalStateCodec!.Encode(projection.Materialization);
+            return new RecordMaterialization(
+                new ObservationSnapshot(
+                    projection.Materialization.Basis, canonical.Id, projection.Materialization.Completeness),
+                projection.Materialization,
+                canonical);
+        }
+
+        private ObservationBudget MaterializationCeiling() =>
+            new ObservationBudget(options.MaxMaterializationBytes, options.MaxMaterializationNodes);
+
+        private ViewContractDescriptor KernelRecordDescriptor() => new ViewContractDescriptor(
+            kernelView,
+            ViewFamily.Record,
+            ViewContractDescriptor.RootScope,
+            options.MaxMaterializationNodes,
+            options.MaxObservationFieldBytes,
+            includeKeylessNodes: false);
+
+        private void CaptureAfterBasis(Interaction interaction)
+        {
+            if (options.CanonicalStateCodec == null || afterBases.ContainsKey(interaction.Request))
+            {
+                return;
+            }
+
+            RecordMaterialization materialization;
+            try
+            {
+                materialization = MaterializeRecord(
+                    KernelRecordDescriptor(), MaterializationCeiling(), out _);
+            }
+            catch (Exception)
+            {
+                // A throwing codec is a recording-side failure: the true terminal
+                // is already committed and stands; the E4 obligation will fail on
+                // its own path (guarantees.md §7) — never the interaction.
+                Emit(
+                    EventKind.StateTransition, EventCausation.OfRequest(interaction.Request),
+                    request: interaction.Request, detailCode: "AfterBasisUnavailable");
+                return;
+            }
+
+            afterBases[interaction.Request] = materialization;
+
+            // Best-effort cache retention: the reference above is the authority;
+            // a refused put only means the blob is not shareable by address yet.
+            if (stateStore.TryPut(
+                    options.RecordDomain,
+                    materialization.Canonical.Id,
+                    materialization.Materialization,
+                    materialization.Canonical.Length) == PutAnswer.Retained)
+            {
+                stateStore.TryPin(
+                    options.RecordDomain,
+                    materialization.Canonical.Id,
+                    LeaseOwner.OfRequest(interaction.Request));
+            }
+        }
+
+        /// <summary>The best-known cause of the latest revision advance — checkpoint metadata, never authority.</summary>
+        private void NoteRevisionCause(LogicalOrder? cause)
+        {
+            lastCauseRevision = nodeStore.Revision.Value;
+            lastCause = cause;
+        }
+
+        /// <summary>The active interaction's order when its effect window owns the mutation, else nothing.</summary>
+        private LogicalOrder? EffectWindowOrder() =>
+            active != null && active.EffectStarted ? active.Order : (LogicalOrder?)null;
+
+        /// <summary>
+        /// The pump-boundary heartbeat (observation-state.md §4/§8, ADR 0011): a
+        /// revision advance without a retained checkpoint is a gap, and the next
+        /// successful checkpoint carries the gap mark. Transient shortfalls (pump
+        /// budget) retry at the next pump's fresh budget; conditions permanent at
+        /// this revision (an unstorable or unretainable blob) skip it with the gap
+        /// recorded. Runs after the turn loop, never past the deadline.
+        /// </summary>
+        private void RunCheckpointFeed(PumpBudget budget)
+        {
+            if (options.CanonicalStateCodec == null || DeadlinePassed(budget))
+            {
+                return;
+            }
+
+            var current = nodeStore.Revision;
+            if (current.Value == timelineObservedRevision)
+            {
+                return;
+            }
+
+            if (pumpObservationBytesRemaining <= 0 || pumpObservationNodesRemaining <= 0)
+            {
+                // Transient: retry against the next pump's fresh budget.
+                timelineGapPending = true;
+                return;
+            }
+
+            RecordMaterialization materialization;
+            ProjectionResult projection;
+            try
+            {
+                materialization = MaterializeRecord(
+                    KernelRecordDescriptor(),
+                    new ObservationBudget(
+                        Math.Min(pumpObservationBytesRemaining, options.MaxMaterializationBytes),
+                        Math.Min(pumpObservationNodesRemaining, options.MaxMaterializationNodes)),
+                    out projection);
+            }
+            catch (Exception)
+            {
+                // A throwing codec fails the diagnostic lane alone: the gap is
+                // recorded and the revision is skipped (permanent at this revision).
+                Emit(EventKind.StateTransition, EventCausation.None, detailCode: "CheckpointUnavailable");
+                timelineGapPending = true;
+                timelineObservedRevision = current.Value;
+                return;
+            }
+
+            pumpObservationBytesRemaining =
+                Math.Max(0, pumpObservationBytesRemaining - projection.ApproximateBytes);
+            pumpObservationNodesRemaining =
+                Math.Max(0, pumpObservationNodesRemaining - projection.Materialization.Nodes.Count);
+            if (projection.Truncated)
+            {
+                // The remaining pump budget cut the materialization short: transient.
+                timelineGapPending = true;
+                return;
+            }
+
+            // The timeline is diagnostic: a refused put records a gap and never
+            // triggers the evidence-priority eviction (observation-state.md §5.1).
+            if (stateStore.TryPut(
+                    options.RecordDomain,
+                    materialization.Canonical.Id,
+                    materialization.Materialization,
+                    materialization.Canonical.Length) != PutAnswer.Retained)
+            {
+                timelineGapPending = true;
+                timelineObservedRevision = current.Value;
+                return;
+            }
+
+            stateStore.TryPin(options.RecordDomain, materialization.Canonical.Id, LeaseOwner.Timeline);
+
+            // Causation metadata (observation-state.md §8): the checkpoint cites
+            // the recorded cause of the latest advance to this exact revision —
+            // source-only and external advances cite nothing (ADR 0009).
+            var causingOrder = lastCauseRevision == current.Value ? lastCause : null;
+            if (!timeline.Append(
+                    new TimelineEntry(
+                        current,
+                        materialization.Canonical.Id,
+                        causingOrder,
+                        timelineGapPending,
+                        currentLogicalNow,
+                        timelineSequence++),
+                    materialization.Canonical.Length))
+            {
+                // The entry could not be retained (it exceeds the retention bound
+                // by itself): permanent at this revision, and the gap stands.
+                timelineGapPending = true;
+                timelineObservedRevision = current.Value;
+                return;
+            }
+
+            timelineGapPending = false;
+            timelineObservedRevision = current.Value;
         }
 
         private bool IsRequestableScope(
@@ -1108,6 +1370,7 @@ namespace SignalRouter.V2.Kernel
             }
 
             nodeStore.AdvanceRevision(); // an external effect is an observable mutation
+            NoteRevisionCause(null); // external: no admission order exists to cite (ADR 0009)
             Emit(
                 intersecting ? EventKind.ContaminationObserved : new EventKind("ObservedExternal"),
                 EventCausation.OfExternal(report.SourceHint),
@@ -1117,6 +1380,7 @@ namespace SignalRouter.V2.Kernel
 
         private void ProcessRegistration(RegistrationMessage message)
         {
+            var revisionBefore = nodeStore.Revision.Value;
             RegistrationReceipt receipt;
             switch (message.Kind)
             {
@@ -1148,6 +1412,13 @@ namespace SignalRouter.V2.Kernel
                         ? RegistrationReceipt.Success(null)
                         : RegistrationReceipt.Failure("UnknownCapability");
                     break;
+            }
+
+            if (nodeStore.Revision.Value != revisionBefore)
+            {
+                // A registry mutation inside an effect window is that interaction's
+                // own mutation; outside one, no admission order exists to cite.
+                NoteRevisionCause(EffectWindowOrder());
             }
 
             message.Observer?.OnCompleted(receipt);
@@ -1309,7 +1580,8 @@ namespace SignalRouter.V2.Kernel
             }
 
             // Every deferred snapshot observer is answered exactly once; active
-            // pins are released with the incarnation.
+            // pins, retained after-bases, the timeline, and the cache are released
+            // with the incarnation.
             foreach (var deferred in deferredSnapshots)
             {
                 deferred.Observer.OnRefused(deferred.Operation, "TornDown");
@@ -1317,6 +1589,9 @@ namespace SignalRouter.V2.Kernel
 
             deferredSnapshots.Clear();
             pinnedSnapshots.Clear();
+            afterBases.Clear();
+            timeline.Clear();
+            stateStore.Clear();
 
             PublishStatus();
             Emit(EventKind.IncarnationLifecycle, EventCausation.None, detailCode: "TornDown");
@@ -1335,6 +1610,8 @@ namespace SignalRouter.V2.Kernel
                 return;
             }
 
+            // A source-only advance carries no admission order to cite (ADR 0009).
+            NoteRevisionCause(null);
             Emit(
                 EventKind.SourcePublicationAdopted,
                 publication.Causation,
@@ -1953,6 +2230,143 @@ namespace SignalRouter.V2.Kernel
                 }
 
                 runtime.mailbox.EnqueueControl(new ReleaseSnapshotMessage(operation));
+            }
+        }
+
+        private sealed class RecordObservationFacade : IRecordObservationServices
+        {
+            private readonly KernelRuntime runtime;
+
+            internal RecordObservationFacade(KernelRuntime runtime)
+            {
+                this.runtime = runtime;
+            }
+
+            public bool CanAddress =>
+                runtime.options.CanonicalStateCodec != null && !runtime.tornDown;
+
+            public bool TryMaterializeView(
+                ViewContractRef view,
+                string scope,
+                SourceRevision? expectedBasis,
+                out RecordMaterialization? materialization,
+                out bool basisMismatch)
+            {
+                if (runtime.options.CanonicalStateCodec == null)
+                {
+                    throw new KernelFaultException(
+                        "Record materialization requires the canonical-state codec (ADR 0011).");
+                }
+
+                if (!runtime.viewContracts.TryGetValue(view, out var descriptor) ||
+                    descriptor.Family != ViewFamily.Record)
+                {
+                    throw new KernelFaultException(
+                        "Record materialization requires a registered Record-family view.");
+                }
+
+                ContractGrammar.ValidateIdentifier(scope, nameof(scope));
+                if (!runtime.IsRequestableScope(scope, descriptor, runtime.options.RecordDomain))
+                {
+                    throw new KernelFaultException(
+                        "The requested scope is outside the registered view contract's scope.");
+                }
+
+                if (expectedBasis.HasValue && !expectedBasis.Value.Equals(runtime.nodeStore.Revision))
+                {
+                    // The basis moved: E3 re-materializes at the new revision; a
+                    // silently different-revision materialization is prohibited.
+                    materialization = null;
+                    basisMismatch = true;
+                    return false;
+                }
+
+                var effective = string.Equals(scope, descriptor.Scope, StringComparison.Ordinal)
+                    ? descriptor
+                    : new ViewContractDescriptor(
+                        descriptor.Contract, descriptor.Family, scope,
+                        descriptor.MaxNodes, descriptor.MaxFieldBytes, descriptor.IncludeKeylessNodes);
+                materialization = runtime.MaterializeRecord(
+                    effective, runtime.MaterializationCeiling(), out _);
+                basisMismatch = false;
+                return true;
+            }
+
+            public LeaseAnswer TryLease(RecordMaterialization materialization, OperationId recording)
+            {
+                if (materialization == null)
+                {
+                    throw new ArgumentNullException(nameof(materialization));
+                }
+
+                if (recording.IsDefault)
+                {
+                    throw new ArgumentException(
+                        "A lease requires a non-default recording operation.", nameof(recording));
+                }
+
+                if (runtime.options.CanonicalStateCodec == null)
+                {
+                    return LeaseAnswer.Unaddressable;
+                }
+
+                while (true)
+                {
+                    var answer = runtime.stateStore.TryPut(
+                        runtime.options.RecordDomain,
+                        materialization.Canonical.Id,
+                        materialization.Materialization,
+                        materialization.Canonical.Length);
+                    switch (answer)
+                    {
+                        case PutAnswer.Retained:
+                            runtime.stateStore.TryPin(
+                                runtime.options.RecordDomain,
+                                materialization.Canonical.Id,
+                                LeaseOwner.Of(recording));
+                            return LeaseAnswer.Retained;
+                        case PutAnswer.OverBlobBound:
+                            return LeaseAnswer.OverBlobBound;
+                        default:
+                            // Diagnostic retention never fails evidence: release
+                            // timeline pins oldest-first and retry before refusing.
+                            if (!runtime.timeline.TryEvictOldest())
+                            {
+                                return LeaseAnswer.OverBudget;
+                            }
+
+                            break;
+                    }
+                }
+            }
+
+            public bool TryGetAfterMaterialization(
+                RequestId request, out RecordMaterialization? materialization)
+            {
+                if (request.IsDefault)
+                {
+                    throw new ArgumentException("A non-default request is required.", nameof(request));
+                }
+
+                if (runtime.afterBases.TryGetValue(request, out var retained))
+                {
+                    materialization = retained;
+                    return true;
+                }
+
+                materialization = null;
+                return false;
+            }
+
+            public void ReleaseRecording(OperationId recording)
+            {
+                if (recording.IsDefault)
+                {
+                    throw new ArgumentException(
+                        "A non-default recording operation is required.", nameof(recording));
+                }
+
+                runtime.stateStore.ReleaseOwner(LeaseOwner.Of(recording));
             }
         }
     }
