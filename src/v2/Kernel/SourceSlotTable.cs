@@ -120,5 +120,32 @@ namespace SignalRouter.V2.Kernel
         }
 
         internal IEnumerable<StateSourceRegistration> Registrations => registrations.Values;
+
+        /// <summary>
+        /// Whether any sampled source is exposed to the family. When none is, a
+        /// materialization under that family is a pure function of the revision —
+        /// the precondition for sharing one evaluation read across armed waits
+        /// (observation-state.md §7: sampled sources read at materialization time).
+        /// </summary>
+        internal bool HasSampledVisibleTo(ViewFamily family)
+        {
+            foreach (var registration in registrations.Values)
+            {
+                if (registration.SourceClass != StateSourceClass.Sampled)
+                {
+                    continue;
+                }
+
+                var visible = family == ViewFamily.Record
+                    ? registration.Descriptor.RecordVisible
+                    : registration.Descriptor.AgentVisible;
+                if (visible)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }
