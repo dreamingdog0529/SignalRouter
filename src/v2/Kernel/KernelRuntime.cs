@@ -60,6 +60,8 @@ namespace SignalRouter.V2.Kernel
         private Interaction? active;
         private SubmissionMessage? stalledAdmission;
         private bool started;
+        private bool sampledVisibleToAgent;
+        private bool sampledVisibleToRecord;
         private bool tornDown;
         private int pumping;
         private long lastMonotonic = long.MinValue;
@@ -140,6 +142,12 @@ namespace SignalRouter.V2.Kernel
 
             executor = effectExecutor ?? throw new ArgumentNullException(nameof(effectExecutor));
             executor.Attach(Completions);
+
+            // Source registration is bootstrap-only, so the sampled-exposure
+            // answer per family is frozen from here on — cache it instead of
+            // rescanning the registry per armed wait (review finding on P1d).
+            sampledVisibleToAgent = sourceTable.HasSampledVisibleTo(ViewFamily.Agent);
+            sampledVisibleToRecord = sourceTable.HasSampledVisibleTo(ViewFamily.Record);
             started = true;
         }
 
@@ -1544,8 +1552,10 @@ namespace SignalRouter.V2.Kernel
             SecurityDomainId domain,
             ref Dictionary<SecurityDomainId, MaterializationLookup>? sharedReaders)
         {
-            var family = domain.Equals(options.RecordDomain) ? ViewFamily.Record : ViewFamily.Agent;
-            if (sourceTable.HasSampledVisibleTo(family))
+            var sampledExposed = domain.Equals(options.RecordDomain)
+                ? sampledVisibleToRecord
+                : sampledVisibleToAgent;
+            if (sampledExposed)
             {
                 return PinReader(domain);
             }
