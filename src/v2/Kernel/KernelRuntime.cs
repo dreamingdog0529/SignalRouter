@@ -41,6 +41,12 @@ namespace SignalRouter.V2.Kernel
         private readonly Queue<SnapshotRequestMessage> deferredSnapshots =
             new Queue<SnapshotRequestMessage>();
 
+        private readonly StateStore stateStore;
+        private readonly TimelineIndex timeline;
+
+        private readonly Dictionary<RequestId, RecordMaterialization> afterBases =
+            new Dictionary<RequestId, RecordMaterialization>();
+
         private readonly Queue<Interaction> admitted = new Queue<Interaction>();
         private readonly List<Interaction> committingEvidence = new List<Interaction>();
         private readonly Dictionary<OperationId, WaitEntry> waits = new Dictionary<OperationId, WaitEntry>();
@@ -59,6 +65,11 @@ namespace SignalRouter.V2.Kernel
         private int pumpObservationBytesRemaining;
         private int pumpObservationNodesRemaining;
         private bool deferredSnapshotServed;
+        private ulong timelineObservedRevision;
+        private bool timelineGapPending;
+        private ulong timelineSequence;
+        private LogicalOrder? lastTerminalOrder;
+        private SourceRevision lastTerminalWatermark;
         private SecurityDomainId gateHolder;
         private bool gated;
         private IEffectExecutor? executor;
@@ -81,11 +92,14 @@ namespace SignalRouter.V2.Kernel
             statusBoard = new StatusBoard();
             trace = new KernelTraceRing(options.TraceRingCapacity, options.TraceRingByteCapacity);
             kernelView = new ViewContractRef(new ViewContractId(KernelViewId), new ContractVersion(1, 0));
+            stateStore = new StateStore(options.StateStoreMaxBlobBytes, options.StateStoreMaxTotalBytes);
+            timeline = new TimelineIndex(stateStore, options);
             Bootstrap = new BootstrapRegistry(this);
             Registry = new NodeRegistryFacade(this);
             Ingress = new IngressSink(this);
             Completions = new CompletionSink(this);
             Control = new ControlFacade(this);
+            RecordObservation = new RecordObservationFacade(this);
         }
 
         public RuntimeIncarnationId Incarnation => nodeStore.Incarnation;
@@ -103,6 +117,12 @@ namespace SignalRouter.V2.Kernel
         public IKernelControl Control { get; }
 
         public KernelTraceRing Trace => trace;
+
+        /// <summary>The diagnostic state timeline (observation-state.md §8); reading is principal-bound default-deny.</summary>
+        public TimelineIndex Timeline => timeline;
+
+        /// <summary>The StateStore-first capability the recording module consumes (ADR 0011). Pump-thread only.</summary>
+        public IRecordObservationServices RecordObservation { get; }
 
         /// <summary>Wires the adapter surfaces and freezes the bootstrap registry.</summary>
         public void Start(IEffectExecutor effectExecutor)
@@ -156,6 +176,11 @@ namespace SignalRouter.V2.Kernel
 
                     turns++;
                     ReevaluateWaitsIfRevisionAdvanced();
+                }
+
+                if (!tornDown)
+                {
+                    RunCheckpointFeed();
                 }
 
                 return BuildReport(turns);
@@ -662,6 +687,15 @@ namespace SignalRouter.V2.Kernel
 
         private void Terminate(Interaction interaction, TerminalDetails details)
         {
+            // The exact after-basis (kernel-execution.md §5, ADR 0011): captured at
+            // the terminal decision — the Observing pin for effect-bearing
+            // interactions, and this very point for zero-effect terminals — and
+            // retained until the terminal evidence commits. E4 uses this, never a
+            // fresh materialization.
+            CaptureAfterBasis(interaction);
+            lastTerminalOrder = interaction.Order;
+            lastTerminalWatermark = nodeStore.Revision;
+
             // The true terminal is committed to the RecoveryIndex first: a recording
             // failure never rewrites an interaction's real result (guarantees.md §7).
             recoveryIndex.CommitTerminal(interaction.Request, details.Outcome, currentLogicalNow);
@@ -733,6 +767,17 @@ namespace SignalRouter.V2.Kernel
 
         private void FinishTerminal(Interaction interaction)
         {
+            // The terminal evidence has its final answer (Ready or Fault): the
+            // retained after-basis is released; a Pending retry keeps it held.
+            if (afterBases.TryGetValue(interaction.Request, out var retainedBasis))
+            {
+                afterBases.Remove(interaction.Request);
+                stateStore.Release(
+                    options.RecordDomain,
+                    retainedBasis.Snapshot.ContentId,
+                    LeaseOwner.OfRequest(interaction.Request));
+            }
+
             var evidence = interaction.PendingTerminal!;
             Emit(
                 EventKind.TerminalCommitted, EventCausation.OfRequest(interaction.Request),
@@ -933,6 +978,122 @@ namespace SignalRouter.V2.Kernel
                 result.Materialization);
             pinnedSnapshots[message.Operation] = pinned;
             message.Observer.OnPinned(message.Operation, pinned);
+        }
+
+        // ── Record materialization, the checkpoint feed, and the after-basis ──
+
+        /// <summary>Materializes and canonically encodes one Record-family view at the current revision.</summary>
+        private RecordMaterialization MaterializeRecord(ViewContractDescriptor descriptor)
+        {
+            var result = ObservationProjector.Materialize(
+                nodeStore, sourceTable, descriptor, options.RecordDomain, currentLogicalNow,
+                new ObservationBudget(options.MaxMaterializationBytes, options.MaxMaterializationNodes),
+                options.MaxObservationFieldBytes,
+                options.MaxCompletenessEntries);
+            var canonical = options.CanonicalStateCodec!.Encode(result.Materialization);
+            return new RecordMaterialization(
+                new ObservationSnapshot(
+                    result.Materialization.Basis, canonical.Id, result.Materialization.Completeness),
+                result.Materialization,
+                canonical);
+        }
+
+        private ViewContractDescriptor KernelRecordDescriptor() => new ViewContractDescriptor(
+            kernelView,
+            ViewFamily.Record,
+            ViewContractDescriptor.RootScope,
+            options.MaxMaterializationNodes,
+            options.MaxObservationFieldBytes,
+            includeKeylessNodes: false);
+
+        private void CaptureAfterBasis(Interaction interaction)
+        {
+            if (options.CanonicalStateCodec == null || afterBases.ContainsKey(interaction.Request))
+            {
+                return;
+            }
+
+            var materialization = MaterializeRecord(KernelRecordDescriptor());
+            afterBases[interaction.Request] = materialization;
+
+            // Best-effort cache retention: the reference above is the authority;
+            // a refused put only means the blob is not shareable by address yet.
+            if (stateStore.TryPut(
+                    options.RecordDomain,
+                    materialization.Canonical.Id,
+                    materialization.Materialization,
+                    materialization.Canonical.Length) == PutAnswer.Retained)
+            {
+                stateStore.TryPin(
+                    options.RecordDomain,
+                    materialization.Canonical.Id,
+                    LeaseOwner.OfRequest(interaction.Request));
+            }
+        }
+
+        /// <summary>
+        /// The pump-boundary heartbeat (observation-state.md §4/§8, ADR 0011): a
+        /// revision advance without a retained checkpoint is a gap, and the next
+        /// successful checkpoint carries the gap mark. Runs after the turn loop.
+        /// </summary>
+        private void RunCheckpointFeed()
+        {
+            if (options.CanonicalStateCodec == null)
+            {
+                return;
+            }
+
+            var current = nodeStore.Revision;
+            if (current.Value == timelineObservedRevision)
+            {
+                return;
+            }
+
+            timelineObservedRevision = current.Value;
+            if (pumpObservationBytesRemaining <= 0 || pumpObservationNodesRemaining <= 0)
+            {
+                timelineGapPending = true;
+                return;
+            }
+
+            var materialization = MaterializeRecord(KernelRecordDescriptor());
+            pumpObservationBytesRemaining =
+                Math.Max(0, pumpObservationBytesRemaining - materialization.Canonical.Length);
+            pumpObservationNodesRemaining =
+                Math.Max(0, pumpObservationNodesRemaining - materialization.Materialization.Nodes.Count);
+
+            // The timeline is diagnostic: a refused put records a gap and never
+            // triggers the evidence-priority eviction (observation-state.md §5.1).
+            if (stateStore.TryPut(
+                    options.RecordDomain,
+                    materialization.Canonical.Id,
+                    materialization.Materialization,
+                    materialization.Canonical.Length) != PutAnswer.Retained)
+            {
+                timelineGapPending = true;
+                return;
+            }
+
+            stateStore.TryPin(options.RecordDomain, materialization.Canonical.Id, LeaseOwner.Timeline);
+
+            // Causation metadata (observation-state.md §8): a checkpoint taken
+            // inside an effect window cites the active interaction; one taken at a
+            // terminal's own watermark cites that terminal; source-only and
+            // external advances cite nothing — no fabricated order (ADR 0009).
+            var causingOrder =
+                active != null && active.EffectStarted ? active.Order
+                : lastTerminalWatermark.Equals(current) ? lastTerminalOrder
+                : null;
+            timeline.Append(
+                new TimelineEntry(
+                    current,
+                    materialization.Canonical.Id,
+                    causingOrder,
+                    timelineGapPending,
+                    currentLogicalNow,
+                    timelineSequence++),
+                materialization.Canonical.Length);
+            timelineGapPending = false;
         }
 
         private bool IsRequestableScope(
@@ -1309,7 +1470,8 @@ namespace SignalRouter.V2.Kernel
             }
 
             // Every deferred snapshot observer is answered exactly once; active
-            // pins are released with the incarnation.
+            // pins, retained after-bases, the timeline, and the cache are released
+            // with the incarnation.
             foreach (var deferred in deferredSnapshots)
             {
                 deferred.Observer.OnRefused(deferred.Operation, "TornDown");
@@ -1317,6 +1479,9 @@ namespace SignalRouter.V2.Kernel
 
             deferredSnapshots.Clear();
             pinnedSnapshots.Clear();
+            afterBases.Clear();
+            timeline.Clear();
+            stateStore.Clear();
 
             PublishStatus();
             Emit(EventKind.IncarnationLifecycle, EventCausation.None, detailCode: "TornDown");
@@ -1953,6 +2118,142 @@ namespace SignalRouter.V2.Kernel
                 }
 
                 runtime.mailbox.EnqueueControl(new ReleaseSnapshotMessage(operation));
+            }
+        }
+
+        private sealed class RecordObservationFacade : IRecordObservationServices
+        {
+            private readonly KernelRuntime runtime;
+
+            internal RecordObservationFacade(KernelRuntime runtime)
+            {
+                this.runtime = runtime;
+            }
+
+            public bool CanAddress =>
+                runtime.options.CanonicalStateCodec != null && !runtime.tornDown;
+
+            public bool TryMaterializeView(
+                ViewContractRef view,
+                string scope,
+                SourceRevision? expectedBasis,
+                out RecordMaterialization? materialization,
+                out bool basisMismatch)
+            {
+                if (runtime.options.CanonicalStateCodec == null)
+                {
+                    throw new KernelFaultException(
+                        "Record materialization requires the canonical-state codec (ADR 0011).");
+                }
+
+                if (!runtime.viewContracts.TryGetValue(view, out var descriptor) ||
+                    descriptor.Family != ViewFamily.Record)
+                {
+                    throw new KernelFaultException(
+                        "Record materialization requires a registered Record-family view.");
+                }
+
+                ContractGrammar.ValidateIdentifier(scope, nameof(scope));
+                if (!runtime.IsRequestableScope(scope, descriptor, runtime.options.RecordDomain))
+                {
+                    throw new KernelFaultException(
+                        "The requested scope is outside the registered view contract's scope.");
+                }
+
+                if (expectedBasis.HasValue && !expectedBasis.Value.Equals(runtime.nodeStore.Revision))
+                {
+                    // The basis moved: E3 re-materializes at the new revision; a
+                    // silently different-revision materialization is prohibited.
+                    materialization = null;
+                    basisMismatch = true;
+                    return false;
+                }
+
+                var effective = string.Equals(scope, descriptor.Scope, StringComparison.Ordinal)
+                    ? descriptor
+                    : new ViewContractDescriptor(
+                        descriptor.Contract, descriptor.Family, scope,
+                        descriptor.MaxNodes, descriptor.MaxFieldBytes, descriptor.IncludeKeylessNodes);
+                materialization = runtime.MaterializeRecord(effective);
+                basisMismatch = false;
+                return true;
+            }
+
+            public LeaseAnswer TryLease(RecordMaterialization materialization, OperationId recording)
+            {
+                if (materialization == null)
+                {
+                    throw new ArgumentNullException(nameof(materialization));
+                }
+
+                if (recording.IsDefault)
+                {
+                    throw new ArgumentException(
+                        "A lease requires a non-default recording operation.", nameof(recording));
+                }
+
+                if (runtime.options.CanonicalStateCodec == null)
+                {
+                    return LeaseAnswer.Unaddressable;
+                }
+
+                while (true)
+                {
+                    var answer = runtime.stateStore.TryPut(
+                        runtime.options.RecordDomain,
+                        materialization.Canonical.Id,
+                        materialization.Materialization,
+                        materialization.Canonical.Length);
+                    switch (answer)
+                    {
+                        case PutAnswer.Retained:
+                            runtime.stateStore.TryPin(
+                                runtime.options.RecordDomain,
+                                materialization.Canonical.Id,
+                                LeaseOwner.Of(recording));
+                            return LeaseAnswer.Retained;
+                        case PutAnswer.OverBlobBound:
+                            return LeaseAnswer.OverBlobBound;
+                        default:
+                            // Diagnostic retention never fails evidence: release
+                            // timeline pins oldest-first and retry before refusing.
+                            if (!runtime.timeline.TryEvictOldest())
+                            {
+                                return LeaseAnswer.OverBudget;
+                            }
+
+                            break;
+                    }
+                }
+            }
+
+            public bool TryGetAfterMaterialization(
+                RequestId request, out RecordMaterialization? materialization)
+            {
+                if (request.IsDefault)
+                {
+                    throw new ArgumentException("A non-default request is required.", nameof(request));
+                }
+
+                if (runtime.afterBases.TryGetValue(request, out var retained))
+                {
+                    materialization = retained;
+                    return true;
+                }
+
+                materialization = null;
+                return false;
+            }
+
+            public void ReleaseRecording(OperationId recording)
+            {
+                if (recording.IsDefault)
+                {
+                    throw new ArgumentException(
+                        "A non-default recording operation is required.", nameof(recording));
+                }
+
+                runtime.stateStore.ReleaseOwner(LeaseOwner.Of(recording));
             }
         }
     }
