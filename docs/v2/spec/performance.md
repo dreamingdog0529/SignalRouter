@@ -1,10 +1,14 @@
 # SignalRouter v2 Specification — Performance
 
-> **Status: Proposed.** The obligations below become MUST at the completion of the
-> performance track (its final consolidation PR); until then each gate is enforced
-> from the moment the change that makes it true lands, and no obligation is
-> retroactive. Everything else in this document — the model, the measurement
-> contract, the profile schema — is normative now.
+The key words MUST, MUST NOT, SHOULD, and MAY are to be interpreted as described
+in RFC 2119.
+
+> **Status.** The **L0 obligations of §2 are Proposed**: they become MUST at the
+> completion of the performance track (its final consolidation PR); until then
+> each gate is enforced from the moment the change that makes it true lands, and
+> no obligation is retroactive. Everything else — the layer model and its
+> misquoting prohibitions (§1, §5), the measurement contract (§3), and the
+> profile schema (§4) — is **normative now**.
 
 The execution specs already bound **time** (the pump budget and the computable
 worst-case occupancy, [kernel-execution.md](kernel-execution.md) §6) and
@@ -20,18 +24,21 @@ enforcement, and no claim may quote a layer it does not belong to:
 | Layer | Claim | Enforcement |
 |---|---|---|
 | **L0 — portable guarantees** | This section's number-free obligations: quiescence, proportionality | The specification itself; gates in kernel model tests |
-| **L1 — regression canaries** | Exact allocation counters on CoreCLR (e.g. idle-zero, retained-state equality) | Kernel model tests, Release configuration, every CI run |
+| **L1 — regression canaries** | Exact allocation counters on CoreCLR (e.g. idle-zero, retained-state equality) | Kernel model tests; each landed gate runs on every CI run |
 | **L2 — profile numbers** | Measured time/bytes for named operations on a named environment | A versioned `PerformanceConformanceProfile` (§4) |
 | **L3 — host tier** | Behavior on a real engine host (frame budget, GC pressure on Mono/IL2CPP) | Engine integration tier; **unmeasured until the engine adapter exists**, and MUST be labeled so |
 
 ## 2. L0 — portable guarantees
 
-- **Quiescence.** A pump with no processable work, no due deadline, and no
-  unobserved revision performs O(1) kernel work and allocates **zero managed
-  bytes on the kernel owner thread**. Conditional exactly like the deadline
-  promise ([kernel-execution.md](kernel-execution.md) §6): the host-injected
-  clock and any host observer callbacks must themselves be allocation-free on
-  this path.
+- **Quiescence.** A pump with no processable work, no due deadline, no revision
+  advance awaiting wait reevaluation, and no checkpoint due performs O(1)
+  kernel work and allocates **zero managed bytes on the kernel owner thread**.
+  The pump report is inside this obligation: it is a value type under the
+  completed track (until that representation change lands, the interim gate
+  pins its constant size instead of zero). Conditional exactly like the
+  deadline promise ([kernel-execution.md](kernel-execution.md) §6): the
+  host-injected clock and any host observer callbacks must themselves be
+  allocation-free on this path.
 - **Proportionality.** The work and allocation of an operation scale only with
   its **admitted work**, its **due items**, and its **explicitly budgeted
   visited/output size** — never with unrelated retained state. Retained

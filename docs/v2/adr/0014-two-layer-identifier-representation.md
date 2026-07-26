@@ -33,6 +33,10 @@ publication), removing the urgency that motivated the original directive.
   This layer is implemented only if profiling shows identifier lookup as a
   material cost after the representation phase — the current baseline says it is
   not — and under these invariants when it is:
+  - **H0** This layer indexes identifier-keyed internal stores only. `NodeRef`
+    ([semantic-model.md](../spec/semantic-model.md) §3.1) is a distinct public
+    concept — unique within an incarnation and **never reused** — and is not
+    implemented by these reusable slots.
   - **H1** Handles never cross the kernel boundary: not into artifacts, evidence,
     codecs, the wire, trace detail codes, error text, or any diagnostic surface a
     reader could mistake for a stable identifier.
@@ -41,6 +45,11 @@ publication), removing the urgency that motivated the original directive.
     alone detects staleness within one table, never a foreign table's handle.
   - **H3** Generations increment checked; a slot at generation ceiling retires
     permanently. Wrap-around ABA is structurally impossible, not improbable.
+    Retired slots consume capacity against the semantic ceilings of
+    [security-resources.md](../spec/security-resources.md) §5.2, and a table
+    whose ceiling is reached refuses further registration with an answer from
+    the guarantees taxonomy — it never grows unbounded and never recycles a
+    retired slot.
   - **H4** Handles are acquired and released only on the pump thread as portable
     messages commit — producers and decoders never mint handles.
   - **H5** Multi-registration commits are reserve → validate-all → commit with
@@ -50,14 +59,16 @@ publication), removing the urgency that motivated the original directive.
   - **H7** Every kernel structure that can hold a handle across turns (waits,
     pins, retained bases, continuations) revalidates generation at lookup.
   - **H8** Tests must cover cross-table rejection, stale and double release,
-    generation retirement, rollback, re-registration, and retained-memory
+    generation retirement and ceiling refusal, rollback, re-registration,
+    incarnation teardown invalidating the whole table, and retained-memory
     plateau under churn.
-- **Parent re-registration semantics are pinned as string rebind.** `AuthorKey`
-  is *the* persistent identity ([semantic-model.md](../spec/semantic-model.md)
-  §3.2): a node registered under a previously-used key **is** the same logical
-  node, and children whose parent key resolves again resolve to it. This is the
-  current behavior, now documented; a handle layer must preserve it (handles
-  bind records, keys bind identity — a child's parent reference is by key).
+- **Parent re-registration semantics are pinned as string rebind — in the
+  semantic model, not only here.** `AuthorKey` is *the* persistent identity
+  ([semantic-model.md](../spec/semantic-model.md) §3.2, which now states the
+  rule normatively): a node registered under a previously-used key **is** the
+  same logical node, and children whose parent key resolves again resolve to
+  it. A handle layer must preserve it: handles bind records, keys bind
+  identity — a child's parent reference is by key.
 - **No validation bypass across assemblies.** Kernel stores hold the validated
   portable values they were given and re-emit them without reconstruction;
   neither `InternalsVisibleTo` nor an unchecked construction path exists.
