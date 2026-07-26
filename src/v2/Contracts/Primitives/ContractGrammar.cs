@@ -18,9 +18,12 @@ namespace SignalRouter.V2.Contracts
         public const int MaxCodeLength = 128;
 
         /// <summary>
-        /// Validates a free-form identifier: non-null, non-empty, bounded, and free of
-        /// control characters. The grammar is deliberately permissive — author keys and
-        /// request identifiers are caller-chosen — but never unbounded.
+        /// Validates a free-form identifier: non-null, non-empty, bounded, free of
+        /// control characters, and well-formed UTF-16 (no unpaired surrogates — an
+        /// unpaired surrogate cannot round-trip through strict UTF-8 and would
+        /// collide distinct inputs at the codec boundary, ADR 0012). The grammar is
+        /// deliberately permissive — author keys and request identifiers are
+        /// caller-chosen — but never unbounded.
         /// </summary>
         public static string ValidateIdentifier(string value, string parameterName)
         {
@@ -48,6 +51,44 @@ namespace SignalRouter.V2.Contracts
                     throw new ArgumentException(
                         "Identifier must not contain control characters.",
                         parameterName);
+                }
+            }
+
+            ValidateScalarText(value, parameterName);
+            return value;
+        }
+
+        /// <summary>
+        /// Validates that text is a well-formed sequence of Unicode scalar values:
+        /// every surrogate is part of a high/low pair. Free-form values (field
+        /// values) pass through this alone; identifiers additionally reject control
+        /// characters. Unpaired surrogates are rejected because strict UTF-8 cannot
+        /// represent them and lossy substitution would collide distinct inputs
+        /// (ADR 0012).
+        /// </summary>
+        public static string ValidateScalarText(string value, string parameterName)
+        {
+            if (value == null)
+            {
+                throw new ArgumentNullException(parameterName);
+            }
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                if (char.IsHighSurrogate(value[i]))
+                {
+                    if (i + 1 >= value.Length || !char.IsLowSurrogate(value[i + 1]))
+                    {
+                        throw new ArgumentException(
+                            "Text must not contain unpaired surrogates.", parameterName);
+                    }
+
+                    i++;
+                }
+                else if (char.IsLowSurrogate(value[i]))
+                {
+                    throw new ArgumentException(
+                        "Text must not contain unpaired surrogates.", parameterName);
                 }
             }
 

@@ -13,6 +13,12 @@ namespace SignalRouter.V2.Contracts
                 throw new ArgumentException("A completeness entry requires a region.", nameof(region));
             }
 
+            if (reason < CompletenessReason.Virtualized || reason > CompletenessReason.UnsupportedContract)
+            {
+                throw new ArgumentException(
+                    "A completeness entry requires a defined reason.", nameof(reason));
+            }
+
             Region = region;
             Reason = reason;
         }

@@ -52,13 +52,19 @@ namespace SignalRouter.V2.Contracts
     }
 
     /// <summary>
-    /// The injected canonical-state codec seam (ADR 0011): implemented by the
-    /// `Codec.CanonicalState` leaf (item 4), never by the BCL-only kernel. Encoding
-    /// MUST be deterministic — same materialization, same bytes, same `ContentId` —
-    /// and MUST derive the `ContentId` from the canonical bytes (and the basis they
-    /// embed, including the security domain). A runtime configured without a codec
-    /// degrades honestly: unaddressed snapshots, no StateStore retention, no
-    /// timeline, no recording support (observation-state.md §2, §5.1).
+    /// The injected canonical-state codec seam (ADR 0011/0012): implemented by the
+    /// `Codec.CanonicalState` leaf, never by the BCL-only kernel. Encoding MUST be
+    /// deterministic — same materialization, same bytes, same `ContentId` — and MUST
+    /// derive the `ContentId` from the canonical bytes, which embed the projection
+    /// identity (view contract, security domain, scope) and neither temporal leg:
+    /// `RuntimeIncarnationId` and `SourceRevision` stay authoritative in the
+    /// surrounding snapshot/cut tuple, so an unchanged state re-addresses to the
+    /// same `ContentId` (guarantees.md §5.3 blob reuse). For a Contracts-valid
+    /// materialization within the kernel's materialization bounds, `Encode` throws
+    /// no input-derived exception (environmental failures excluded). A runtime
+    /// configured without a codec degrades honestly: unaddressed snapshots, no
+    /// StateStore retention, no timeline, no recording support
+    /// (observation-state.md §2, §5.1).
     /// </summary>
     public interface ICanonicalStateCodec
     {

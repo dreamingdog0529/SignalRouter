@@ -46,11 +46,7 @@ namespace SignalRouter.V2.Contracts
 
         public static FieldValue Of(string value)
         {
-            if (value == null)
-            {
-                throw new ArgumentNullException(nameof(value));
-            }
-
+            ContractGrammar.ValidateScalarText(value, nameof(value));
             return new FieldValue(FieldValueKind.String, value, 0, false, 0);
         }
 
@@ -153,6 +149,9 @@ namespace SignalRouter.V2.Contracts
         public string Name { get; }
 
         public FieldValue Value { get; }
+
+        /// <summary>True for `default(NamedField)`, which bypasses the constructor.</summary>
+        public bool IsDefault => Name == null;
 
         public bool Equals(NamedField other) =>
             string.Equals(Name, other.Name, StringComparison.Ordinal) && Value.Equals(other.Value);
