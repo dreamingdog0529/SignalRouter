@@ -41,8 +41,14 @@ namespace SignalRouter.V2.Kernel
             return registrations.TryGetValue(key, out registration!);
         }
 
-        /// <summary>Pump-thread adoption: document swap + revision advance are one step.</summary>
-        internal bool TryAdopt(StateSourceKey key, SourceDocument document, NodeStore store)
+        /// <summary>
+        /// Pump-thread adoption: the document is validated against its contract
+        /// (declared fields, types, byte ceiling — security-resources.md §5),
+        /// redacted at production (sensitive values never enter the slot,
+        /// semantic-model.md §7), and only then swapped with the revision advance
+        /// in one step. Invalid publications never partially swap.
+        /// </summary>
+        internal bool TryAdopt(StateSourceKey key, SourceDocument document, int approximateBytes, NodeStore store)
         {
             if (!registrations.TryGetValue(key, out var registration) ||
                 registration.SourceClass != StateSourceClass.RevisionBound)
@@ -50,9 +56,62 @@ namespace SignalRouter.V2.Kernel
                 return false;
             }
 
-            documents[key] = document;
+            var descriptor = registration.Descriptor;
+            if (approximateBytes > descriptor.MaxDocumentBytes)
+            {
+                return false;
+            }
+
+            var retained = new List<NamedField>();
+            foreach (var field in document.Fields)
+            {
+                SourceFieldSchema? declared = null;
+                foreach (var schema in descriptor.Fields)
+                {
+                    if (string.Equals(schema.Name, field.Name, StringComparison.Ordinal))
+                    {
+                        declared = schema;
+                        break;
+                    }
+                }
+
+                if (declared == null)
+                {
+                    return false; // undeclared field
+                }
+
+                if (field.Value.Kind != FieldValueKind.Null &&
+                    !Matches(declared.Value.Type, field.Value.Kind))
+                {
+                    return false; // runtime type contradicts the schema
+                }
+
+                if (declared.Value.Sensitivity != Sensitivity.Sensitive)
+                {
+                    retained.Add(field);
+                }
+            }
+
+            documents[key] = new SourceDocument(ValueList<NamedField>.From(retained));
             store.AdvanceRevision();
             return true;
+        }
+
+        private static bool Matches(FieldType declared, FieldValueKind actual)
+        {
+            switch (declared)
+            {
+                case FieldType.String:
+                    return actual == FieldValueKind.String;
+                case FieldType.Integer:
+                    return actual == FieldValueKind.Integer;
+                case FieldType.Boolean:
+                    return actual == FieldValueKind.Boolean;
+                case FieldType.Float:
+                    return actual == FieldValueKind.Float;
+                default:
+                    return false;
+            }
         }
 
         internal bool TryGetDocument(StateSourceKey key, out SourceDocument document)

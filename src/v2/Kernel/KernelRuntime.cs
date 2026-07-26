@@ -33,6 +33,7 @@ namespace SignalRouter.V2.Kernel
             new Dictionary<PredicateContractRef, PredicateDefinition>();
 
         private readonly Queue<Interaction> admitted = new Queue<Interaction>();
+        private readonly List<Interaction> committingEvidence = new List<Interaction>();
         private readonly Dictionary<OperationId, WaitEntry> waits = new Dictionary<OperationId, WaitEntry>();
 
         private Interaction? active;
@@ -158,6 +159,11 @@ namespace SignalRouter.V2.Kernel
                 return true;
             }
 
+            if (TryProgressCommitting())
+            {
+                return true;
+            }
+
             if (tornDown)
             {
                 // The incarnation is over: fence stale submissions and drop stale
@@ -249,6 +255,7 @@ namespace SignalRouter.V2.Kernel
                 (!tornDown && (
                     mailbox.PublicationDepth > 0 ||
                     stalledAdmission != null ||
+                    committingEvidence.Count > 0 ||
                     (!awaitingCompletion && (admitted.Count > 0 || active != null))));
             return new PumpReport(
                 turns,
@@ -351,7 +358,13 @@ namespace SignalRouter.V2.Kernel
                 return;
             }
 
-            switch (coordinator.PrepareAdmissionEvidence(submission.Request))
+            var resolvedTarget = new ResolvedTarget(record.Reference, record.Registration.AuthorKey);
+            var invocation = new CapabilityInvocation(
+                submission.Capability, submission.Target, canonical.Arguments);
+            var order = new LogicalOrder(logicalOrderCounter + 1);
+            switch (coordinator.PrepareAdmissionEvidence(new AdmissionEvidence(
+                submission.Request, order, canonical.Fingerprint, invocation,
+                resolvedTarget, submission.Envelope)))
             {
                 case EvidenceReadiness.Pending:
                     stalledAdmission = message;
@@ -361,11 +374,9 @@ namespace SignalRouter.V2.Kernel
                     return;
             }
 
-            var order = new LogicalOrder(++logicalOrderCounter);
+            logicalOrderCounter++;
             recoveryIndex.RegisterPending(
                 submission.Request, canonical.Fingerprint, submission.Envelope.Principal, order);
-            var invocation = new CapabilityInvocation(
-                submission.Capability, submission.Target, canonical.Arguments);
             var interaction = new Interaction(
                 submission.Request,
                 order,
@@ -436,6 +447,8 @@ namespace SignalRouter.V2.Kernel
                     return StepWaitingCompletion(interaction);
                 case InteractionState.Observing:
                     return StepObserving(interaction);
+                case InteractionState.CommittingEvidence:
+                    return TryCommitEvidence(interaction);
                 default:
                     return false;
             }
@@ -491,7 +504,8 @@ namespace SignalRouter.V2.Kernel
                 return true;
             }
 
-            switch (coordinator.PrepareEffectPermit(interaction.Request))
+            switch (coordinator.PrepareEffectPermit(new PermitEvidence(
+                interaction.Request, interaction.Order, nodeStore.Revision)))
             {
                 case EvidenceReadiness.Pending:
                     return false;
@@ -526,6 +540,7 @@ namespace SignalRouter.V2.Kernel
                 // A throw cannot prove the no-effect-before-adoption rule was
                 // honored: possibly effected, redacted stable code
                 // (kernel-execution.md §5).
+                interaction.EffectStarted = true;
                 Terminate(interaction, TerminalDetails.Faulted(
                     new FaultCode("ExecutorFault"), effectPermitted: true, effectStarted: true));
                 return true;
@@ -549,7 +564,9 @@ namespace SignalRouter.V2.Kernel
 
         private bool StepWaitingCompletion(Interaction interaction)
         {
-            if (interaction.Completion != null)
+            // The after basis is taken only once the fence is real: for
+            // AdapterAcknowledged the completion never implies it (ADR 0010).
+            if (interaction.Completion != null && interaction.Fenced)
             {
                 interaction.State = InteractionState.Observing;
                 return true;
@@ -619,42 +636,92 @@ namespace SignalRouter.V2.Kernel
 
         private void Terminate(Interaction interaction, TerminalDetails details)
         {
+            // The true terminal is committed to the RecoveryIndex first: a recording
+            // failure never rewrites an interaction's real result (guarantees.md §7).
             recoveryIndex.CommitTerminal(interaction.Request, details.Outcome, currentLogicalNow);
+            PublishStatus();
 
-            // An evidence-commit fault fails the recording alone; the true terminal
-            // above is already committed (guarantees.md §7).
-            var evidence = coordinator.CommitTerminalEvidence(interaction.Request, details.Outcome);
-            if (evidence == EvidenceReadiness.Fault)
+            // The ephemeral payload's lifetime ends at the terminal
+            // (kernel-execution.md §3).
+            interaction.Payload = null;
+            interaction.PendingTerminal = new TerminalEvidence(
+                interaction.Request,
+                interaction.Order,
+                details.Outcome,
+                interaction.EffectPermitted,
+                interaction.EffectStarted,
+                details.RejectionReason,
+                details.FaultCode,
+                details.CancellationPhase,
+                details.Postcondition,
+                nodeStore.Revision,
+                interaction.Completion?.Continuations ?? ValueList<ContinuationRequest>.Empty);
+            interaction.State = InteractionState.CommittingEvidence;
+            if (!TryCommitEvidence(interaction) && !ReferenceEquals(active, interaction))
             {
+                committingEvidence.Add(interaction);
+            }
+        }
+
+        /// <summary>
+        /// Retries the E4 obligation. Pending keeps the interaction (and, when
+        /// active, the mutation lane) held; continuations are released only after a
+        /// final answer — children are never admitted before the parent's terminal
+        /// evidence is durable (kernel-execution.md §9).
+        /// </summary>
+        private bool TryCommitEvidence(Interaction interaction)
+        {
+            var answer = coordinator.CommitTerminalEvidence(interaction.PendingTerminal!);
+            if (answer == EvidenceReadiness.Pending)
+            {
+                return false;
+            }
+
+            if (answer == EvidenceReadiness.Fault)
+            {
+                // The recording alone fails; the terminal already stands.
                 Emit(
                     EventKind.TerminalCommitted, EventCausation.OfRequest(interaction.Request),
                     request: interaction.Request, order: interaction.Order,
                     detailCode: "RecordingCommitFault");
             }
 
+            FinishTerminal(interaction);
+            return true;
+        }
+
+        private bool TryProgressCommitting()
+        {
+            for (var i = 0; i < committingEvidence.Count; i++)
+            {
+                var interaction = committingEvidence[i];
+                if (TryCommitEvidence(interaction))
+                {
+                    committingEvidence.RemoveAt(i);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void FinishTerminal(Interaction interaction)
+        {
+            var evidence = interaction.PendingTerminal!;
             Emit(
                 EventKind.TerminalCommitted, EventCausation.OfRequest(interaction.Request),
                 request: interaction.Request, order: interaction.Order,
-                detailCode: details.Outcome.ToString());
-
-            // The ephemeral payload's lifetime ends at the terminal
-            // (kernel-execution.md §3).
-            var continuations = interaction.Completion?.Continuations;
-            interaction.Payload = null;
+                detailCode: evidence.Outcome.ToString());
             interaction.State = InteractionState.Terminal;
             if (ReferenceEquals(active, interaction))
             {
                 active = null;
             }
 
-            PublishStatus();
-
-            // Children are admitted only after the parent terminal is durable
-            // (kernel-execution.md §9).
-            if (continuations != null && continuations.Count > 0 &&
-                details.Outcome != InteractionOutcome.Rejected)
+            if (evidence.Continuations.Count > 0 &&
+                evidence.Outcome != InteractionOutcome.Rejected)
             {
-                AdmitContinuations(interaction, continuations);
+                AdmitContinuations(interaction, evidence.Continuations);
             }
         }
 
@@ -672,8 +739,13 @@ namespace SignalRouter.V2.Kernel
             for (var ordinal = 0; ordinal < continuations.Count; ordinal++)
             {
                 var continuation = continuations[ordinal];
+                // Kernel-namespaced by the parent's LogicalOrder (unique and short
+                // within the incarnation), never derived from the caller-chosen id:
+                // a caller cannot exhaust the identifier length bound, and a dedup
+                // hit on this id is a traced conflict, not a silent swallow.
                 var childRequest = new RequestId(
-                    parent.Request.Value + "-c" + ordinal.ToString(CultureInfo.InvariantCulture));
+                    "continuation-" + parent.Order.Value.ToString(CultureInfo.InvariantCulture) +
+                    "-" + ordinal.ToString(CultureInfo.InvariantCulture));
 
                 SemanticFingerprint childFingerprint;
                 try
@@ -718,6 +790,12 @@ namespace SignalRouter.V2.Kernel
 
         private void ProcessControl(ControlMessage message)
         {
+            if (tornDown)
+            {
+                HandleControlAfterTeardown(message);
+                return;
+            }
+
             switch (message)
             {
                 case CancelMessage cancel:
@@ -750,6 +828,41 @@ namespace SignalRouter.V2.Kernel
                     break;
                 case TeardownMessage:
                     ProcessTeardown();
+                    break;
+            }
+        }
+
+        /// <summary>The incarnation is over: every late control operation gets an explicit answer or trace, never silent state changes.</summary>
+        private void HandleControlAfterTeardown(ControlMessage message)
+        {
+            switch (message)
+            {
+                case RegistrationMessage registration:
+                    registration.Observer?.OnCompleted(RegistrationReceipt.Failure("TornDown"));
+                    break;
+                case ArmWaitMessage arm:
+                    arm.Observer.OnResolved(arm.Operation, PredicateResolution.Faulted);
+                    break;
+                case AssertionMessage assertion:
+                {
+                    var results = new List<PredicateEvaluationResult>();
+                    foreach (var _ in assertion.Batch.Predicates)
+                    {
+                        results.Add(new PredicateEvaluationResult(
+                            PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.Incompleteness),
+                            ValueList<ClauseEvaluation>.Empty));
+                    }
+
+                    assertion.Batch.Observer.OnEvaluated(
+                        ValueList<PredicateEvaluationResult>.From(results));
+                    break;
+                }
+
+                case FenceMessage fence:
+                    EmitProtocolViolation(fence.Permit, "FenceRejected");
+                    break;
+                case CompletionMessage completion:
+                    EmitProtocolViolation(completion.Completion.Permit, "CompletionRejected");
                     break;
             }
         }
@@ -803,7 +916,21 @@ namespace SignalRouter.V2.Kernel
             }
 
             active.Completion = completion;
-            active.Fenced = true; // completion implies the fence for fence-entailing profiles
+            if (FenceEntailedBy(active.Descriptor.CompletionProfile))
+            {
+                active.Fenced = true;
+            }
+        }
+
+        /// <summary>
+        /// Completion implies an unreported fence only for profiles whose evidence
+        /// entails "no further mutation after completion"; AdapterAcknowledged@1
+        /// never does (adapter-conformance.md §3/§4, ADR 0010).
+        /// </summary>
+        private static bool FenceEntailedBy(CompletionProfileRef profile)
+        {
+            var id = profile.Id.Value;
+            return id == "Applied" || id == "FrameCommitted" || id == "PostconditionSatisfied";
         }
 
         private bool IsLivePermit(EffectPermitToken permit)
@@ -896,6 +1023,15 @@ namespace SignalRouter.V2.Kernel
             {
                 Emit(EventKind.PredicateResolved, EventCausation.None, operation: message.Operation);
                 message.Observer.OnResolved(message.Operation, PredicateResolution.Satisfied);
+                return;
+            }
+
+            // A wait armed with an already-passed deadline resolves immediately;
+            // storing it would leave the observer unresolved on an idle kernel.
+            if (message.TimeoutAtLogicalTime <= currentLogicalNow)
+            {
+                Emit(EventKind.PredicateResolved, EventCausation.None, operation: message.Operation);
+                message.Observer.OnResolved(message.Operation, PredicateResolution.TimedOut);
                 return;
             }
 
@@ -1007,7 +1143,9 @@ namespace SignalRouter.V2.Kernel
             tornDown = true;
             active = null;
             admitted.Clear();
+            committingEvidence.Clear();
             stalledAdmission = null;
+            executor?.Detach();
 
             foreach (var stranded in recoveryIndex.DrainPending())
             {
@@ -1029,12 +1167,13 @@ namespace SignalRouter.V2.Kernel
         private void AdoptPublication(SourcePublicationMessage message)
         {
             var publication = message.Publication;
-            if (!sourceTable.TryAdopt(publication.Source, publication.Document, nodeStore))
+            if (!sourceTable.TryAdopt(
+                publication.Source, publication.Document, message.ApproximateBytes, nodeStore))
             {
                 Emit(
                     new EventKind("PublicationRejected"),
                     publication.Causation,
-                    detailCode: "UnknownOrSampledSource");
+                    detailCode: "ContractViolationOrUnknownSource");
                 return;
             }
 
@@ -1045,9 +1184,12 @@ namespace SignalRouter.V2.Kernel
 
             // A publication caused outside the active controlled work that lands
             // during a recorded interaction's effect window participates in
-            // contamination (observation-state.md §7.2).
+            // contamination (observation-state.md §7.2). Only the active request's
+            // own causation is exempt — another request's causation is still
+            // external to THIS controlled work.
             if (active != null && active.EffectStarted &&
-                publication.Causation.Kind != EventCausationKind.Request)
+                !(publication.Causation.Kind == EventCausationKind.Request &&
+                    publication.Causation.Request.Equals(active.Request)))
             {
                 active.Contaminated = true;
                 Emit(
@@ -1122,6 +1264,7 @@ namespace SignalRouter.V2.Kernel
             Invoking,
             WaitingCompletion,
             Observing,
+            CommittingEvidence,
             Terminal,
         }
 
@@ -1185,6 +1328,8 @@ namespace SignalRouter.V2.Kernel
             internal bool CancellationDelivered { get; set; }
 
             internal bool Contaminated { get; set; }
+
+            internal TerminalEvidence? PendingTerminal { get; set; }
         }
 
         private sealed class WaitEntry
@@ -1223,22 +1368,34 @@ namespace SignalRouter.V2.Kernel
 
             internal InteractionOutcome Outcome { get; }
 
+            internal RejectionReason? RejectionReason { get; private set; }
+
+            internal FaultCode? FaultCode { get; private set; }
+
+            internal CancellationPhase? CancellationPhase { get; private set; }
+
+            internal PostconditionResult? Postcondition { get; private set; }
+
             internal static TerminalDetails Succeeded(PostconditionResult? postcondition) =>
-                new TerminalDetails(InteractionOutcome.Succeeded);
+                new TerminalDetails(InteractionOutcome.Succeeded) { Postcondition = postcondition };
 
             internal static TerminalDetails Rejected(RejectionReason reason) =>
-                new TerminalDetails(InteractionOutcome.Rejected);
+                new TerminalDetails(InteractionOutcome.Rejected) { RejectionReason = reason };
 
             internal static TerminalDetails Faulted(
                 FaultCode code,
                 bool effectPermitted,
                 bool effectStarted,
                 PostconditionResult? postcondition = null) =>
-                new TerminalDetails(InteractionOutcome.Faulted);
+                new TerminalDetails(InteractionOutcome.Faulted)
+                {
+                    FaultCode = code,
+                    Postcondition = postcondition,
+                };
 
             internal static TerminalDetails Cancelled(
                 CancellationPhase phase, string? disposition = null) =>
-                new TerminalDetails(InteractionOutcome.Cancelled);
+                new TerminalDetails(InteractionOutcome.Cancelled) { CancellationPhase = phase };
         }
 
         // ── Facades ──────────────────────────────────────────────────────────

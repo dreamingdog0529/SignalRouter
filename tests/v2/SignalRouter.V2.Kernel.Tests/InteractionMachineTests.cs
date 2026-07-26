@@ -193,12 +193,31 @@ internal sealed class ScriptedCoordinator : IEvidenceCoordinator
 
     internal EvidenceReadiness TerminalAnswer { get; set; } = EvidenceReadiness.Ready;
 
-    public EvidenceReadiness PrepareAdmissionEvidence(RequestId request) => AdmissionAnswer;
+    internal System.Collections.Generic.List<AdmissionEvidence> Admissions { get; } = new();
 
-    public EvidenceReadiness PrepareEffectPermit(RequestId request) => PermitAnswer;
+    internal System.Collections.Generic.List<TerminalEvidence> Terminals { get; } = new();
 
-    public EvidenceReadiness CommitTerminalEvidence(RequestId request, InteractionOutcome outcome) =>
-        TerminalAnswer;
+    public EvidenceReadiness PrepareAdmissionEvidence(AdmissionEvidence evidence)
+    {
+        if (AdmissionAnswer == EvidenceReadiness.Ready)
+        {
+            Admissions.Add(evidence);
+        }
+
+        return AdmissionAnswer;
+    }
+
+    public EvidenceReadiness PrepareEffectPermit(PermitEvidence evidence) => PermitAnswer;
+
+    public EvidenceReadiness CommitTerminalEvidence(TerminalEvidence evidence)
+    {
+        if (TerminalAnswer == EvidenceReadiness.Ready)
+        {
+            Terminals.Add(evidence);
+        }
+
+        return TerminalAnswer;
+    }
 }
 
 /// <summary>Records registration receipts.</summary>

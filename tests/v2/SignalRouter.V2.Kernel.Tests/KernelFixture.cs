@@ -149,6 +149,7 @@ internal sealed class KernelFixture
         int perSourcePending = 16,
         PredicateDefinition? invokePrecondition = null,
         PredicateDefinition? invokePostcondition = null,
+        CompletionProfileRef? invokeProfile = null,
         IEvidenceCoordinator? coordinator = null,
         bool start = true)
     {
@@ -176,7 +177,8 @@ internal sealed class KernelFixture
         }));
 
         Runtime.Bootstrap.RegisterCapabilityContract(new CapabilityContractDescriptor(
-            Invoke, ArgumentSchema.Empty, invokePrecondition, Applied, invokePostcondition));
+            Invoke, ArgumentSchema.Empty, invokePrecondition,
+            invokeProfile ?? Applied, invokePostcondition));
 
         SaveNode = Runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("save"),

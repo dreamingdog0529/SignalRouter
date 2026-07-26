@@ -104,7 +104,12 @@ namespace SignalRouter.V2.Kernel
                         record.Registration.Exposure);
                 }
 
-                if (record.Registration.Parent.HasValue)
+                // Hidden children never contribute to visible counts: a count over
+                // nodes/<parent>/children must not reveal the existence or number
+                // of nodes the domain may not see (exposure equivalence,
+                // security-resources.md §4).
+                if (record.Registration.Parent.HasValue &&
+                    record.Registration.Exposure.IsVisibleTo(domain))
                 {
                     var parentKey = record.Registration.Parent.Value.Value;
                     childCounts.TryGetValue(parentKey, out var count);

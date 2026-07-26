@@ -59,8 +59,13 @@ namespace SignalRouter.V2.Kernel
                 events.Enqueue(semanticEvent);
                 approximateBytes += EstimateBytes(semanticEvent);
 
+                // Evict to one below the bounds so the gap marker itself never
+                // pushes the ring past its configured capacity or byte ceiling.
                 var droppedNow = 0;
-                while (events.Count > capacity || approximateBytes > byteCapacity)
+                var gapBytes = 96;
+                var overLimit = events.Count > capacity || approximateBytes > byteCapacity;
+                while (overLimit &&
+                    (events.Count > capacity - 1 || approximateBytes > byteCapacity - gapBytes))
                 {
                     if (events.Count == 1)
                     {

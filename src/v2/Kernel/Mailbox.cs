@@ -45,12 +45,17 @@ namespace SignalRouter.V2.Kernel
             }
         }
 
-        /// <summary>Fence/completion messages of admitted work: reserved accounting, never starved by control traffic.</summary>
+        /// <summary>
+        /// Fence/completion messages of admitted work: reserved accounting, never
+        /// starved by control traffic. The bound counts outstanding operations;
+        /// each operation reports at most one fence and exactly one completion, so
+        /// the message capacity is twice the operation bound.
+        /// </summary>
         internal void EnqueuePostFence(ControlMessage message)
         {
             lock (gate)
             {
-                if (postFence.Count >= options.MailboxMaxOutstandingPostFenceOperations)
+                if (postFence.Count >= options.MailboxMaxOutstandingPostFenceOperations * 2)
                 {
                     throw new KernelFaultException(
                         "Post-fence obligation overflow is a kernel fault; the bound tracks admitted work.");

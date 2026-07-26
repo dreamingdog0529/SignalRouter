@@ -86,12 +86,12 @@ public sealed class CancellationAndContinuationTests
         fixture.PumpUntilIdle();
 
         Assert.That(fixture.Query("r1"), Is.EqualTo(QueryAnswer.Terminal(InteractionOutcome.Succeeded)));
-        Assert.That(fixture.Query("r1-c0").Kind, Is.EqualTo(QueryAnswerKind.Pending));
+        Assert.That(fixture.Query("continuation-1-0").Kind, Is.EqualTo(QueryAnswerKind.Pending));
 
         // The child is an ordinary admission with its own place in LogicalOrder.
         var childAdmission = fixture.Runtime.Trace.Snapshot()
             .Where(e => e.Kind == EventKind.Admitted)
-            .Single(e => e.Request!.Value.Equals(new RequestId("r1-c0")));
+            .Single(e => e.Request!.Value.Equals(new RequestId("continuation-1-0")));
         Assert.That(childAdmission.Order!.Value, Is.EqualTo(new LogicalOrder(2)));
         Assert.That(
             childAdmission.Causation,
@@ -100,7 +100,7 @@ public sealed class CancellationAndContinuationTests
         fixture.Executor.CompleteLast(EffectResolution.Succeeded(Applied()));
         fixture.PumpUntilIdle();
         Assert.That(
-            fixture.Query("r1-c0"),
+            fixture.Query("continuation-1-0"),
             Is.EqualTo(QueryAnswer.Terminal(InteractionOutcome.Succeeded)));
     }
 
@@ -125,7 +125,7 @@ public sealed class CancellationAndContinuationTests
             ValueList<ContinuationRequest>.From(tooMany));
         fixture.PumpUntilIdle();
 
-        Assert.That(fixture.Query("r1-c0").Kind, Is.EqualTo(QueryAnswerKind.OutcomeUnknown));
+        Assert.That(fixture.Query("continuation-1-0").Kind, Is.EqualTo(QueryAnswerKind.OutcomeUnknown));
         Assert.That(fixture.TraceKinds(), Has.Some.Contains("ContinuationLimitExceeded"));
     }
 }

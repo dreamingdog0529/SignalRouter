@@ -148,6 +148,7 @@ public sealed class PumpGatingAndLifecycleTests
             KernelFixture.LabelExists, KernelFixture.Agent, timeoutAtLogicalTime: 1000, waitObserver);
         fixture.PumpUntilIdle();
         var oldPermit = fixture.Executor.Requests.Single().Permit;
+        var staleSink = fixture.Executor.Sink; // a detached adapter holding on to its old reference
 
         fixture.Runtime.Control.TearDownIncarnation();
         fixture.PumpUntilIdle();
@@ -162,7 +163,7 @@ public sealed class PumpGatingAndLifecycleTests
         Assert.That(late.Rejected.Single().Reason, Is.EqualTo(RejectionReason.IncarnationMismatch));
 
         // A completion carrying the old permit is rejected and traced, never applied.
-        fixture.Executor.Sink.ReportCompletion(new EffectCompletion(
+        staleSink.ReportCompletion(new EffectCompletion(
             oldPermit, EffectResolution.Succeeded(Applied())));
         fixture.Pump();
         Assert.That(fixture.Query("r1").Kind, Is.EqualTo(QueryAnswerKind.OutcomeUnknown));
