@@ -59,6 +59,8 @@ namespace SignalRouter.V2.Kernel
         private readonly Dictionary<RequestId, TerminalEntry> terminals =
             new Dictionary<RequestId, TerminalEntry>();
 
+        private readonly DeadlineIndex<RequestId> terminalDeadlines = new DeadlineIndex<RequestId>();
+
         private readonly int pendingCapacity;
         private readonly int terminalCapacity;
         private readonly long retention;
@@ -96,37 +98,35 @@ namespace SignalRouter.V2.Kernel
             }
 
             pending.Remove(request);
+            if (terminals.ContainsKey(request))
+            {
+                // Defensive: an overwrite (impossible under admission dedup)
+                // must not leave a stale deadline behind.
+                terminalDeadlines.Remove(request);
+            }
+
             terminals[request] = new TerminalEntry(
                 entry.Fingerprint, entry.Principal, outcome, nowLogicalTime + retention);
+            terminalDeadlines.Add(request, nowLogicalTime + retention);
         }
 
         /// <summary>
         /// Terminals expire only by retention, evaluated at pump boundaries
         /// (ADR 0010). Answers whether any entry expired, so the caller
         /// republishes the status snapshot only when the status actually changed.
+        /// Deadline-indexed: a pump with nothing due peeks once instead of
+        /// scanning every retained terminal (performance-track finding A4).
         /// </summary>
         internal bool ExpireTerminals(long nowLogicalTime)
         {
-            List<RequestId>? expired = null;
-            foreach (var pair in terminals)
-            {
-                if (pair.Value.ExpiresAtLogicalTime <= nowLogicalTime)
-                {
-                    (expired ??= new List<RequestId>()).Add(pair.Key);
-                }
-            }
-
-            if (expired == null)
-            {
-                return false;
-            }
-
-            foreach (var request in expired)
+            var any = false;
+            while (terminalDeadlines.TryPopExpired(nowLogicalTime, out var request))
             {
                 terminals.Remove(request);
+                any = true;
             }
 
-            return true;
+            return any;
         }
 
         /// <summary>Incarnation teardown: strand every pending entry (guarantees.md §7).</summary>
