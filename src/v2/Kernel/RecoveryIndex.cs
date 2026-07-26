@@ -100,8 +100,12 @@ namespace SignalRouter.V2.Kernel
                 entry.Fingerprint, entry.Principal, outcome, nowLogicalTime + retention);
         }
 
-        /// <summary>Terminals expire only by retention, evaluated at pump boundaries (ADR 0010).</summary>
-        internal void ExpireTerminals(long nowLogicalTime)
+        /// <summary>
+        /// Terminals expire only by retention, evaluated at pump boundaries
+        /// (ADR 0010). Answers whether any entry expired, so the caller
+        /// republishes the status snapshot only when the status actually changed.
+        /// </summary>
+        internal bool ExpireTerminals(long nowLogicalTime)
         {
             List<RequestId>? expired = null;
             foreach (var pair in terminals)
@@ -112,13 +116,17 @@ namespace SignalRouter.V2.Kernel
                 }
             }
 
-            if (expired != null)
+            if (expired == null)
             {
-                foreach (var request in expired)
-                {
-                    terminals.Remove(request);
-                }
+                return false;
             }
+
+            foreach (var request in expired)
+            {
+                terminals.Remove(request);
+            }
+
+            return true;
         }
 
         /// <summary>Incarnation teardown: strand every pending entry (guarantees.md §7).</summary>
