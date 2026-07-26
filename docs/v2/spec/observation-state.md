@@ -63,7 +63,7 @@ A materialized snapshot is identified by:
 ObservationSnapshot {
   RuntimeIncarnationId
   SourceRevision
-  ViewContractId@version
+  ViewContractId@version · SecurityDomain · Scope
   ContentId
   CompletenessMap
 }
@@ -71,7 +71,14 @@ ObservationSnapshot {
 
 `ContentId` alone never identifies an observation semantically; the tuple does. Two
 snapshots are comparable only under the same `ViewContract` (or an explicit migration,
-[recording-replay.md](recording-replay.md) §5).
+[recording-replay.md](recording-replay.md) §5). The basis legs split by role: the
+projection identity — view contract, security domain, scope — is embedded in the
+canonical payload and therefore participates in the `ContentId`; the temporal legs —
+`RuntimeIncarnationId` and `SourceRevision` — are authoritative in this tuple and MUST
+NOT influence the `ContentId`, so an unchanged visible state re-materialized at a
+later revision re-addresses to the same blob (the checkpoint-reuse premise of
+[guarantees.md](guarantees.md) §5.3;
+[adr 0012](../adr/0012-canonical-state-representation-and-digest-policy.md)).
 
 **Unaddressed snapshots.** A runtime configured without the canonical-state codec
 (§5.1) produces snapshots whose `ContentId` leg is explicitly absent. An unaddressed
@@ -206,10 +213,19 @@ The runtime-owned `StateStore` core is an in-memory, content-addressed **cache**
   without re-encoding. A runtime configured without the codec serves views, pinned
   reads, and predicate evaluation as *unaddressed* snapshots (§2), but retains no
   blobs, produces no timeline, and cannot support recording — honest degradation,
-  never placeholder identifiers. Cross-domain concealment is enforced by the store's
-  domain-keyed lookup and by release-surface authorization; whether the codec
-  additionally folds a keyed secret into digest production is a `Codec.CanonicalState`
-  decision (adr 0011, open point).
+  never placeholder identifiers. The canonical payload embeds the **projection
+  identity** — view contract, security domain, and scope — and neither temporal leg
+  (`RuntimeIncarnationId`, `SourceRevision`): those stay authoritative in the
+  surrounding snapshot/cut tuple (§2), which is what lets an unchanged state
+  re-materialize to the same `ContentId` for checkpoint-blob reuse
+  ([guarantees.md](guarantees.md) §5.3). Digest production folds in no keyed secret —
+  any authorized reader verifies a blob against its `ContentId` portably and offline,
+  with nothing but the bytes ([semantic-model.md](semantic-model.md) §5,
+  [adr 0012](../adr/0012-canonical-state-representation-and-digest-policy.md));
+  cross-domain concealment is enforced by the store's domain-keyed lookup, by
+  release-surface authorization, and by the rule that every surface exposing a
+  `ContentId` demands the same authorization as reading its blob
+  ([security-resources.md](security-resources.md) §4).
 - **Pins are reference counts** keyed by `(blob, lease owner)`, where the owner is a
   discriminated lease identity: a snapshot-read operation, an interaction's retained
   after-basis (its `RequestId`), a recording, or the reserved timeline owner.
