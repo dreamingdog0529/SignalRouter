@@ -116,6 +116,148 @@ public sealed class CheckpointTimelineTests
         Assert.That(entries[^1].AfterGap, Is.True, "the resynchronizing checkpoint carries the mark");
     }
 
+    private sealed class ThrowingCodec : ICanonicalStateCodec
+    {
+        public CanonicalStateResult Encode(ObservationMaterialization materialization) =>
+            throw new System.InvalidOperationException("codec exploded");
+    }
+
+    [Test]
+    public void AThrowingCodecNeverSuppressesTheTrueTerminal()
+    {
+        // codex review: the terminal is committed before the after-basis capture,
+        // so a codec failure degrades the recording alone (guarantees.md §7).
+        var fixture = new KernelFixture(codec: new ThrowingCodec());
+        fixture.Submit("r1");
+        fixture.PumpUntilIdle();
+        fixture.Executor.CompleteLast(EffectResolution.Succeeded(new CompletionEvidence(
+            KernelFixture.Applied, CompletionEvidenceKind.Applied, default)));
+        fixture.PumpUntilIdle();
+
+        Assert.That(fixture.Query("r1"), Is.EqualTo(QueryAnswer.Terminal(InteractionOutcome.Succeeded)));
+        Assert.That(fixture.TraceKinds(), Has.Some.Contains("AfterBasisUnavailable"));
+        Assert.That(
+            fixture.Runtime.RecordObservation.TryGetAfterMaterialization(
+                new RequestId("r1"), out _),
+            Is.False, "no basis was retained — honest absence, never a crash");
+    }
+
+    [Test]
+    public void TheFeedNeverRunsPastThePumpDeadlineAndRetriesLater()
+    {
+        // codex review: a deadline-exhausted pump must not materialize or invoke
+        // the codec; the unobserved revision is retried at the next pump.
+        var fixture = new KernelFixture(codec: new TestCanonicalStateCodec());
+        fixture.PumpUntilIdle();
+        var baseline = fixture.Runtime.Timeline.Snapshot(Recorder).Count;
+
+        fixture.PublishInventory(1);
+        fixture.Clock.Value = 10;
+        fixture.Runtime.Pump(new PumpBudget(
+            maxTurns: 64, deadline: 5, new LogicalTime(fixture.LogicalNow), FramePhase.Update));
+        Assert.That(
+            fixture.Runtime.Timeline.Snapshot(Recorder).Count, Is.EqualTo(baseline),
+            "no checkpoint work past the deadline");
+
+        fixture.PumpUntilIdle();
+        Assert.That(
+            fixture.Runtime.Timeline.Snapshot(Recorder).Count, Is.GreaterThan(baseline),
+            "the unobserved revision is checkpointed at the next pump without another mutation");
+    }
+
+    [Test]
+    public void ASkippedRevisionIsRetriedWithoutAnotherMutation()
+    {
+        // codex review: a budget-starved feed must not mark the revision observed;
+        // the very next pump retries and the checkpoint carries the gap mark.
+        var view = new ViewContractRef(new ViewContractId("agent-standard"), new ContractVersion(1, 0));
+        var fixture = new KernelFixture(
+            codec: new TestCanonicalStateCodec(), observationBudgetNodes: 1, start: false);
+        fixture.Runtime.Bootstrap.RegisterViewContract(new ViewContractDescriptor(
+            view, ViewFamily.Agent, "root",
+            maxNodes: 256, maxFieldBytes: 4096, includeKeylessNodes: false));
+        fixture.Runtime.Start(fixture.Executor);
+        fixture.PublishInventory(1);
+        fixture.PumpUntilIdle();
+        var baseline = fixture.Runtime.Timeline.Snapshot(Recorder).Count;
+
+        var observer = new RecordingSnapshotObserver();
+        fixture.Runtime.Control.RequestSnapshot(view, KernelFixture.Agent, "root", observer);
+        fixture.PublishInventory(2);
+        fixture.Pump();
+        Assert.That(fixture.Runtime.Timeline.Snapshot(Recorder).Count, Is.EqualTo(baseline));
+
+        fixture.Pump();
+        var entries = fixture.Runtime.Timeline.Snapshot(Recorder);
+        Assert.That(entries.Count, Is.GreaterThan(baseline), "retried against the fresh budget");
+        Assert.That(entries[^1].AfterGap, Is.True);
+    }
+
+    [Test]
+    public void MixedCausesInOnePumpNeverMisattributeASourceAdvance()
+    {
+        // codex review: a zero-effect rejection terminating in the same pump as a
+        // source publication must not lend its order to the source-only checkpoint.
+        var failingPrecondition = new PredicateDefinition(
+            ValueList<PredicateClause>.From(new[]
+            {
+                new PredicateClause(new ClauseId("c0"), new ComparisonExpression(
+                    new FieldPath("nodes/save/attributes/label"),
+                    ComparisonOperator.Eq,
+                    PredicateOperand.Of("NeverThisValue"))),
+            }));
+        var fixture = new KernelFixture(
+            codec: new TestCanonicalStateCodec(), invokePrecondition: failingPrecondition);
+        fixture.PumpUntilIdle();
+
+        fixture.Submit("r1");
+        fixture.PublishInventory(1);
+        fixture.PumpUntilIdle();
+
+        Assert.That(fixture.Query("r1"), Is.EqualTo(QueryAnswer.Terminal(InteractionOutcome.Rejected)));
+        var entries = fixture.Runtime.Timeline.Snapshot(Recorder);
+        Assert.That(
+            entries[^1].CausingOrder, Is.Null,
+            "the advance was the publication's; the rejected interaction mutated nothing");
+    }
+
+    [Test]
+    public void ASelfEvictedCheckpointIsAGapNotASilentSuccess()
+    {
+        // codex review: an entry larger than the retention bound evicts itself;
+        // the feed must record a gap and the next retainable checkpoint must
+        // carry the mark.
+        var fixture = new KernelFixture(
+            codec: new TestCanonicalStateCodec(), timelineRetentionBytes: 450);
+        fixture.PumpUntilIdle();
+        Assert.That(fixture.Runtime.Timeline.Snapshot(Recorder), Is.Not.Empty, "the small world fits");
+
+        fixture.Runtime.Registry.UpdateAttributes(
+            fixture.SaveNode,
+            ValueList<NodeAttribute>.From(new[]
+            {
+                new NodeAttribute(
+                    "label", FieldValue.Of(new string('x', 600)), Sensitivity.Standard),
+            }),
+            observer: null);
+        fixture.PumpUntilIdle();
+        var afterBig = fixture.Runtime.Timeline.Snapshot(Recorder);
+        Assert.That(
+            afterBig.All(entry => entry.Revision.Value < 100) && afterBig.Count <= 1, Is.True,
+            "the oversized checkpoint never pretends to be retained");
+
+        fixture.Runtime.Registry.UpdateAttributes(
+            fixture.SaveNode,
+            ValueList<NodeAttribute>.From(new[]
+            {
+                new NodeAttribute("label", FieldValue.Of("small"), Sensitivity.Standard),
+            }),
+            observer: null);
+        fixture.PumpUntilIdle();
+        var entries = fixture.Runtime.Timeline.Snapshot(Recorder);
+        Assert.That(entries[^1].AfterGap, Is.True, "the resynchronizing checkpoint carries the mark");
+    }
+
     [Test]
     public void RetentionKeepsTheNewestEntriesOnly()
     {

@@ -239,6 +239,7 @@ internal sealed class KernelFixture
         int stateStoreMaxBlobBytes = 1024 * 1024,
         long stateStoreMaxTotalBytes = 64L * 1024 * 1024,
         int timelineRetentionEntries = 128,
+        long timelineRetentionBytes = 8L * 1024 * 1024,
         bool start = true)
     {
         var options = new KernelOptions(
@@ -264,7 +265,8 @@ internal sealed class KernelFixture
             canonicalStateCodec: codec,
             stateStoreMaxBlobBytes: stateStoreMaxBlobBytes,
             stateStoreMaxTotalBytes: stateStoreMaxTotalBytes,
-            timelineRetentionEntries: timelineRetentionEntries);
+            timelineRetentionEntries: timelineRetentionEntries,
+            timelineRetentionBytes: timelineRetentionBytes);
         Runtime = new KernelRuntime(new RuntimeIncarnationId("incarnation-1"), options, coordinator);
 
         var visibleToAll = new ExposurePolicy(ValueList<SecurityDomainId>.From(new[]

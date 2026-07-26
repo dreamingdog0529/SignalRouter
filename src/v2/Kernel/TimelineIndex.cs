@@ -108,18 +108,30 @@ namespace SignalRouter.V2.Kernel
             }
         }
 
-        /// <summary>Pump thread: the entry's blob is already retained and pinned by the timeline owner.</summary>
-        internal void Append(TimelineEntry entry, int blobBytes)
+        /// <summary>
+        /// Pump thread: the entry's blob is already retained and pinned by the
+        /// timeline owner. Answers false when the entry could not be retained even
+        /// after evicting everything older (it exceeds the retention bound by
+        /// itself) — the caller records a gap instead of pretending retention.
+        /// </summary>
+        internal bool Append(TimelineEntry entry, int blobBytes)
         {
             lock (gate)
             {
-                retained.Add(new Retained(entry, blobBytes));
+                var added = new Retained(entry, blobBytes);
+                retained.Add(added);
                 retainedBytes += blobBytes;
                 while (retained.Count > options.TimelineRetentionEntries ||
                     retainedBytes > options.TimelineRetentionBytes)
                 {
                     EvictOldestLocked();
+                    if (retained.Count == 0)
+                    {
+                        return false;
+                    }
                 }
+
+                return retained.Contains(added);
             }
         }
 

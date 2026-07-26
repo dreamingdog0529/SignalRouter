@@ -93,6 +93,29 @@ public sealed class RecordObservationServicesTests
     }
 
     [Test]
+    public void PinnedSnapshotsAreAddressedWhenTheCodecIsPresent()
+    {
+        // codex review: the ordinary snapshot path must encode, retain, and pin
+        // under the operation's lease — the codec-present configuration is exactly
+        // the one meant to produce addressed snapshots.
+        var agentView = new ViewContractRef(new ViewContractId("agent-standard"), new ContractVersion(1, 0));
+        var fixture = new KernelFixture(codec: new TestCanonicalStateCodec(), start: false);
+        fixture.Runtime.Bootstrap.RegisterViewContract(new ViewContractDescriptor(
+            agentView, ViewFamily.Agent, "root",
+            maxNodes: 256, maxFieldBytes: 4096, includeKeylessNodes: false));
+        fixture.Runtime.Start(fixture.Executor);
+
+        var observer = new RecordingSnapshotObserver();
+        var operation = fixture.Runtime.Control.RequestSnapshot(
+            agentView, KernelFixture.Agent, "root", observer);
+        fixture.PumpUntilIdle();
+        Assert.That(observer.Pinned.Single().Snapshot.Snapshot.IsAddressed, Is.True);
+
+        fixture.Runtime.Control.ReleaseSnapshot(operation);
+        fixture.PumpUntilIdle();
+    }
+
+    [Test]
     public void LeasesAreStructuredAndIdempotent()
     {
         var fixture = BuildWithRecordView(new TestCanonicalStateCodec());
