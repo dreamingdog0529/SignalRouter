@@ -626,15 +626,24 @@ enum SignalRouter.V2.Contracts.FieldLookupKind
 readonly struct SignalRouter.V2.Contracts.FieldPath
   implements System.IEquatable<SignalRouter.V2.Contracts.FieldPath>
   property IsDefault : System.Boolean { public get; }
-  property Segments : System.Collections.Generic.IReadOnlyList<System.String> { public get; }
+  property SegmentCount : System.Int32 { public get; }
+  property Segments : SignalRouter.V2.Contracts.FieldPath+SegmentEnumerable { public get; }
   property Value : System.String { public get; }
   public ctor(System.String value)
   public method Equals(SignalRouter.V2.Contracts.FieldPath other) : System.Boolean
+  public method IsSegmentPrefixOf(SignalRouter.V2.Contracts.FieldPath path) : System.Boolean
   public operator op_Equality(SignalRouter.V2.Contracts.FieldPath left, SignalRouter.V2.Contracts.FieldPath right) : System.Boolean
   public operator op_Inequality(SignalRouter.V2.Contracts.FieldPath left, SignalRouter.V2.Contracts.FieldPath right) : System.Boolean
   public override method Equals(System.Object? obj) : System.Boolean
   public override method GetHashCode() : System.Int32
   public override method ToString() : System.String
+
+ref readonly struct SignalRouter.V2.Contracts.FieldPath+SegmentEnumerable
+  public method GetEnumerator() : SignalRouter.V2.Contracts.FieldPath+SegmentEnumerator
+
+ref struct SignalRouter.V2.Contracts.FieldPath+SegmentEnumerator
+  property Current : System.ReadOnlySpan<System.Char> { public get; }
+  public method MoveNext() : System.Boolean
 
 readonly struct SignalRouter.V2.Contracts.FieldSchema
   implements System.IEquatable<SignalRouter.V2.Contracts.FieldSchema>

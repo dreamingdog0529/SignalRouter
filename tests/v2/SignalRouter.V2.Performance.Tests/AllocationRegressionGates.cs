@@ -91,6 +91,83 @@ public sealed class AllocationRegressionGates
     }
 
     /// <summary>
+    /// P3a (finding B2): a materialization lookup — path parse, node/source
+    /// binary search, attribute/field match, completeness longest-prefix — is
+    /// allocation-free. Before the fix every lookup split the path (and every
+    /// completeness consultation re-split it per entry).
+    /// </summary>
+    [Test]
+    public void MaterializationLookupAllocatesZero()
+    {
+        var world = BenchWorld.Create(nodeCount: 512, withCodec: true);
+        world.VerifySnapshotSucceeds(expectedNodes: 512);
+        var observer = new CollectingSnapshotObserver();
+        world.Runtime.Control.RequestSnapshot(
+            BenchWorld.AgentView, BenchWorld.Agent, "root", observer);
+        world.PumpUntilIdle();
+        var lookup = observer.Last!.Lookup;
+        var present = new SignalRouter.V2.Contracts.FieldPath("nodes/node-00300/attributes/label");
+        var missing = new SignalRouter.V2.Contracts.FieldPath("nodes/never-registered/attributes/label");
+        var sourceField = new SignalRouter.V2.Contracts.FieldPath("sources/inventory/count");
+        var children = new SignalRouter.V2.Contracts.FieldPath("nodes/node-00300/children");
+
+        // A separate materialization with populated completeness entries: the
+        // longest-prefix loop must also be allocation-free, and the snapshot
+        // world above is verified complete, so it never exercises that loop.
+        var incompleteLookup = new SignalRouter.V2.Contracts.MaterializationLookup(
+            new SignalRouter.V2.Contracts.ObservationMaterialization(
+                new SignalRouter.V2.Contracts.ObservationBasis(
+                    new SignalRouter.V2.Contracts.RuntimeIncarnationId("gate-incarnation"),
+                    new SignalRouter.V2.Contracts.SourceRevision(1),
+                    BenchWorld.AgentView,
+                    BenchWorld.AgentDomain,
+                    "root"),
+                SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.MaterializedNode>.Empty,
+                SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.MaterializedSource>.Empty,
+                SignalRouter.V2.Contracts.CompletenessMap.From(
+                    new[]
+                    {
+                        new SignalRouter.V2.Contracts.CompletenessEntry(
+                            new SignalRouter.V2.Contracts.FieldPath("nodes/virtual"),
+                            SignalRouter.V2.Contracts.CompletenessReason.Virtualized),
+                        new SignalRouter.V2.Contracts.CompletenessEntry(
+                            new SignalRouter.V2.Contracts.FieldPath("nodes/virtual/attributes/label"),
+                            SignalRouter.V2.Contracts.CompletenessReason.Redacted),
+                        new SignalRouter.V2.Contracts.CompletenessEntry(
+                            new SignalRouter.V2.Contracts.FieldPath("sources/gone"),
+                            SignalRouter.V2.Contracts.CompletenessReason.SourceUnavailable),
+                    },
+                    maxEntries: 8)));
+        var underRegion = new SignalRouter.V2.Contracts.FieldPath("nodes/virtual/attributes/value");
+        var noRegion = new SignalRouter.V2.Contracts.FieldPath("nodes/other/attributes/value");
+
+        var bytes = AllocationMeter.BytesPerOperation(() =>
+        {
+            lookup.Lookup(present);
+            lookup.Lookup(missing);
+            lookup.Lookup(sourceField);
+            lookup.CountCollection(children);
+            incompleteLookup.Lookup(underRegion);
+            incompleteLookup.Lookup(noRegion);
+        });
+
+        TestContext.Out.WriteLine($"[allocation-gate] six lookups incl. completeness walk: {bytes} B/op");
+        Assert.That(bytes, Is.EqualTo(0), "lookups parse by span and search sorted lists in place");
+    }
+
+    private sealed class CollectingSnapshotObserver : SignalRouter.V2.Kernel.ISnapshotObserver
+    {
+        internal SignalRouter.V2.Kernel.PinnedSnapshot? Last;
+
+        public void OnPinned(
+            SignalRouter.V2.Contracts.OperationId operation,
+            SignalRouter.V2.Kernel.PinnedSnapshot snapshot) => Last = snapshot;
+
+        public void OnRefused(SignalRouter.V2.Contracts.OperationId operation, string reasonCode) =>
+            throw new System.InvalidOperationException("Snapshot refused: " + reasonCode);
+    }
+
+    /// <summary>
     /// P1d (finding A3), a proportionality gate (spec/performance.md §2): in a
     /// sampled-free world a revision advance materializes once per domain and
     /// pays only cheap per-wait evaluations on top, so 256 armed waits must

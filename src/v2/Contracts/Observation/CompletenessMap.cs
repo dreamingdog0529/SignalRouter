@@ -136,13 +136,18 @@ namespace SignalRouter.V2.Contracts
                 throw new ArgumentException("A non-default path is required.", nameof(path));
             }
 
+            // Among prefixes of one path, more segments means a longer string, so
+            // the ordinal value length is the same "longest prefix" order without
+            // any segment counting.
             var bestLength = -1;
             reason = default;
-            foreach (var entry in Entries)
+            var entries = Entries;
+            for (var i = 0; i < entries.Count; i++)
             {
-                if (IsSegmentPrefix(entry.Region, path) && entry.Region.Segments.Count > bestLength)
+                var entry = entries[i];
+                if (entry.Region.IsSegmentPrefixOf(path) && entry.Region.Value.Length > bestLength)
                 {
-                    bestLength = entry.Region.Segments.Count;
+                    bestLength = entry.Region.Value.Length;
                     reason = entry.Reason;
                 }
             }
@@ -174,11 +179,13 @@ namespace SignalRouter.V2.Contracts
                 return false;
             }
 
-            foreach (var entry in Entries)
+            var entries = Entries;
+            for (var i = 0; i < entries.Count; i++)
             {
                 // An entry inside the subtree, or an ancestor entry covering it,
                 // makes the region incomplete.
-                if (IsSegmentPrefix(regionPrefix, entry.Region) || IsSegmentPrefix(entry.Region, regionPrefix))
+                if (regionPrefix.IsSegmentPrefixOf(entries[i].Region) ||
+                    entries[i].Region.IsSegmentPrefixOf(regionPrefix))
                 {
                     return false;
                 }
@@ -198,29 +205,9 @@ namespace SignalRouter.V2.Contracts
         public override string ToString() =>
             IsComplete ? "Complete" : $"{Entries.Count} regions{(RootTruncated ? " + root" : "")}";
 
-        private static bool IsSegmentPrefix(FieldPath prefix, FieldPath path)
-        {
-            var prefixSegments = prefix.Segments;
-            var pathSegments = path.Segments;
-            if (prefixSegments.Count > pathSegments.Count)
-            {
-                return false;
-            }
-
-            for (var i = 0; i < prefixSegments.Count; i++)
-            {
-                if (!string.Equals(prefixSegments[i], pathSegments[i], StringComparison.Ordinal))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
         private static int DeepestFirstThenOrdinalLast(CompletenessEntry left, CompletenessEntry right)
         {
-            var byDepth = right.Region.Segments.Count.CompareTo(left.Region.Segments.Count);
+            var byDepth = right.Region.SegmentCount.CompareTo(left.Region.SegmentCount);
             if (byDepth != 0)
             {
                 return byDepth;
