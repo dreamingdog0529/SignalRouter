@@ -13,9 +13,9 @@ The v2 specs normalized **time** (pump budgets, the worst-case occupancy formula
 and **retention** (every store bounded) but never **allocation**: the word does not
 appear in the original set, and the implementation followed the spec's silence —
 no pooling, no span paths, and per-pump work proportional to retained state. The
-owner's mandate for the performance track ("Cysharp-quality performance and
-allocation") required deciding *where* performance claims live. Measurement came
-first: a benchmark suite and an exact per-thread allocation meter recorded the
+owner's mandate for the performance track — minimal allocation and performance
+as first-class engineering goals — required deciding *where* performance claims
+live. Measurement came first: a benchmark suite and an exact per-thread allocation meter recorded the
 pre-optimization baseline (`bench/v2/BASELINE.md`) — a quiescent pump allocating
 280 B and degrading 2,550× with retained terminals, one revision advance with 256
 armed waits costing 108 MB — before any optimization was designed, so the work
@@ -80,8 +80,8 @@ list was ranked by evidence, not intuition.
   it moves and lands the gate that keeps it moved. Measured values live in the
   measurement artifacts with full provenance — the pre-optimization record in
   `bench/v2/BASELINE.md`, the running post-change record in
-  `bench/v2/PROFILE-default.md` (the first `PerformanceConformanceProfile`
-  draft) — never as numbers quoted only in an ADR. The gated properties so far:
+  `bench/v2/PROFILE-default.md` (the first `PerformanceConformanceProfile`) —
+  never as numbers quoted only in an ADR. The gated properties so far:
   retained-state independence of the quiescent pump at the default terminal
   capacity (exact equality — this also guards the publish-on-change fix, whose
   regression would break the equality), the absolute quiescent-pump constant

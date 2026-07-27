@@ -3,12 +3,11 @@
 The key words MUST, MUST NOT, SHOULD, and MAY are to be interpreted as described
 in RFC 2119.
 
-> **Status.** The **L0 obligations of §2 are Proposed**: they become MUST at the
-> completion of the performance track (its final consolidation PR); until then
-> each gate is enforced from the moment the change that makes it true lands, and
-> no obligation is retroactive. Everything else — the layer model and its
-> misquoting prohibitions (§1, §5), the measurement contract (§3), and the
-> profile schema (§4) — is **normative now**.
+> **Status: in force.** The performance track completed on 2026-07-28: every L0
+> obligation of §2 is MUST, realized in the implementation and enforced by the
+> kernel model gates (`tests/v2/SignalRouter.V2.Performance.Tests`). The layer
+> model and its misquoting prohibitions (§1, §5), the measurement contract
+> (§3), and the profile schema (§4) were normative from acceptance.
 
 The execution specs already bound **time** (the pump budget and the computable
 worst-case occupancy, [kernel-execution.md](kernel-execution.md) §6) and
@@ -33,12 +32,10 @@ enforcement, and no claim may quote a layer it does not belong to:
 - **Quiescence.** A pump with no processable work, no due deadline, no revision
   advance awaiting wait reevaluation, and no checkpoint due performs O(1)
   kernel work and allocates **zero managed bytes on the kernel owner thread**.
-  The pump report is inside this obligation: it is a value type under the
-  completed track (until that representation change lands, the interim gate
-  pins its constant size instead of zero). Conditional exactly like the
-  deadline promise ([kernel-execution.md](kernel-execution.md) §6): the
-  host-injected clock and any host observer callbacks must themselves be
-  allocation-free on this path.
+  The pump report is inside this obligation (it is a value type). Conditional
+  exactly like the deadline promise
+  ([kernel-execution.md](kernel-execution.md) §6): the host-injected clock and
+  any host observer callbacks must themselves be allocation-free on this path.
 - **Proportionality.** The work and allocation of an operation scale only with
   its **admitted work**, its **due items**, and its **explicitly budgeted
   visited/output size** — never with unrelated retained state. Retained
