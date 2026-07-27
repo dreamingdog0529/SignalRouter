@@ -74,188 +74,188 @@ namespace SignalRouter.V2.Kernel
             scratch.Begin();
             try
             {
-            var completeness = scratch.Completeness;
-            var truncated = false;
-            var bytesUsed = 0;
+                var completeness = scratch.Completeness;
+                var truncated = false;
+                var bytesUsed = 0;
 
-            // Candidate selection: keyed, visible to the domain, inside the scope.
-            var candidates = scratch.Candidates;
-            foreach (var record in store.LiveRecords)
-            {
-                if (!record.Registration.AuthorKey.HasValue)
+                // Candidate selection: keyed, visible to the domain, inside the scope.
+                var candidates = scratch.Candidates;
+                foreach (var record in store.LiveRecords)
                 {
-                    continue; // keyless nodes are never path-addressable
-                }
-
-                if (!record.Registration.Exposure.IsVisibleTo(domain))
-                {
-                    continue;
-                }
-
-                if (!IsInScope(store, record, descriptor.Scope))
-                {
-                    continue;
-                }
-
-                candidates.Add(record);
-            }
-
-            candidates.Sort((left, right) => string.CompareOrdinal(
-                left.Registration.AuthorKey!.Value.Value, right.Registration.AuthorKey!.Value.Value));
-
-            // Deterministic budget cut: first N candidates in ordinal key order.
-            var included = scratch.Included;
-            var includedKeys = scratch.IncludedKeys;
-            foreach (var record in candidates)
-            {
-                var cost = NodeCost(record, effectiveFieldBytes);
-                if (included.Count + 1 > maxNodes || bytesUsed + cost > budget.MaxBytes)
-                {
-                    truncated = true;
-                    break;
-                }
-
-                bytesUsed += cost;
-                included.Add(record);
-                includedKeys.Add(record.Registration.AuthorKey!.Value.Value);
-            }
-
-            // Visible child counts, over the same visibility/scope rules; keyless
-            // children participate only when the view includes them.
-            var childCounts = scratch.ChildCounts;
-            foreach (var record in store.LiveRecords)
-            {
-                if (!record.Registration.Parent.HasValue ||
-                    !record.Registration.Exposure.IsVisibleTo(domain) ||
-                    !IsInScope(store, record, descriptor.Scope))
-                {
-                    continue;
-                }
-
-                if (!record.Registration.AuthorKey.HasValue && !descriptor.IncludeKeylessNodes)
-                {
-                    continue;
-                }
-
-                var parentKey = record.Registration.Parent.Value.Value;
-                childCounts.TryGetValue(parentKey, out var count);
-                childCounts[parentKey] = count + 1;
-            }
-
-            var nodes = scratch.Nodes;
-            foreach (var record in included)
-            {
-                var key = record.Registration.AuthorKey!.Value;
-                var attributes = scratch.Attributes;
-                attributes.Clear();
-                foreach (var attribute in record.Attributes.Values)
-                {
-                    if (attribute.Sensitivity == Sensitivity.Sensitive)
+                    if (!record.Registration.AuthorKey.HasValue)
                     {
-                        // Redaction at value production: presence without content.
-                        attributes.Add(new MaterializedAttribute(attribute.Name, default, redacted: true));
+                        continue; // keyless nodes are never path-addressable
+                    }
+
+                    if (!record.Registration.Exposure.IsVisibleTo(domain))
+                    {
                         continue;
                     }
 
-                    if (ValueUnits(attribute.Value) > effectiveFieldBytes)
+                    if (!IsInScope(store, record, descriptor.Scope))
                     {
-                        completeness.Add(new CompletenessEntry(
-                            new FieldPath("nodes/" + key.Value + "/attributes/" + attribute.Name),
-                            CompletenessReason.BudgetTruncated));
                         continue;
                     }
 
-                    attributes.Add(new MaterializedAttribute(attribute.Name, attribute.Value, redacted: false));
+                    candidates.Add(record);
                 }
 
-                attributes.Sort(AttributeOrder);
+                candidates.Sort((left, right) => string.CompareOrdinal(
+                    left.Registration.AuthorKey!.Value.Value, right.Registration.AuthorKey!.Value.Value));
 
-                var capabilities = scratch.Capabilities;
-                capabilities.Clear();
-                foreach (var availability in record.Availability)
+                // Deterministic budget cut: first N candidates in ordinal key order.
+                var included = scratch.Included;
+                var includedKeys = scratch.IncludedKeys;
+                foreach (var record in candidates)
                 {
-                    capabilities.Add(new MaterializedCapability(availability.Key, availability.Value));
-                }
-
-                capabilities.Sort(CapabilityOrder);
-
-                // A parent outside the materialized set terminates traversal as a
-                // completeness condition, never a dangling key that would reveal a
-                // hidden node (observation-state.md §3). The narrow `parent` region
-                // marks the condition without shadowing attribute lookups.
-                AuthorKey? parent = null;
-                if (record.Registration.Parent.HasValue)
-                {
-                    if (includedKeys.Contains(record.Registration.Parent.Value.Value))
+                    var cost = NodeCost(record, effectiveFieldBytes);
+                    if (included.Count + 1 > maxNodes || bytesUsed + cost > budget.MaxBytes)
                     {
-                        parent = record.Registration.Parent.Value;
+                        truncated = true;
+                        break;
                     }
-                    else
+
+                    bytesUsed += cost;
+                    included.Add(record);
+                    includedKeys.Add(record.Registration.AuthorKey!.Value.Value);
+                }
+
+                // Visible child counts, over the same visibility/scope rules; keyless
+                // children participate only when the view includes them.
+                var childCounts = scratch.ChildCounts;
+                foreach (var record in store.LiveRecords)
+                {
+                    if (!record.Registration.Parent.HasValue ||
+                        !record.Registration.Exposure.IsVisibleTo(domain) ||
+                        !IsInScope(store, record, descriptor.Scope))
+                    {
+                        continue;
+                    }
+
+                    if (!record.Registration.AuthorKey.HasValue && !descriptor.IncludeKeylessNodes)
+                    {
+                        continue;
+                    }
+
+                    var parentKey = record.Registration.Parent.Value.Value;
+                    childCounts.TryGetValue(parentKey, out var count);
+                    childCounts[parentKey] = count + 1;
+                }
+
+                var nodes = scratch.Nodes;
+                foreach (var record in included)
+                {
+                    var key = record.Registration.AuthorKey!.Value;
+                    var attributes = scratch.Attributes;
+                    attributes.Clear();
+                    foreach (var attribute in record.Attributes.Values)
+                    {
+                        if (attribute.Sensitivity == Sensitivity.Sensitive)
+                        {
+                            // Redaction at value production: presence without content.
+                            attributes.Add(new MaterializedAttribute(attribute.Name, default, redacted: true));
+                            continue;
+                        }
+
+                        if (ValueUnits(attribute.Value) > effectiveFieldBytes)
+                        {
+                            completeness.Add(new CompletenessEntry(
+                                new FieldPath("nodes/" + key.Value + "/attributes/" + attribute.Name),
+                                CompletenessReason.BudgetTruncated));
+                            continue;
+                        }
+
+                        attributes.Add(new MaterializedAttribute(attribute.Name, attribute.Value, redacted: false));
+                    }
+
+                    attributes.Sort(AttributeOrder);
+
+                    var capabilities = scratch.Capabilities;
+                    capabilities.Clear();
+                    foreach (var availability in record.Availability)
+                    {
+                        capabilities.Add(new MaterializedCapability(availability.Key, availability.Value));
+                    }
+
+                    capabilities.Sort(CapabilityOrder);
+
+                    // A parent outside the materialized set terminates traversal as a
+                    // completeness condition, never a dangling key that would reveal a
+                    // hidden node (observation-state.md §3). The narrow `parent` region
+                    // marks the condition without shadowing attribute lookups.
+                    AuthorKey? parent = null;
+                    if (record.Registration.Parent.HasValue)
+                    {
+                        if (includedKeys.Contains(record.Registration.Parent.Value.Value))
+                        {
+                            parent = record.Registration.Parent.Value;
+                        }
+                        else
+                        {
+                            completeness.Add(new CompletenessEntry(
+                                new FieldPath("nodes/" + key.Value + "/parent"),
+                                CompletenessReason.OutOfScope));
+                        }
+                    }
+
+                    childCounts.TryGetValue(key.Value, out var childCount);
+                    nodes.Add(new MaterializedNode(
+                        key,
+                        record.Registration.Role,
+                        parent,
+                        ValueArray<MaterializedAttribute>.From(attributes),
+                        ValueArray<MaterializedCapability>.From(capabilities),
+                        childCount));
+                }
+
+                // Sources: family selects the exposure opt-in (observation-state.md
+                // §7.2). Candidates sort by key before the budget cut so registration
+                // order never changes snapshot membership.
+                var sourceCandidates = scratch.SourceCandidates;
+                foreach (var registration in sourceTable.Registrations)
+                {
+                    var visible = descriptor.Family == ViewFamily.Record
+                        ? registration.Descriptor.RecordVisible
+                        : registration.Descriptor.AgentVisible;
+                    if (visible)
+                    {
+                        sourceCandidates.Add(registration);
+                    }
+                }
+
+                sourceCandidates.Sort((left, right) =>
+                    string.CompareOrdinal(left.Key.Value, right.Key.Value));
+
+                var sources = scratch.Sources;
+                foreach (var registration in sourceCandidates)
+                {
+                    var materialized = MaterializeSource(
+                        sourceTable, registration, logicalNow, effectiveFieldBytes,
+                        completeness, scratch, out var cost);
+                    if (bytesUsed + cost > budget.MaxBytes)
+                    {
+                        truncated = true;
+                        break;
+                    }
+
+                    bytesUsed += cost;
+                    if (materialized.Omission.HasValue)
                     {
                         completeness.Add(new CompletenessEntry(
-                            new FieldPath("nodes/" + key.Value + "/parent"),
-                            CompletenessReason.OutOfScope));
+                            new FieldPath("sources/" + registration.Key.Value),
+                            materialized.Omission.Value));
                     }
+
+                    sources.Add(materialized);
                 }
 
-                childCounts.TryGetValue(key.Value, out var childCount);
-                nodes.Add(new MaterializedNode(
-                    key,
-                    record.Registration.Role,
-                    parent,
-                    ValueArray<MaterializedAttribute>.From(attributes),
-                    ValueArray<MaterializedCapability>.From(capabilities),
-                    childCount));
-            }
-
-            // Sources: family selects the exposure opt-in (observation-state.md
-            // §7.2). Candidates sort by key before the budget cut so registration
-            // order never changes snapshot membership.
-            var sourceCandidates = scratch.SourceCandidates;
-            foreach (var registration in sourceTable.Registrations)
-            {
-                var visible = descriptor.Family == ViewFamily.Record
-                    ? registration.Descriptor.RecordVisible
-                    : registration.Descriptor.AgentVisible;
-                if (visible)
-                {
-                    sourceCandidates.Add(registration);
-                }
-            }
-
-            sourceCandidates.Sort((left, right) =>
-                string.CompareOrdinal(left.Key.Value, right.Key.Value));
-
-            var sources = scratch.Sources;
-            foreach (var registration in sourceCandidates)
-            {
-                var materialized = MaterializeSource(
-                    sourceTable, registration, logicalNow, effectiveFieldBytes,
-                    completeness, scratch, out var cost);
-                if (bytesUsed + cost > budget.MaxBytes)
-                {
-                    truncated = true;
-                    break;
-                }
-
-                bytesUsed += cost;
-                if (materialized.Omission.HasValue)
-                {
-                    completeness.Add(new CompletenessEntry(
-                        new FieldPath("sources/" + registration.Key.Value),
-                        materialized.Omission.Value));
-                }
-
-                sources.Add(materialized);
-            }
-
-                        var basis = new ObservationBasis(
-                store.Incarnation, store.Revision, descriptor.Contract, domain, descriptor.Scope);
-            var materialization = new ObservationMaterialization(
-                basis,
-                ValueArray<MaterializedNode>.From(nodes),
-                ValueArray<MaterializedSource>.From(sources),
-                CompletenessMap.From(completeness, maxCompletenessEntries, rootTruncated: truncated));
+                var basis = new ObservationBasis(
+                    store.Incarnation, store.Revision, descriptor.Contract, domain, descriptor.Scope);
+                var materialization = new ObservationMaterialization(
+                    basis,
+                    ValueArray<MaterializedNode>.From(nodes),
+                    ValueArray<MaterializedSource>.From(sources),
+                    CompletenessMap.From(completeness, maxCompletenessEntries, rootTruncated: truncated));
                 return new ProjectionResult(materialization, truncated, bytesUsed);
             }
             finally
