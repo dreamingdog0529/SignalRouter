@@ -193,11 +193,6 @@ namespace SignalRouter.V2.Contracts
     {
         public BooleanExpression(BooleanOperator @operator, ValueArray<PredicateExpression> operands)
         {
-            if (operands == null)
-            {
-                throw new ArgumentNullException(nameof(operands));
-            }
-
             if (operands.Count < 2)
             {
                 throw new ArgumentException(

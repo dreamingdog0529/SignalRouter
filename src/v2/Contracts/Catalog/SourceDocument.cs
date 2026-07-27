@@ -10,11 +10,6 @@ namespace SignalRouter.V2.Contracts
 
         public SourceDocument(ValueArray<NamedField> fields)
         {
-            if (fields == null)
-            {
-                throw new ArgumentNullException(nameof(fields));
-            }
-
             byName = new Dictionary<string, FieldValue>(StringComparer.Ordinal);
             foreach (var field in fields)
             {

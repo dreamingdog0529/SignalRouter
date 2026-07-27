@@ -59,7 +59,7 @@ public sealed class AllocationRegressionGates
         var bytes = AllocationMeter.BytesPerOperation(() => world.Pump());
 
         TestContext.Out.WriteLine($"[allocation-gate] idle pump absolute: {bytes} B/op");
-        Assert.That(bytes, Is.EqualTo(56), "one PumpReport instance, nothing else");
+        Assert.That(bytes, Is.EqualTo(0), "the report is a value type: the quiescent pump allocates nothing (L0)");
     }
 
     /// <summary>
