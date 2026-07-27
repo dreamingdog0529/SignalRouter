@@ -37,11 +37,11 @@ namespace SignalRouter.V2.Contracts
     {
         public ArtifactFacts(
             bool baseSnapshotDurable,
-            ValueList<EvidenceCut> cuts,
+            ValueArray<EvidenceCut> cuts,
             bool externalIntegrityFailure = false)
         {
             BaseSnapshotDurable = baseSnapshotDurable;
-            Cuts = cuts ?? throw new ArgumentNullException(nameof(cuts));
+            Cuts = cuts;
             ExternalIntegrityFailure = externalIntegrityFailure;
         }
 
@@ -49,7 +49,7 @@ namespace SignalRouter.V2.Contracts
         public bool BaseSnapshotDurable { get; }
 
         /// <summary>The durable ReplayEvidence cuts in stream order.</summary>
-        public ValueList<EvidenceCut> Cuts { get; }
+        public ValueArray<EvidenceCut> Cuts { get; }
 
         /// <summary>
         /// True when codec-level integrity verification (blob existence, ContentId

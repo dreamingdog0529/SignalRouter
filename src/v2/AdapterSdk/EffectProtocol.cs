@@ -291,7 +291,7 @@ namespace SignalRouter.V2.AdapterSdk
         public EffectCompletion(
             EffectPermitToken permit,
             EffectResolution resolution,
-            ValueList<ContinuationRequest>? continuations = null)
+            ValueArray<ContinuationRequest>? continuations = null)
         {
             if (permit.IsDefault)
             {
@@ -300,13 +300,13 @@ namespace SignalRouter.V2.AdapterSdk
 
             Permit = permit;
             Resolution = resolution ?? throw new ArgumentNullException(nameof(resolution));
-            Continuations = continuations ?? ValueList<ContinuationRequest>.Empty;
+            Continuations = continuations ?? ValueArray<ContinuationRequest>.Empty;
         }
 
         public EffectPermitToken Permit { get; }
 
         public EffectResolution Resolution { get; }
 
-        public ValueList<ContinuationRequest> Continuations { get; }
+        public ValueArray<ContinuationRequest> Continuations { get; }
     }
 }

@@ -18,7 +18,7 @@ public sealed class ReaderProjectorParityTests
     {
         var contract = new PredicateContractRef(new PredicateContractId(id), new ContractVersion(1, 0));
         fixture.Runtime.Bootstrap.RegisterPredicateContract(contract, new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(new ClauseId("c0"), expression),
             })));
@@ -82,10 +82,10 @@ public sealed class ReaderProjectorParityTests
     {
         var observer = new RecordingAssertionObserver();
         fixture.Runtime.Control.EvaluateAssertions(new AssertionBatch(
-            ValueList<PredicateContractRef>.From(predicates),
+            ValueArray<PredicateContractRef>.From(predicates),
             KernelFixture.Agent,
             observer));
         fixture.PumpUntilIdle();
-        return observer.Results!.Select(result => result.Outcome).ToArray();
+        return observer.Results!.Value.Select(result => result.Outcome).ToArray();
     }
 }

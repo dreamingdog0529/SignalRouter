@@ -11,7 +11,7 @@ namespace SignalRouter.V2.AdapterSdk.Tests;
 /// </summary>
 public sealed class AdapterDescriptorTests
 {
-    private static ValueList<FramePhase> Phases => ValueList<FramePhase>.From(new[]
+    private static ValueArray<FramePhase> Phases => ValueArray<FramePhase>.From(new[]
     {
         FramePhase.Update, FramePhase.LateUpdate,
     });
@@ -19,24 +19,24 @@ public sealed class AdapterDescriptorTests
     private static AdapterDescriptor Build(
         FramePhase? fence = null,
         int syncBound = 5,
-        ValueList<CompletionLatencyBound>? latencies = null) =>
+        ValueArray<CompletionLatencyBound>? latencies = null) =>
         new(
             "reference-adapter",
             new ContractVersion(1, 0),
             Phases,
             fence ?? FramePhase.LateUpdate,
-            ValueList<CapabilityProfileSupport>.From(new[]
+            ValueArray<CapabilityProfileSupport>.From(new[]
             {
                 new CapabilityProfileSupport(
                     SdkTestData.Capability,
-                    ValueList<CompletionProfileRef>.From(new[] { SdkTestData.Applied })),
+                    ValueArray<CompletionProfileRef>.From(new[] { SdkTestData.Applied })),
             }),
             syncBound,
-            latencies ?? ValueList<CompletionLatencyBound>.From(new[]
+            latencies ?? ValueArray<CompletionLatencyBound>.From(new[]
             {
                 new CompletionLatencyBound(SdkTestData.Applied, 1),
             }),
-            ValueList<InputClassification>.From(new[]
+            ValueArray<InputClassification>.From(new[]
             {
                 new InputClassification("synthetic-click", InputClass.Managed),
                 new InputClassification("external-world-mutation", InputClass.Observed),
@@ -67,10 +67,10 @@ public sealed class AdapterDescriptorTests
     {
         AssertEx.Throws<ArgumentException>(() => _ = new CapabilityProfileSupport(
             SdkTestData.Capability,
-            ValueList<CompletionProfileRef>.From(new[] { SdkTestData.Applied, SdkTestData.Applied })));
+            ValueArray<CompletionProfileRef>.From(new[] { SdkTestData.Applied, SdkTestData.Applied })));
 
         AssertEx.Throws<ArgumentException>(() => Build(
-            latencies: ValueList<CompletionLatencyBound>.From(new[]
+            latencies: ValueArray<CompletionLatencyBound>.From(new[]
             {
                 new CompletionLatencyBound(SdkTestData.Applied, 1),
                 new CompletionLatencyBound(SdkTestData.Applied, 2),
@@ -86,9 +86,9 @@ public sealed class AdapterDescriptorTests
         // A supported profile without a declared MaxFrames leaves the TCK and host
         // with nothing to enforce; an orphan bound declares latency for nothing.
         AssertEx.Throws<ArgumentException>(() => Build(
-            latencies: ValueList<CompletionLatencyBound>.Empty));
+            latencies: ValueArray<CompletionLatencyBound>.Empty));
         AssertEx.Throws<ArgumentException>(() => Build(
-            latencies: ValueList<CompletionLatencyBound>.From(new[]
+            latencies: ValueArray<CompletionLatencyBound>.From(new[]
             {
                 new CompletionLatencyBound(SdkTestData.Applied, 1),
                 new CompletionLatencyBound(SdkTestData.FrameCommitted, 2),

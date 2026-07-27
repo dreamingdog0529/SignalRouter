@@ -59,10 +59,10 @@ namespace SignalRouter.V2.Tck
     /// <summary>The versioned answer of one TCK run.</summary>
     public sealed class TckReport
     {
-        public TckReport(string version, ValueList<TckCheckResult> checks)
+        public TckReport(string version, ValueArray<TckCheckResult> checks)
         {
             Version = ContractGrammar.ValidateIdentifier(version, nameof(version));
-            Checks = checks ?? throw new ArgumentNullException(nameof(checks));
+            Checks = checks;
 
             var aggregate = TckAggregate.Passed;
             foreach (var check in checks)
@@ -86,6 +86,6 @@ namespace SignalRouter.V2.Tck
 
         public TckAggregate Aggregate { get; }
 
-        public ValueList<TckCheckResult> Checks { get; }
+        public ValueArray<TckCheckResult> Checks { get; }
     }
 }

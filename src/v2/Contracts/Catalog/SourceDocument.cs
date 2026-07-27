@@ -8,7 +8,7 @@ namespace SignalRouter.V2.Contracts
     {
         private readonly Dictionary<string, FieldValue> byName;
 
-        public SourceDocument(ValueList<NamedField> fields)
+        public SourceDocument(ValueArray<NamedField> fields)
         {
             if (fields == null)
             {
@@ -29,7 +29,7 @@ namespace SignalRouter.V2.Contracts
             Fields = fields;
         }
 
-        public ValueList<NamedField> Fields { get; }
+        public ValueArray<NamedField> Fields { get; }
 
         public bool TryGetValue(string name, out FieldValue value)
         {

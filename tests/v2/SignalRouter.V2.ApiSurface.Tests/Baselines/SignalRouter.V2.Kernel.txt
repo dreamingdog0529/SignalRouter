@@ -11,9 +11,9 @@ sealed class SignalRouter.V2.Kernel.AdmissionEvidence
 
 sealed class SignalRouter.V2.Kernel.AssertionBatch
   property Observer : SignalRouter.V2.Kernel.IAssertionObserver { public get; }
-  property Predicates : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.PredicateContractRef> { public get; }
+  property Predicates : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> { public get; }
   property Principal : SignalRouter.V2.Contracts.Principal { public get; }
-  public ctor(SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.PredicateContractRef> predicates, SignalRouter.V2.Contracts.Principal principal, SignalRouter.V2.Kernel.IAssertionObserver observer)
+  public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> predicates, SignalRouter.V2.Contracts.Principal principal, SignalRouter.V2.Kernel.IAssertionObserver observer)
 
 enum SignalRouter.V2.Kernel.EvidenceReadiness
   : System.Int32
@@ -22,7 +22,7 @@ enum SignalRouter.V2.Kernel.EvidenceReadiness
   Ready = 0
 
 interface SignalRouter.V2.Kernel.IAssertionObserver
-  public method OnEvaluated(SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.PredicateEvaluationResult> results) : System.Void
+  public method OnEvaluated(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateEvaluationResult> results) : System.Void
 
 interface SignalRouter.V2.Kernel.IEvidenceCoordinator
   public method CommitTerminalEvidence(SignalRouter.V2.Kernel.TerminalEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
@@ -92,7 +92,7 @@ sealed class SignalRouter.V2.Kernel.KernelOptions
   property TimelineRetentionEntries : System.Int32 { public get; }
   property TraceRingByteCapacity : System.Int32 { public get; }
   property TraceRingCapacity : System.Int32 { public get; }
-  public ctor(SignalRouter.V2.AdapterSdk.IMonotonicClock monotonicClock, System.Byte[] redactionKey, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Kernel.PrincipalDomainBinding> principalDomains, SignalRouter.V2.Contracts.SecurityDomainId recordDomain, System.Int32 mailboxControlCapacity = 4096, System.Int32 mailboxMaxOutstandingPostFenceOperations = 64, System.Int32 mailboxMutationCapacity = 256, System.Int32 sourcePublicationCapacity = 512, System.Int32 sourcePublicationAggregateBytes = 16777216, System.Int32 sourcePublicationPendingPerSource = 16, System.Int32 recoveryIndexPendingCapacity = 4096, System.Int32 recoveryIndexTerminalCapacity = 4096, System.Int64 recoveryIndexTerminalRetentionLogicalTime = 300, System.Int32 traceRingCapacity = 8192, System.Int32 traceRingByteCapacity = 4194304, System.Int32 maxArmedWaits = 256, System.Int32 maxContinuationsPerParent = 32, System.Int32 maxRegisteredPredicateContracts = 1024, System.Int32 observationBudgetBytes = 262144, System.Int32 observationBudgetNodes = 2048, System.Int32 maxRegisteredViewContracts = 64, System.Int32 maxPinnedSnapshots = 32, System.Int32 maxCompletenessEntries = 1024, System.Int32 maxObservationFieldBytes = 4096, System.Int32 maxMaterializationNodes = 2048, System.Int32 maxMaterializationBytes = 262144, SignalRouter.V2.Contracts.ICanonicalStateCodec? canonicalStateCodec = null, System.Int32 stateStoreMaxBlobBytes = 1048576, System.Int64 stateStoreMaxTotalBytes = 67108864, System.Int32 timelineRetentionEntries = 128, System.Int64 timelineRetentionBytes = 8388608)
+  public ctor(SignalRouter.V2.AdapterSdk.IMonotonicClock monotonicClock, System.Byte[] redactionKey, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Kernel.PrincipalDomainBinding> principalDomains, SignalRouter.V2.Contracts.SecurityDomainId recordDomain, System.Int32 mailboxControlCapacity = 4096, System.Int32 mailboxMaxOutstandingPostFenceOperations = 64, System.Int32 mailboxMutationCapacity = 256, System.Int32 sourcePublicationCapacity = 512, System.Int32 sourcePublicationAggregateBytes = 16777216, System.Int32 sourcePublicationPendingPerSource = 16, System.Int32 recoveryIndexPendingCapacity = 4096, System.Int32 recoveryIndexTerminalCapacity = 4096, System.Int64 recoveryIndexTerminalRetentionLogicalTime = 300, System.Int32 traceRingCapacity = 8192, System.Int32 traceRingByteCapacity = 4194304, System.Int32 maxArmedWaits = 256, System.Int32 maxContinuationsPerParent = 32, System.Int32 maxRegisteredPredicateContracts = 1024, System.Int32 observationBudgetBytes = 262144, System.Int32 observationBudgetNodes = 2048, System.Int32 maxRegisteredViewContracts = 64, System.Int32 maxPinnedSnapshots = 32, System.Int32 maxCompletenessEntries = 1024, System.Int32 maxObservationFieldBytes = 4096, System.Int32 maxMaterializationNodes = 2048, System.Int32 maxMaterializationBytes = 262144, SignalRouter.V2.Contracts.ICanonicalStateCodec? canonicalStateCodec = null, System.Int32 stateStoreMaxBlobBytes = 1048576, System.Int64 stateStoreMaxTotalBytes = 67108864, System.Int32 timelineRetentionEntries = 128, System.Int64 timelineRetentionBytes = 8388608)
   public method TryResolveDomain(SignalRouter.V2.Contracts.Principal principal, out SignalRouter.V2.Contracts.SecurityDomainId domain) : System.Boolean
 
 sealed class SignalRouter.V2.Kernel.KernelRuntime
@@ -115,7 +115,7 @@ sealed class SignalRouter.V2.Kernel.KernelTraceRing
   property TotalDropped : System.Int64 { public get; }
   public ctor(System.Int32 capacity, System.Int32 byteCapacity)
   public method Emit(SignalRouter.V2.Contracts.SemanticEvent semanticEvent) : System.Void
-  public method Snapshot() : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.SemanticEvent>
+  public method Snapshot() : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.SemanticEvent>
 
 enum SignalRouter.V2.Kernel.LeaseAnswer
   : System.Int32
@@ -162,7 +162,7 @@ sealed class SignalRouter.V2.Kernel.RecordMaterialization
 sealed class SignalRouter.V2.Kernel.TerminalEvidence
   property AfterWatermark : SignalRouter.V2.Contracts.SourceRevision { public get; }
   property CancellationPhase : SignalRouter.V2.Contracts.CancellationPhase? { public get; }
-  property Continuations : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.ContinuationRequest> { public get; }
+  property Continuations : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.ContinuationRequest> { public get; }
   property EffectPermitted : System.Boolean { public get; }
   property EffectStarted : System.Boolean { public get; }
   property FaultCode : SignalRouter.V2.Contracts.FaultCode? { public get; }
@@ -171,7 +171,7 @@ sealed class SignalRouter.V2.Kernel.TerminalEvidence
   property Postcondition : SignalRouter.V2.Contracts.PostconditionResult? { public get; }
   property RejectionReason : SignalRouter.V2.Contracts.RejectionReason? { public get; }
   property Request : SignalRouter.V2.Contracts.RequestId { public get; }
-  public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.InteractionOutcome outcome, System.Boolean effectPermitted, System.Boolean effectStarted, SignalRouter.V2.Contracts.RejectionReason? rejectionReason, SignalRouter.V2.Contracts.FaultCode? faultCode, SignalRouter.V2.Contracts.CancellationPhase? cancellationPhase, SignalRouter.V2.Contracts.PostconditionResult? postcondition, SignalRouter.V2.Contracts.SourceRevision afterWatermark, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.ContinuationRequest> continuations)
+  public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.InteractionOutcome outcome, System.Boolean effectPermitted, System.Boolean effectStarted, SignalRouter.V2.Contracts.RejectionReason? rejectionReason, SignalRouter.V2.Contracts.FaultCode? faultCode, SignalRouter.V2.Contracts.CancellationPhase? cancellationPhase, SignalRouter.V2.Contracts.PostconditionResult? postcondition, SignalRouter.V2.Contracts.SourceRevision afterWatermark, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.ContinuationRequest> continuations)
 
 sealed class SignalRouter.V2.Kernel.TimelineEntry
   property AfterGap : System.Boolean { public get; }
@@ -182,4 +182,4 @@ sealed class SignalRouter.V2.Kernel.TimelineEntry
   property Revision : SignalRouter.V2.Contracts.SourceRevision { public get; }
 
 sealed class SignalRouter.V2.Kernel.TimelineIndex
-  public method Snapshot(SignalRouter.V2.Contracts.Principal principal) : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Kernel.TimelineEntry>
+  public method Snapshot(SignalRouter.V2.Contracts.Principal principal) : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Kernel.TimelineEntry>

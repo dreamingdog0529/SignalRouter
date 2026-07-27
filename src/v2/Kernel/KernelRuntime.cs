@@ -740,7 +740,7 @@ namespace SignalRouter.V2.Kernel
                 details.CancellationPhase,
                 details.Postcondition,
                 nodeStore.Revision,
-                interaction.Completion?.Continuations ?? ValueList<ContinuationRequest>.Empty);
+                interaction.Completion?.Continuations ?? ValueArray<ContinuationRequest>.Empty);
             interaction.State = InteractionState.CommittingEvidence;
             if (!TryCommitEvidence(interaction) && !ReferenceEquals(active, interaction))
             {
@@ -826,7 +826,7 @@ namespace SignalRouter.V2.Kernel
             }
         }
 
-        private void AdmitContinuations(Interaction parent, ValueList<ContinuationRequest> continuations)
+        private void AdmitContinuations(Interaction parent, ValueArray<ContinuationRequest> continuations)
         {
             if (continuations.Count > options.MaxContinuationsPerParent)
             {
@@ -1267,11 +1267,11 @@ namespace SignalRouter.V2.Kernel
                     {
                         results.Add(new PredicateEvaluationResult(
                             PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.Incompleteness),
-                            ValueList<ClauseEvaluation>.Empty));
+                            ValueArray<ClauseEvaluation>.Empty));
                     }
 
                     assertion.Batch.Observer.OnEvaluated(
-                        ValueList<PredicateEvaluationResult>.From(results));
+                        ValueArray<PredicateEvaluationResult>.From(results));
                     break;
                 }
 
@@ -1435,7 +1435,7 @@ namespace SignalRouter.V2.Kernel
                         : RegistrationReceipt.Failure("UnknownNode");
                     break;
                 case RegistrationMessage.Operation.UpdateAttributes:
-                    receipt = nodeStore.TryUpdateAttributes(message.Node, message.Updates!)
+                    receipt = nodeStore.TryUpdateAttributes(message.Node, message.Updates!.Value)
                         ? RegistrationReceipt.Success(null)
                         : RegistrationReceipt.Failure("UpdateRefused");
                     break;
@@ -1589,7 +1589,7 @@ namespace SignalRouter.V2.Kernel
                 {
                     results.Add(new PredicateEvaluationResult(
                         PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.OutOfScope),
-                        ValueList<ClauseEvaluation>.Empty));
+                        ValueArray<ClauseEvaluation>.Empty));
                 }
             }
             else
@@ -1602,7 +1602,7 @@ namespace SignalRouter.V2.Kernel
                     {
                         results.Add(new PredicateEvaluationResult(
                             PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.UnsupportedContract),
-                            ValueList<ClauseEvaluation>.Empty));
+                            ValueArray<ClauseEvaluation>.Empty));
                         continue;
                     }
 
@@ -1612,7 +1612,7 @@ namespace SignalRouter.V2.Kernel
                 }
             }
 
-            batch.Observer.OnEvaluated(ValueList<PredicateEvaluationResult>.From(results));
+            batch.Observer.OnEvaluated(ValueArray<PredicateEvaluationResult>.From(results));
         }
 
         private void ProcessTeardown()
@@ -2059,7 +2059,7 @@ namespace SignalRouter.V2.Kernel
             }
 
             public void UpdateAttributes(
-                NodeRef node, ValueList<NodeAttribute> updates, IRegistrationObserver? observer)
+                NodeRef node, ValueArray<NodeAttribute> updates, IRegistrationObserver? observer)
             {
                 if (updates == null)
                 {

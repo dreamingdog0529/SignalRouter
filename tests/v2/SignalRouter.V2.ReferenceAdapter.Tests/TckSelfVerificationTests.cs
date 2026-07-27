@@ -111,7 +111,7 @@ public sealed class TckSelfVerificationTests
     [Test]
     public void AllRequiredChecksPassingAggregateToPassed()
     {
-        var report = new TckReport(TckSuite.Version, ValueList<TckCheckResult>.From(new[]
+        var report = new TckReport(TckSuite.Version, ValueArray<TckCheckResult>.From(new[]
         {
             Result("a", required: true, TckCheckStatus.Passed),
             Result("b", required: false, TckCheckStatus.Skipped),
@@ -122,7 +122,7 @@ public sealed class TckSelfVerificationTests
     [Test]
     public void ARequiredSkipAggregatesToIncompleteNeverPassed()
     {
-        var report = new TckReport(TckSuite.Version, ValueList<TckCheckResult>.From(new[]
+        var report = new TckReport(TckSuite.Version, ValueArray<TckCheckResult>.From(new[]
         {
             Result("a", required: true, TckCheckStatus.Passed),
             Result("b", required: true, TckCheckStatus.Skipped),
@@ -133,7 +133,7 @@ public sealed class TckSelfVerificationTests
     [Test]
     public void ARequiredFailureDominatesSkips()
     {
-        var report = new TckReport(TckSuite.Version, ValueList<TckCheckResult>.From(new[]
+        var report = new TckReport(TckSuite.Version, ValueArray<TckCheckResult>.From(new[]
         {
             Result("a", required: true, TckCheckStatus.Skipped),
             Result("b", required: true, TckCheckStatus.Failed),

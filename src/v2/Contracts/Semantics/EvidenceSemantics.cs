@@ -20,8 +20,8 @@ namespace SignalRouter.V2.Contracts
         /// This declaration is the comparison surface later layers must cover; a
         /// structural property of the cut set, pinned by test.
         /// </summary>
-        public static ValueList<EvidenceCutKind> ComparisonBearingCutKinds { get; } =
-            ValueList<EvidenceCutKind>.From(new[]
+        public static ValueArray<EvidenceCutKind> ComparisonBearingCutKinds { get; } =
+            ValueArray<EvidenceCutKind>.From(new[]
             {
                 EvidenceCutKind.RecordingOpened,
                 EvidenceCutKind.AdmissionCut,
@@ -38,7 +38,7 @@ namespace SignalRouter.V2.Contracts
         /// Classifies every admitted interaction (one per E2, in stream order) into
         /// its §6.1 shape and reader outcome.
         /// </summary>
-        public static ValueList<InteractionClassification> ClassifyInteractions(ArtifactFacts facts)
+        public static ValueArray<InteractionClassification> ClassifyInteractions(ArtifactFacts facts)
         {
             if (facts == null)
             {
@@ -59,7 +59,7 @@ namespace SignalRouter.V2.Contracts
                 results.Add(ClassifyChain(chain, contaminated.Contains(chain.RequestId)));
             }
 
-            return ValueList<InteractionClassification>.From(results);
+            return ValueArray<InteractionClassification>.From(results);
         }
 
         /// <summary>
@@ -68,7 +68,7 @@ namespace SignalRouter.V2.Contracts
         /// is comparison-bearing) and are pinned by tests over declarations. R5 is
         /// honored by construction: no rule below ever inspects E8 cuts.
         /// </summary>
-        public static ValueList<RuleViolation> CheckStructure(ArtifactFacts facts)
+        public static ValueArray<RuleViolation> CheckStructure(ArtifactFacts facts)
         {
             if (facts == null)
             {
@@ -79,7 +79,7 @@ namespace SignalRouter.V2.Contracts
             CheckInteractionStructure(facts, violations);
             CheckPredicatePairing(facts, violations);
             CheckContinuations(facts, violations);
-            return ValueList<RuleViolation>.From(violations);
+            return ValueArray<RuleViolation>.From(violations);
         }
 
         /// <summary>
@@ -135,7 +135,7 @@ namespace SignalRouter.V2.Contracts
         /// §6.1). Stops requiring contract knowledge (temporal predicates) and the
         /// actual stop decision belong to the replay layer.
         /// </summary>
-        public static ValueList<StaticReplayHazard> ScanStaticReplayHazards(ArtifactFacts facts)
+        public static ValueArray<StaticReplayHazard> ScanStaticReplayHazards(ArtifactFacts facts)
         {
             if (facts == null)
             {
@@ -215,7 +215,7 @@ namespace SignalRouter.V2.Contracts
             }
 
             hazards.Sort((left, right) => left.Position.CompareTo(right.Position));
-            return ValueList<StaticReplayHazard>.From(hazards);
+            return ValueArray<StaticReplayHazard>.From(hazards);
         }
 
         /// <summary>
@@ -243,7 +243,7 @@ namespace SignalRouter.V2.Contracts
 
         private static RecordingOutcome DecideOutcome(
             ArtifactFacts facts,
-            ValueList<RuleViolation> violations,
+            ValueArray<RuleViolation> violations,
             ClosureCheckResult closure)
         {
             var opens = facts.Cuts.OfType<RecordingOpened>().ToList();

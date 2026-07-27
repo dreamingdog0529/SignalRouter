@@ -14,9 +14,9 @@ namespace SignalRouter.V2.Contracts
             ReplayComparisonProfileRef profile,
             ViewContractRef recordView,
             RedactionPolicyId redactionPolicy,
-            ValueList<CompletionBinding> completionBindings,
-            ValueList<StateSourceBinding> stateSourceContracts,
-            ValueList<PredicateContractRef> predicateContracts,
+            ValueArray<CompletionBinding> completionBindings,
+            ValueArray<StateSourceBinding> stateSourceContracts,
+            ValueArray<PredicateContractRef> predicateContracts,
             RuntimeIncarnationId incarnation,
             ContentId baseSnapshot)
             : base(sequence)
@@ -54,9 +54,9 @@ namespace SignalRouter.V2.Contracts
             Profile = profile;
             RecordView = recordView;
             RedactionPolicy = redactionPolicy;
-            CompletionBindings = completionBindings ?? throw new ArgumentNullException(nameof(completionBindings));
-            StateSourceContracts = stateSourceContracts ?? throw new ArgumentNullException(nameof(stateSourceContracts));
-            PredicateContracts = predicateContracts ?? throw new ArgumentNullException(nameof(predicateContracts));
+            CompletionBindings = completionBindings;
+            StateSourceContracts = stateSourceContracts;
+            PredicateContracts = predicateContracts;
             Incarnation = incarnation;
             BaseSnapshot = baseSnapshot;
         }
@@ -69,11 +69,11 @@ namespace SignalRouter.V2.Contracts
 
         public RedactionPolicyId RedactionPolicy { get; }
 
-        public ValueList<CompletionBinding> CompletionBindings { get; }
+        public ValueArray<CompletionBinding> CompletionBindings { get; }
 
-        public ValueList<StateSourceBinding> StateSourceContracts { get; }
+        public ValueArray<StateSourceBinding> StateSourceContracts { get; }
 
-        public ValueList<PredicateContractRef> PredicateContracts { get; }
+        public ValueArray<PredicateContractRef> PredicateContracts { get; }
 
         public RuntimeIncarnationId Incarnation { get; }
 

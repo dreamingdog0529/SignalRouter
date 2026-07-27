@@ -94,14 +94,14 @@ public sealed class GoldenVectorAndDeterminismTests
     {
         ObservationMaterialization WithAttribute(MaterializedAttribute[] attributes) => new(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.From(new[]
+            ValueArray<MaterializedNode>.From(new[]
             {
                 new MaterializedNode(
                     new AuthorKey("n"), NodeRole.Button, null,
-                    ValueList<MaterializedAttribute>.From(attributes),
-                    ValueList<MaterializedCapability>.Empty, 0),
+                    ValueArray<MaterializedAttribute>.From(attributes),
+                    ValueArray<MaterializedCapability>.Empty, 0),
             }),
-            ValueList<MaterializedSource>.Empty,
+            ValueArray<MaterializedSource>.Empty,
             CompletenessMap.Complete);
 
         var absent = Codec.Encode(WithAttribute(System.Array.Empty<MaterializedAttribute>()));
@@ -130,14 +130,14 @@ public sealed class GoldenVectorAndDeterminismTests
     {
         ObservationMaterialization WithSourceField(string name, string value) => new(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.Empty,
-            ValueList<MaterializedSource>.From(new[]
+            ValueArray<MaterializedNode>.Empty,
+            ValueArray<MaterializedSource>.From(new[]
             {
                 new MaterializedSource(
                     new StateSourceKey("s"),
                     new StateSourceContractRef(new StateSourceContractId("s"), new ContractVersion(1, 0)),
-                    ValueList<NamedField>.From(new[] { new NamedField(name, FieldValue.Of(value)) }),
-                    ValueList<string>.Empty,
+                    ValueArray<NamedField>.From(new[] { new NamedField(name, FieldValue.Of(value)) }),
+                    ValueArray<string>.Empty,
                     omission: null),
             }),
             CompletenessMap.Complete);
@@ -153,14 +153,14 @@ public sealed class GoldenVectorAndDeterminismTests
     {
         ObservationMaterialization WithFloat(double value) => new(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.Empty,
-            ValueList<MaterializedSource>.From(new[]
+            ValueArray<MaterializedNode>.Empty,
+            ValueArray<MaterializedSource>.From(new[]
             {
                 new MaterializedSource(
                     new StateSourceKey("s"),
                     new StateSourceContractRef(new StateSourceContractId("s"), new ContractVersion(1, 0)),
-                    ValueList<NamedField>.From(new[] { new NamedField("f", FieldValue.Of(value)) }),
-                    ValueList<string>.Empty,
+                    ValueArray<NamedField>.From(new[] { new NamedField("f", FieldValue.Of(value)) }),
+                    ValueArray<string>.Empty,
                     omission: null),
             }),
             CompletenessMap.Complete);
@@ -180,20 +180,20 @@ public sealed class GoldenVectorAndDeterminismTests
         var complete = Codec.Encode(CodecFixtures.Minimal());
         var truncated = Codec.Encode(new ObservationMaterialization(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.Empty,
-            ValueList<MaterializedSource>.Empty,
+            ValueArray<MaterializedNode>.Empty,
+            ValueArray<MaterializedSource>.Empty,
             CompletenessMap.From(
                 System.Array.Empty<CompletenessEntry>(), maxEntries: 1, rootTruncated: true)));
         Assert.That(truncated.Id, Is.Not.EqualTo(complete.Id));
 
         ObservationMaterialization WithAvailability(bool available) => new(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.From(new[]
+            ValueArray<MaterializedNode>.From(new[]
             {
                 new MaterializedNode(
                     new AuthorKey("n"), NodeRole.Button, null,
-                    ValueList<MaterializedAttribute>.Empty,
-                    ValueList<MaterializedCapability>.From(new[]
+                    ValueArray<MaterializedAttribute>.Empty,
+                    ValueArray<MaterializedCapability>.From(new[]
                     {
                         new MaterializedCapability(
                             new CapabilityContractRef(
@@ -202,7 +202,7 @@ public sealed class GoldenVectorAndDeterminismTests
                     }),
                     0),
             }),
-            ValueList<MaterializedSource>.Empty,
+            ValueArray<MaterializedSource>.Empty,
             CompletenessMap.Complete);
         Assert.That(
             Codec.Encode(WithAvailability(true)).Id,

@@ -308,8 +308,8 @@ namespace SignalRouter.V2.Codec.CanonicalState
                     incarnation, revision, view, domain, scope);
                 return new ObservationMaterialization(
                     basis,
-                    ValueList<MaterializedNode>.From(nodes),
-                    ValueList<MaterializedSource>.From(sources),
+                    ValueArray<MaterializedNode>.From(nodes),
+                    ValueArray<MaterializedSource>.From(sources),
                     completeness);
             }
             catch (ArgumentException exception)
@@ -367,8 +367,8 @@ namespace SignalRouter.V2.Codec.CanonicalState
             var childCount = reader.ReadVaruint();
             return new MaterializedNode(
                 key, role, parent,
-                ValueList<MaterializedAttribute>.From(attributes),
-                ValueList<MaterializedCapability>.From(capabilities),
+                ValueArray<MaterializedAttribute>.From(attributes),
+                ValueArray<MaterializedCapability>.From(capabilities),
                 childCount);
         }
 
@@ -411,8 +411,8 @@ namespace SignalRouter.V2.Codec.CanonicalState
             return new MaterializedSource(
                 key,
                 new StateSourceContractRef(new StateSourceContractId(id), new ContractVersion(major, minor)),
-                ValueList<NamedField>.From(fields),
-                ValueList<string>.From(redactedNames),
+                ValueArray<NamedField>.From(fields),
+                ValueArray<string>.From(redactedNames),
                 omission);
         }
 

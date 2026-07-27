@@ -55,7 +55,7 @@ namespace SignalRouter.V2.Contracts
     /// </summary>
     public sealed class CompletenessMap : IEquatable<CompletenessMap>
     {
-        private CompletenessMap(ValueList<CompletenessEntry> entries, bool rootTruncated)
+        private CompletenessMap(ValueArray<CompletenessEntry> entries, bool rootTruncated)
         {
             Entries = entries;
             RootTruncated = rootTruncated;
@@ -63,7 +63,7 @@ namespace SignalRouter.V2.Contracts
 
         /// <summary>The complete materialization: no entries, no root truncation.</summary>
         public static CompletenessMap Complete { get; } =
-            new CompletenessMap(ValueList<CompletenessEntry>.Empty, rootTruncated: false);
+            new CompletenessMap(ValueArray<CompletenessEntry>.Empty, rootTruncated: false);
 
         public static CompletenessMap From(
             IReadOnlyList<CompletenessEntry> entries, int maxEntries, bool rootTruncated = false)
@@ -117,11 +117,11 @@ namespace SignalRouter.V2.Contracts
             }
 
             var sorted = new List<CompletenessEntry>(byRegion.Values);
-            return new CompletenessMap(ValueList<CompletenessEntry>.From(sorted), rootTruncated);
+            return new CompletenessMap(ValueArray<CompletenessEntry>.From(sorted), rootTruncated);
         }
 
         /// <summary>Specific regions, ordinally sorted by region path.</summary>
-        public ValueList<CompletenessEntry> Entries { get; }
+        public ValueArray<CompletenessEntry> Entries { get; }
 
         /// <summary>The reserved root-region `BudgetTruncated` marker (covers every path).</summary>
         public bool RootTruncated { get; }

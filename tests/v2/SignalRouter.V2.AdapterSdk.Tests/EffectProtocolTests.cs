@@ -65,7 +65,7 @@ public sealed class EffectProtocolTests
         var completion = new EffectCompletion(
             SdkTestData.Permit(),
             EffectResolution.Succeeded(SdkTestData.Completion),
-            ValueList<ContinuationRequest>.From(new[]
+            ValueArray<ContinuationRequest>.From(new[]
             {
                 new ContinuationRequest(
                     SdkTestData.Capability,
@@ -76,7 +76,7 @@ public sealed class EffectProtocolTests
 
         var withoutContinuations = new EffectCompletion(
             SdkTestData.Permit(), EffectResolution.Faulted(new FaultCode("AppFault")));
-        Assert.That(withoutContinuations.Continuations, Is.EqualTo(ValueList<ContinuationRequest>.Empty));
+        Assert.That(withoutContinuations.Continuations, Is.EqualTo(ValueArray<ContinuationRequest>.Empty));
 
         AssertEx.Throws<ArgumentException>(() => _ = new EffectCompletion(
             default, EffectResolution.Faulted(new FaultCode("AppFault"))));

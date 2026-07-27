@@ -15,7 +15,7 @@ public sealed class InvocationCanonicalizerTests
     private static readonly byte[] KeyA = Encoding.UTF8.GetBytes("incarnation-key-a");
     private static readonly byte[] KeyB = Encoding.UTF8.GetBytes("incarnation-key-b");
 
-    private static readonly ArgumentSchema Schema = new(ValueList<ArgumentField>.From(new[]
+    private static readonly ArgumentSchema Schema = new(ValueArray<ArgumentField>.From(new[]
     {
         new ArgumentField("value", FieldType.String, required: true, Sensitivity.Standard),
         new ArgumentField("token", FieldType.String, required: false, Sensitivity.Sensitive),
@@ -23,7 +23,7 @@ public sealed class InvocationCanonicalizerTests
     }));
 
     private static InvocationPayload Payload(params NamedField[] fields) =>
-        new(ValueList<NamedField>.From(fields));
+        new(ValueArray<NamedField>.From(fields));
 
     private static CanonicalInvocation Canonicalize(InvocationPayload payload, byte[]? key = null) =>
         InvocationCanonicalizer.Canonicalize(

@@ -10,7 +10,7 @@ namespace SignalRouter.V2.Contracts.Tests;
 /// </summary>
 public sealed class PredicateTypeCheckTests
 {
-    private static readonly PredicateCatalog Catalog = new(ValueList<FieldSchema>.From(new[]
+    private static readonly PredicateCatalog Catalog = new(ValueArray<FieldSchema>.From(new[]
     {
         new FieldSchema(new FieldPath("nodes/save/attributes/label"), FieldType.String),
         new FieldSchema(new FieldPath("nodes/save/attributes/enabled"), FieldType.Boolean),
@@ -22,7 +22,7 @@ public sealed class PredicateTypeCheckTests
     {
         var clauses = expressions
             .Select((expression, index) => new PredicateClause(new ClauseId($"c{index}"), expression));
-        return new PredicateDefinition(ValueList<PredicateClause>.From(clauses));
+        return new PredicateDefinition(ValueArray<PredicateClause>.From(clauses));
     }
 
     [Test]

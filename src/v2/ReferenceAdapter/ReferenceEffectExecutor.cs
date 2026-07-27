@@ -201,7 +201,7 @@ namespace SignalRouter.V2.ReferenceAdapter
             applyCounter++;
             registry.UpdateAttributes(
                 target,
-                ValueList<NodeAttribute>.From(new[]
+                ValueArray<NodeAttribute>.From(new[]
                 {
                     new NodeAttribute(
                         "label", FieldValue.Of(prefix + "-" + applyCounter), Sensitivity.Standard),

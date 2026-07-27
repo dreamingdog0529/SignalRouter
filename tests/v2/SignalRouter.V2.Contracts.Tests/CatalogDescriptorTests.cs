@@ -14,7 +14,7 @@ public sealed class CatalogDescriptorTests
     public void NothingIsVisibleByDefault()
     {
         Assert.That(ExposurePolicy.Hidden.IsVisibleTo(new SecurityDomainId("agent")), Is.False);
-        var exposed = new ExposurePolicy(ValueList<SecurityDomainId>.From(new[]
+        var exposed = new ExposurePolicy(ValueArray<SecurityDomainId>.From(new[]
         {
             new SecurityDomainId("agent"),
         }));
@@ -26,7 +26,7 @@ public sealed class CatalogDescriptorTests
     public void ArgumentSchemaRejectsDuplicateAndCollectionFields()
     {
         AssertEx.Throws<ArgumentException>(() => _ = new ArgumentSchema(
-            ValueList<ArgumentField>.From(new[]
+            ValueArray<ArgumentField>.From(new[]
             {
                 new ArgumentField("a", FieldType.String, true, Sensitivity.Standard),
                 new ArgumentField("a", FieldType.Integer, false, Sensitivity.Standard),
@@ -42,20 +42,20 @@ public sealed class CatalogDescriptorTests
             authorKey: null,
             NodeRole.Button,
             parent: null,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute("label", FieldValue.Of("Save"), Sensitivity.Standard),
                 new NodeAttribute("label", FieldValue.Of("Other"), Sensitivity.Standard),
             }),
-            ValueList<CapabilityDeclaration>.Empty,
+            ValueArray<CapabilityDeclaration>.Empty,
             ExposurePolicy.Hidden));
 
         AssertEx.Throws<ArgumentException>(() => _ = new NodeRegistration(
             authorKey: null,
             NodeRole.Button,
             parent: null,
-            ValueList<NodeAttribute>.Empty,
-            ValueList<CapabilityDeclaration>.From(new[]
+            ValueArray<NodeAttribute>.Empty,
+            ValueArray<CapabilityDeclaration>.From(new[]
             {
                 new CapabilityDeclaration(TestData.Capability, true),
                 new CapabilityDeclaration(TestData.Capability, false),
@@ -84,7 +84,7 @@ public sealed class CatalogDescriptorTests
         // neither.
         var descriptor = new StateSourceContractDescriptor(
             new StateSourceContractRef(new StateSourceContractId("clock"), new ContractVersion(1, 0)),
-            ValueList<SourceFieldSchema>.Empty,
+            ValueArray<SourceFieldSchema>.Empty,
             agentVisible: false,
             recordVisible: false,
             maxDocumentBytes: 64);
@@ -115,7 +115,7 @@ public sealed class CatalogDescriptorTests
     {
         AssertEx.Throws<ArgumentException>(() => _ = new StateSourceContractDescriptor(
             new StateSourceContractRef(new StateSourceContractId("inventory"), new ContractVersion(1, 0)),
-            ValueList<SourceFieldSchema>.From(new[]
+            ValueArray<SourceFieldSchema>.From(new[]
             {
                 new SourceFieldSchema("count", FieldType.Integer, Sensitivity.Standard),
                 new SourceFieldSchema("count", FieldType.Integer, Sensitivity.Standard),
@@ -126,7 +126,7 @@ public sealed class CatalogDescriptorTests
 
         AssertEx.Throws<ArgumentOutOfRangeException>(() => _ = new StateSourceContractDescriptor(
             new StateSourceContractRef(new StateSourceContractId("inventory"), new ContractVersion(1, 0)),
-            ValueList<SourceFieldSchema>.Empty,
+            ValueArray<SourceFieldSchema>.Empty,
             agentVisible: false,
             recordVisible: true,
             maxDocumentBytes: 0));

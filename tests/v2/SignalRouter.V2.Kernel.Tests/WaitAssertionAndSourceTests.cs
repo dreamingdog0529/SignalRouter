@@ -25,7 +25,7 @@ public sealed class WaitAssertionAndSourceTests
 
         fixture.Runtime.Registry.UpdateAttributes(
             fixture.SaveNode,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute("label", FieldValue.Of("Saved"), Sensitivity.Standard),
             }),
@@ -84,7 +84,7 @@ public sealed class WaitAssertionAndSourceTests
         var fixture = new KernelFixture();
         var observer = new RecordingAssertionObserver();
         fixture.Runtime.Control.EvaluateAssertions(new AssertionBatch(
-            ValueList<PredicateContractRef>.From(new[]
+            ValueArray<PredicateContractRef>.From(new[]
             {
                 KernelFixture.LabelExists,
                 new PredicateContractRef(new PredicateContractId("nope"), new ContractVersion(1, 0)),
@@ -93,12 +93,12 @@ public sealed class WaitAssertionAndSourceTests
             observer));
         fixture.PumpUntilIdle();
 
-        Assert.That(observer.Results, Has.Count.EqualTo(2));
+        Assert.That(observer.Results!.Value.Count, Is.EqualTo(2));
         Assert.That(
-            observer.Results![0].Outcome, Is.EqualTo(PredicateEvaluationOutcome.False),
+            observer.Results!.Value[0].Outcome, Is.EqualTo(PredicateEvaluationOutcome.False),
             "label is 'Save', the predicate expects 'Saved'");
         Assert.That(
-            observer.Results![1].Outcome,
+            observer.Results!.Value[1].Outcome,
             Is.EqualTo(PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.UnsupportedContract)));
     }
 
@@ -111,7 +111,7 @@ public sealed class WaitAssertionAndSourceTests
         var secretProbe = new PredicateContractRef(
             new PredicateContractId("secretProbe"), new ContractVersion(1, 0));
         fixture.Runtime.Bootstrap.RegisterPredicateContract(secretProbe, new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(new ClauseId("c0"), new ComparisonExpression(
                     new FieldPath("sources/inventory/secret"),
@@ -124,13 +124,13 @@ public sealed class WaitAssertionAndSourceTests
 
         var observer = new RecordingAssertionObserver();
         fixture.Runtime.Control.EvaluateAssertions(new AssertionBatch(
-            ValueList<PredicateContractRef>.From(new[] { secretProbe }),
+            ValueArray<PredicateContractRef>.From(new[] { secretProbe }),
             KernelFixture.Agent,
             observer));
         fixture.PumpUntilIdle();
 
         Assert.That(
-            observer.Results!.Single().Outcome,
+            observer.Results!.Value.Single().Outcome,
             Is.EqualTo(PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.Redacted)));
     }
 
@@ -141,7 +141,7 @@ public sealed class WaitAssertionAndSourceTests
         fixture.PublishInventory(1);
         var second = fixture.Runtime.Ingress.PublishSourceDocument(new SourcePublication(
             new StateSourceKey("inventory"),
-            new SourceDocument(ValueList<NamedField>.From(new[]
+            new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("count", FieldValue.Of(2L)),
             })),

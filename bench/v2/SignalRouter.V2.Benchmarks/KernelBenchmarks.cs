@@ -129,12 +129,12 @@ public class CanonicalEncodeBenchmarks
                 new AuthorKey("node-" + ordinal),
                 NodeRole.Button,
                 parent: null,
-                ValueList<MaterializedAttribute>.From(new[]
+                ValueArray<MaterializedAttribute>.From(new[]
                 {
                     new MaterializedAttribute("label", FieldValue.Of("Label " + ordinal), redacted: false),
                     new MaterializedAttribute("value", FieldValue.Of((long)i), redacted: false),
                 }),
-                ValueList<MaterializedCapability>.From(new[]
+                ValueArray<MaterializedCapability>.From(new[]
                 {
                     new MaterializedCapability(BenchWorld.Invoke, available: true),
                 }),
@@ -148,15 +148,15 @@ public class CanonicalEncodeBenchmarks
                 BenchWorld.AgentView,
                 BenchWorld.AgentDomain,
                 "root"),
-            ValueList<MaterializedNode>.From(nodes),
-            ValueList<MaterializedSource>.From(new[]
+            ValueArray<MaterializedNode>.From(nodes),
+            ValueArray<MaterializedSource>.From(new[]
             {
                 new MaterializedSource(
                     new StateSourceKey("inventory"),
                     new StateSourceContractRef(
                         new StateSourceContractId("inventory"), new ContractVersion(1, 0)),
-                    ValueList<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(5L)) }),
-                    ValueList<string>.Empty,
+                    ValueArray<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(5L)) }),
+                    ValueArray<string>.Empty,
                     omission: null),
             }),
             CompletenessMap.Complete);

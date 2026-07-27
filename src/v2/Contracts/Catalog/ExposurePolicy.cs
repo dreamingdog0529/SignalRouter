@@ -9,15 +9,15 @@ namespace SignalRouter.V2.Contracts
     /// </summary>
     public sealed class ExposurePolicy
     {
-        public ExposurePolicy(ValueList<SecurityDomainId> visibleTo)
+        public ExposurePolicy(ValueArray<SecurityDomainId> visibleTo)
         {
-            VisibleTo = visibleTo ?? throw new ArgumentNullException(nameof(visibleTo));
+            VisibleTo = visibleTo;
         }
 
         /// <summary>The default-deny policy: visible to no domain.</summary>
-        public static ExposurePolicy Hidden { get; } = new ExposurePolicy(ValueList<SecurityDomainId>.Empty);
+        public static ExposurePolicy Hidden { get; } = new ExposurePolicy(ValueArray<SecurityDomainId>.Empty);
 
-        public ValueList<SecurityDomainId> VisibleTo { get; }
+        public ValueArray<SecurityDomainId> VisibleTo { get; }
 
         public bool IsVisibleTo(SecurityDomainId domain)
         {

@@ -213,7 +213,7 @@ public sealed class EvidenceCutTests
             effectPermitted: true,
             TestData.Content("after"),
             completionEvidence: TestData.Completion(),
-            continuations: ValueList<ContinuationCommitment>.From(new[]
+            continuations: ValueArray<ContinuationCommitment>.From(new[]
             {
                 new ContinuationCommitment(0, TestData.Fingerprint("a")),
                 new ContinuationCommitment(0, TestData.Fingerprint("b")),
@@ -230,7 +230,7 @@ public sealed class EvidenceCutTests
             default,
             declaredEventCount: 2,
             TestData.Content("final"),
-            ValueList<ContentId>.Empty));
+            ValueArray<ContentId>.Empty));
         Assert.That(default(RecordingCloseReason).IsDefault, Is.True);
     }
 
@@ -253,7 +253,7 @@ public sealed class EvidenceCutTests
             new EvidenceSequence(4),
             new SourceRevision(1),
             "hint",
-            ValueList<RequestId>.Empty));
+            ValueArray<RequestId>.Empty));
     }
 
     [Test]
@@ -264,6 +264,6 @@ public sealed class EvidenceCutTests
             RecordingCloseReason.Completed,
             declaredEventCount: 1,
             TestData.Content("final"),
-            ValueList<ContentId>.Empty));
+            ValueArray<ContentId>.Empty));
     }
 }

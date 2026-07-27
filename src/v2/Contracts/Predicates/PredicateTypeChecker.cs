@@ -48,14 +48,14 @@ namespace SignalRouter.V2.Contracts
     /// <summary>The answer of a validation run.</summary>
     public sealed class PredicateValidationResult
     {
-        public PredicateValidationResult(ValueList<PredicateValidationError> errors)
+        public PredicateValidationResult(ValueArray<PredicateValidationError> errors)
         {
-            Errors = errors ?? throw new ArgumentNullException(nameof(errors));
+            Errors = errors;
         }
 
         public bool IsValid => Errors.Count == 0;
 
-        public ValueList<PredicateValidationError> Errors { get; }
+        public ValueArray<PredicateValidationError> Errors { get; }
     }
 
     /// <summary>
@@ -108,7 +108,7 @@ namespace SignalRouter.V2.Contracts
                 CheckExpression(clause.Id, clause.Expression, catalog, bounds, errors);
             }
 
-            return new PredicateValidationResult(ValueList<PredicateValidationError>.From(errors));
+            return new PredicateValidationResult(ValueArray<PredicateValidationError>.From(errors));
         }
 
         private static void CheckExpression(

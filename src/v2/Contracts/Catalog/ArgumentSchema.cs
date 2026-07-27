@@ -64,7 +64,7 @@ namespace SignalRouter.V2.Contracts
     {
         private readonly Dictionary<string, ArgumentField> byName;
 
-        public ArgumentSchema(ValueList<ArgumentField> fields)
+        public ArgumentSchema(ValueArray<ArgumentField> fields)
         {
             if (fields == null)
             {
@@ -85,9 +85,9 @@ namespace SignalRouter.V2.Contracts
             Fields = fields;
         }
 
-        public static ArgumentSchema Empty { get; } = new ArgumentSchema(ValueList<ArgumentField>.Empty);
+        public static ArgumentSchema Empty { get; } = new ArgumentSchema(ValueArray<ArgumentField>.Empty);
 
-        public ValueList<ArgumentField> Fields { get; }
+        public ValueArray<ArgumentField> Fields { get; }
 
         public bool TryGetField(string name, out ArgumentField field)
         {

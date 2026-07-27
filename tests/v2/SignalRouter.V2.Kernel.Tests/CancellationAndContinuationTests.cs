@@ -76,7 +76,7 @@ public sealed class CancellationAndContinuationTests
 
         fixture.Executor.CompleteLast(
             EffectResolution.Succeeded(Applied()),
-            ValueList<ContinuationRequest>.From(new[]
+            ValueArray<ContinuationRequest>.From(new[]
             {
                 new ContinuationRequest(
                     KernelFixture.Invoke,
@@ -122,7 +122,7 @@ public sealed class CancellationAndContinuationTests
 
         fixture.Executor.CompleteLast(
             EffectResolution.Succeeded(Applied()),
-            ValueList<ContinuationRequest>.From(tooMany));
+            ValueArray<ContinuationRequest>.From(tooMany));
         fixture.PumpUntilIdle();
 
         Assert.That(fixture.Query("continuation-1-0").Kind, Is.EqualTo(QueryAnswerKind.OutcomeUnknown));

@@ -187,7 +187,7 @@ public sealed class StructureRuleTests
             .Admit("parent")
             .Permit("parent")
             .Terminal("parent", InteractionOutcome.Succeeded,
-                continuations: ValueList<ContinuationCommitment>.From(new[] { commitment }))
+                continuations: ValueArray<ContinuationCommitment>.From(new[] { commitment }))
             .Admit("child", Causality.OfContinuation(link))
             .Permit("child")
             .Terminal("child", InteractionOutcome.Succeeded)
@@ -211,7 +211,7 @@ public sealed class StructureRuleTests
             .Admit("parent")
             .Permit("parent")
             .Terminal("parent", InteractionOutcome.Succeeded,
-                continuations: ValueList<ContinuationCommitment>.From(new[] { commitment }))
+                continuations: ValueArray<ContinuationCommitment>.From(new[] { commitment }))
             .Close()
             .Build();
 
@@ -238,7 +238,7 @@ public sealed class StructureRuleTests
             .Permit("child")
             .Terminal("child", InteractionOutcome.Succeeded)
             .Terminal("parent", InteractionOutcome.Succeeded,
-                continuations: ValueList<ContinuationCommitment>.From(new[] { commitment }))
+                continuations: ValueArray<ContinuationCommitment>.From(new[] { commitment }))
             .Build();
 
         Assert.That(
@@ -257,7 +257,7 @@ public sealed class StructureRuleTests
             .Admit("parent")
             .Permit("parent")
             .Terminal("parent", InteractionOutcome.Succeeded,
-                continuations: ValueList<ContinuationCommitment>.From(new[] { commitment }))
+                continuations: ValueArray<ContinuationCommitment>.From(new[] { commitment }))
             .Admit("child", Causality.OfContinuation(wrongLink))
             .Permit("child")
             .Terminal("child", InteractionOutcome.Succeeded)

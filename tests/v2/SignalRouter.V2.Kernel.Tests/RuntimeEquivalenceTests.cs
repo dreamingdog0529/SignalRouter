@@ -44,7 +44,7 @@ public sealed class RuntimeEquivalenceTests
 
         private long logicalNow = 100;
 
-        private readonly ExposurePolicy visibleToAll = new(ValueList<SecurityDomainId>.From(new[]
+        private readonly ExposurePolicy visibleToAll = new(ValueArray<SecurityDomainId>.From(new[]
         {
             KernelFixture.AgentDomain, KernelFixture.HumanDomain, KernelFixture.RecordDomain,
         }));
@@ -54,7 +54,7 @@ public sealed class RuntimeEquivalenceTests
             var options = new KernelOptions(
                 Clock,
                 new byte[] { 1, 2, 3, 4 },
-                ValueList<PrincipalDomainBinding>.From(new[]
+                ValueArray<PrincipalDomainBinding>.From(new[]
                 {
                     new PrincipalDomainBinding(
                         Principal.WellKnownKinds.AgentSession, KernelFixture.AgentDomain),
@@ -84,11 +84,11 @@ public sealed class RuntimeEquivalenceTests
                     new AuthorKey("save"),
                     NodeRole.Button,
                     parent: null,
-                    ValueList<NodeAttribute>.From(new[]
+                    ValueArray<NodeAttribute>.From(new[]
                     {
                         new NodeAttribute("label", FieldValue.Of("Save"), Sensitivity.Standard),
                     }),
-                    ValueList<CapabilityDeclaration>.From(new[]
+                    ValueArray<CapabilityDeclaration>.From(new[]
                     {
                         new CapabilityDeclaration(KernelFixture.Invoke, initiallyAvailable: true),
                     }),
@@ -97,8 +97,8 @@ public sealed class RuntimeEquivalenceTests
                     new AuthorKey("secret"),
                     NodeRole.Button,
                     parent: null,
-                    ValueList<NodeAttribute>.Empty,
-                    ValueList<CapabilityDeclaration>.From(new[]
+                    ValueArray<NodeAttribute>.Empty,
+                    ValueArray<CapabilityDeclaration>.From(new[]
                     {
                         new CapabilityDeclaration(KernelFixture.Invoke, initiallyAvailable: true),
                     }),
@@ -108,7 +108,7 @@ public sealed class RuntimeEquivalenceTests
                     new StateSourceContractDescriptor(
                         new StateSourceContractRef(
                             new StateSourceContractId("inventory"), new ContractVersion(1, 0)),
-                        ValueList<SourceFieldSchema>.From(new[]
+                        ValueArray<SourceFieldSchema>.From(new[]
                         {
                             new SourceFieldSchema("count", FieldType.Integer, Sensitivity.Standard),
                             new SourceFieldSchema("secret", FieldType.String, Sensitivity.Sensitive),
@@ -145,8 +145,8 @@ public sealed class RuntimeEquivalenceTests
                         new AuthorKey("churn-" + i),
                         NodeRole.Button,
                         parent: null,
-                        ValueList<NodeAttribute>.Empty,
-                        ValueList<CapabilityDeclaration>.Empty,
+                        ValueArray<NodeAttribute>.Empty,
+                        ValueArray<CapabilityDeclaration>.Empty,
                         visibleToAll), observer);
                 }
 
@@ -170,11 +170,11 @@ public sealed class RuntimeEquivalenceTests
                 new AuthorKey("late"),
                 NodeRole.Button,
                 parent: null,
-                ValueList<NodeAttribute>.From(new[]
+                ValueArray<NodeAttribute>.From(new[]
                 {
                     new NodeAttribute("marker", FieldValue.Of("fresh"), Sensitivity.Standard),
                 }),
-                ValueList<CapabilityDeclaration>.Empty,
+                ValueArray<CapabilityDeclaration>.Empty,
                 visibleToAll), lateObserver);
             PumpUntilIdle();
             Assert.That(lateObserver.Receipts.Single().Succeeded, Is.True);
@@ -199,7 +199,7 @@ public sealed class RuntimeEquivalenceTests
         {
             var answer = Runtime.Ingress.PublishSourceDocument(new SourcePublication(
                 new StateSourceKey("inventory"),
-                new SourceDocument(ValueList<NamedField>.From(new[]
+                new SourceDocument(ValueArray<NamedField>.From(new[]
                 {
                     new NamedField("count", FieldValue.Of(3L)),
                 })),

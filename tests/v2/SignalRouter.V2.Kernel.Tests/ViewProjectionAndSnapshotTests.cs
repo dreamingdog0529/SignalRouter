@@ -84,7 +84,7 @@ public sealed class ViewProjectionAndSnapshotTests
 
         fixture.Runtime.Registry.UpdateAttributes(
             fixture.SaveNode,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute("label", FieldValue.Of("Changed"), Sensitivity.Standard),
             }),
@@ -114,7 +114,7 @@ public sealed class ViewProjectionAndSnapshotTests
             new StateSourceContractDescriptor(
                 new StateSourceContractRef(
                     new StateSourceContractId("record-only"), new ContractVersion(1, 0)),
-                ValueList<SourceFieldSchema>.From(new[]
+                ValueArray<SourceFieldSchema>.From(new[]
                 {
                     new SourceFieldSchema("flag", FieldType.Boolean, Sensitivity.Standard),
                 }),
@@ -202,16 +202,16 @@ public sealed class ViewProjectionAndSnapshotTests
         fixture.Runtime.Bootstrap.RegisterViewContract(new ViewContractDescriptor(
             AgentView, ViewFamily.Agent, "panel",
             maxNodes: 256, maxFieldBytes: 4096, includeKeylessNodes: false));
-        var visibleToAll = new ExposurePolicy(ValueList<SecurityDomainId>.From(new[]
+        var visibleToAll = new ExposurePolicy(ValueArray<SecurityDomainId>.From(new[]
         {
             KernelFixture.AgentDomain, KernelFixture.HumanDomain, KernelFixture.RecordDomain,
         }));
         fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("panel"), NodeRole.Container, parent: null,
-            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty, visibleToAll));
+            ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty, visibleToAll));
         fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("inside"), NodeRole.Button, new AuthorKey("panel"),
-            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty, visibleToAll));
+            ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty, visibleToAll));
         fixture.Runtime.Start(fixture.Executor);
 
         var snapshot = Pin(fixture, AgentView, KernelFixture.Agent, scope: "panel");
@@ -234,14 +234,14 @@ public sealed class ViewProjectionAndSnapshotTests
             AgentView, ViewFamily.Agent, "root",
             maxNodes: 256, maxFieldBytes: 4096, includeKeylessNodes: false));
         var agentVisible = new ExposurePolicy(
-            ValueList<SecurityDomainId>.From(new[] { KernelFixture.AgentDomain }));
+            ValueArray<SecurityDomainId>.From(new[] { KernelFixture.AgentDomain }));
         fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("hidden-parent"), NodeRole.Container, parent: null,
-            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty,
+            ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty,
             ExposurePolicy.Hidden));
         fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("orphaned"), NodeRole.Button, new AuthorKey("hidden-parent"),
-            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty, agentVisible));
+            ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty, agentVisible));
         fixture.Runtime.Start(fixture.Executor);
 
         var snapshot = Pin(fixture, AgentView, KernelFixture.Agent);
@@ -265,16 +265,16 @@ public sealed class ViewProjectionAndSnapshotTests
             AgentView, ViewFamily.Agent, "panel",
             maxNodes: 256, maxFieldBytes: 4096, includeKeylessNodes: false));
         var visibleToAgent = new ExposurePolicy(
-            ValueList<SecurityDomainId>.From(new[] { KernelFixture.AgentDomain }));
+            ValueArray<SecurityDomainId>.From(new[] { KernelFixture.AgentDomain }));
         fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("panel"), NodeRole.Container, parent: null,
-            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty, visibleToAgent));
+            ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty, visibleToAgent));
         fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("inside"), NodeRole.Button, new AuthorKey("panel"),
-            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty, visibleToAgent));
+            ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty, visibleToAgent));
         fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("hidden-inside"), NodeRole.Button, new AuthorKey("panel"),
-            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty,
+            ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty,
             ExposurePolicy.Hidden));
         fixture.Runtime.Start(fixture.Executor);
 

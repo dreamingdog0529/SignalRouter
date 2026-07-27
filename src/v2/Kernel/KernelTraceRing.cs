@@ -231,7 +231,7 @@ namespace SignalRouter.V2.Kernel
         }
 
         /// <summary>A point-in-time copy for diagnostics; never replay authority.</summary>
-        public ValueList<SemanticEvent> Snapshot()
+        public ValueArray<SemanticEvent> Snapshot()
         {
             lock (gate)
             {
@@ -256,7 +256,7 @@ namespace SignalRouter.V2.Kernel
                             entry.DetailCode));
                 }
 
-                return ValueList<SemanticEvent>.From(events);
+                return ValueArray<SemanticEvent>.From(events);
             }
         }
 

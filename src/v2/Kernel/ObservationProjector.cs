@@ -181,8 +181,8 @@ namespace SignalRouter.V2.Kernel
                     key,
                     record.Registration.Role,
                     parent,
-                    ValueList<MaterializedAttribute>.From(attributes),
-                    ValueList<MaterializedCapability>.From(capabilities),
+                    ValueArray<MaterializedAttribute>.From(attributes),
+                    ValueArray<MaterializedCapability>.From(capabilities),
                     childCount));
             }
 
@@ -231,8 +231,8 @@ namespace SignalRouter.V2.Kernel
                 store.Incarnation, store.Revision, descriptor.Contract, domain, descriptor.Scope);
             var materialization = new ObservationMaterialization(
                 basis,
-                ValueList<MaterializedNode>.From(nodes),
-                ValueList<MaterializedSource>.From(sources),
+                ValueArray<MaterializedNode>.From(nodes),
+                ValueArray<MaterializedSource>.From(sources),
                 CompletenessMap.From(completeness, maxCompletenessEntries, rootTruncated: truncated));
             return new ProjectionResult(materialization, truncated, bytesUsed);
         }
@@ -335,8 +335,8 @@ namespace SignalRouter.V2.Kernel
             return new MaterializedSource(
                 registration.Key,
                 descriptor.Contract,
-                ValueList<NamedField>.From(fields),
-                ValueList<string>.From(redactedNames),
+                ValueArray<NamedField>.From(fields),
+                ValueArray<string>.From(redactedNames),
                 omission);
         }
 

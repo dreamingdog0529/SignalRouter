@@ -84,7 +84,7 @@ namespace SignalRouter.V2.Kernel
             CancellationPhase? cancellationPhase,
             PostconditionResult? postcondition,
             SourceRevision afterWatermark,
-            ValueList<ContinuationRequest> continuations)
+            ValueArray<ContinuationRequest> continuations)
         {
             Request = request;
             Order = order;
@@ -96,7 +96,7 @@ namespace SignalRouter.V2.Kernel
             CancellationPhase = cancellationPhase;
             Postcondition = postcondition;
             AfterWatermark = afterWatermark;
-            Continuations = continuations ?? throw new ArgumentNullException(nameof(continuations));
+            Continuations = continuations;
         }
 
         public RequestId Request { get; }
@@ -119,7 +119,7 @@ namespace SignalRouter.V2.Kernel
 
         public SourceRevision AfterWatermark { get; }
 
-        public ValueList<ContinuationRequest> Continuations { get; }
+        public ValueArray<ContinuationRequest> Continuations { get; }
     }
 
     /// <summary>

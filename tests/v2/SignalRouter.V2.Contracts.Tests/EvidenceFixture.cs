@@ -28,12 +28,12 @@ internal sealed class EvidenceFixture
             TestData.ComparisonProfile,
             TestData.RecordView,
             new RedactionPolicyId("default-redaction"),
-            ValueList<CompletionBinding>.From(new[]
+            ValueArray<CompletionBinding>.From(new[]
             {
                 new CompletionBinding(TestData.Capability, TestData.CompletionProfile),
             }),
-            ValueList<StateSourceBinding>.Empty,
-            ValueList<PredicateContractRef>.From(new[] { TestData.Predicate }),
+            ValueArray<StateSourceBinding>.Empty,
+            ValueArray<PredicateContractRef>.From(new[] { TestData.Predicate }),
             TestData.Incarnation,
             TestData.Content("base")));
         return this;
@@ -75,7 +75,7 @@ internal sealed class EvidenceFixture
         RejectionReason? rejectionReason = null,
         FaultCode? faultCode = null,
         CancellationPhase? cancellationPhase = null,
-        ValueList<ContinuationCommitment>? continuations = null)
+        ValueArray<ContinuationCommitment>? continuations = null)
     {
         var effectPermitted = permits.ContainsKey(request);
         var cancellation = cancellationPhase.HasValue
@@ -107,7 +107,7 @@ internal sealed class EvidenceFixture
             new EvidenceSequence(firstObservedCut),
             new SourceRevision(nextSequence),
             "external-source",
-            ValueList<RequestId>.From(contaminatedRequests.Select(TestData.Request))));
+            ValueArray<RequestId>.From(contaminatedRequests.Select(TestData.Request))));
         return this;
     }
 
@@ -150,12 +150,12 @@ internal sealed class EvidenceFixture
             completeForScope: true,
             TestData.Predicate,
             TestData.Arguments(seed),
-            ValueList<ClauseEvaluation>.From(new[]
+            ValueArray<ClauseEvaluation>.From(new[]
             {
                 new ClauseEvaluation("clause-1", "true", outcome.Kind == PredicateEvaluationKind.Satisfied ? "true" : "false"),
             }),
             outcome,
-            ValueList<string>.Empty));
+            ValueArray<string>.Empty));
         return this;
     }
 
@@ -204,7 +204,7 @@ internal sealed class EvidenceFixture
             reason ?? RecordingCloseReason.Completed,
             declaredEventCountOverride ?? cuts.Count + 1,
             finalCheckpoint,
-            ValueList<ContentId>.From(reachable.Distinct())));
+            ValueArray<ContentId>.From(reachable.Distinct())));
         return this;
     }
 
@@ -225,7 +225,7 @@ internal sealed class EvidenceFixture
         cuts.OfType<PredicateArmed>().First(cut => cut.OperationId == TestData.Operation(operation)).Sequence;
 
     internal ArtifactFacts Build(bool baseSnapshotDurable = true, bool externalIntegrityFailure = false) =>
-        new(baseSnapshotDurable, ValueList<EvidenceCut>.From(cuts), externalIntegrityFailure);
+        new(baseSnapshotDurable, ValueArray<EvidenceCut>.From(cuts), externalIntegrityFailure);
 
     private EvidenceSequence NextSequence() => new(nextSequence++);
 }

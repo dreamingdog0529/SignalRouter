@@ -16,7 +16,7 @@ namespace SignalRouter.V2.Contracts
             EvidenceSequence firstObservedCut,
             SourceRevision revisionAtDetection,
             string sourceHint,
-            ValueList<RequestId> contaminatedRequests)
+            ValueArray<RequestId> contaminatedRequests)
             : base(sequence)
         {
             if (firstObservedCut < lastKnownCleanCut)
@@ -29,7 +29,7 @@ namespace SignalRouter.V2.Contracts
             FirstObservedCut = firstObservedCut;
             RevisionAtDetection = revisionAtDetection;
             SourceHint = ContractGrammar.ValidateIdentifier(sourceHint, nameof(sourceHint));
-            ContaminatedRequests = contaminatedRequests ?? throw new ArgumentNullException(nameof(contaminatedRequests));
+            ContaminatedRequests = contaminatedRequests;
         }
 
         public override EvidenceCutKind Kind => EvidenceCutKind.ExternalMutationBarrier;
@@ -43,6 +43,6 @@ namespace SignalRouter.V2.Contracts
         public string SourceHint { get; }
 
         /// <summary>The interactions whose effect window overlaps the interval, marked contaminated.</summary>
-        public ValueList<RequestId> ContaminatedRequests { get; }
+        public ValueArray<RequestId> ContaminatedRequests { get; }
     }
 }

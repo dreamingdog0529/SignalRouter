@@ -6,16 +6,16 @@ namespace SignalRouter.V2.Contracts
     /// <summary>The answer of one predicate evaluation, with the per-clause report.</summary>
     public sealed class PredicateEvaluationResult
     {
-        public PredicateEvaluationResult(PredicateEvaluationOutcome outcome, ValueList<ClauseEvaluation> clauses)
+        public PredicateEvaluationResult(PredicateEvaluationOutcome outcome, ValueArray<ClauseEvaluation> clauses)
         {
             Outcome = outcome;
-            Clauses = clauses ?? throw new ArgumentNullException(nameof(clauses));
+            Clauses = clauses;
         }
 
         public PredicateEvaluationOutcome Outcome { get; }
 
         /// <summary>Per-clause expected/actual reports — diagnostic material, never comparison input (guarantees.md §5.10).</summary>
-        public ValueList<ClauseEvaluation> Clauses { get; }
+        public ValueArray<ClauseEvaluation> Clauses { get; }
     }
 
     /// <summary>
@@ -66,7 +66,7 @@ namespace SignalRouter.V2.Contracts
                 verdict = Verdict.And(verdict, clauseVerdict);
             }
 
-            return new PredicateEvaluationResult(verdict.ToOutcome(), ValueList<ClauseEvaluation>.From(clauseReports));
+            return new PredicateEvaluationResult(verdict.ToOutcome(), ValueArray<ClauseEvaluation>.From(clauseReports));
         }
 
         private static Verdict EvaluateExpression(

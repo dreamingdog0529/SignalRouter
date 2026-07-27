@@ -49,7 +49,7 @@ namespace SignalRouter.V2.ReferenceAdapter
             var options = new KernelOptions(
                 clock,
                 new byte[] { 0x52, 0x65, 0x66, 0x41 },
-                ValueList<PrincipalDomainBinding>.From(new[]
+                ValueArray<PrincipalDomainBinding>.From(new[]
                 {
                     new PrincipalDomainBinding(
                         Principal.WellKnownKinds.AgentSession, ReferenceWorld.AgentDomain),

@@ -15,7 +15,7 @@ namespace SignalRouter.V2.Contracts
     {
         private readonly Dictionary<string, FieldValue> byName;
 
-        public InvocationPayload(ValueList<NamedField> fields)
+        public InvocationPayload(ValueArray<NamedField> fields)
         {
             if (fields == null)
             {
@@ -36,9 +36,9 @@ namespace SignalRouter.V2.Contracts
             Fields = fields;
         }
 
-        public static InvocationPayload Empty { get; } = new InvocationPayload(ValueList<NamedField>.Empty);
+        public static InvocationPayload Empty { get; } = new InvocationPayload(ValueArray<NamedField>.Empty);
 
-        public ValueList<NamedField> Fields { get; }
+        public ValueArray<NamedField> Fields { get; }
 
         public bool TryGetValue(string name, out FieldValue value)
         {

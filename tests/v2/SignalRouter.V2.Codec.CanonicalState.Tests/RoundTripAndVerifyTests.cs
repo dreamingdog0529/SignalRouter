@@ -38,7 +38,7 @@ public sealed class RoundTripAndVerifyTests
         var source = new MaterializedSource(
             new StateSourceKey("s"),
             new StateSourceContractRef(new StateSourceContractId("s"), new ContractVersion(1, 0)),
-            ValueList<NamedField>.From(new[]
+            ValueArray<NamedField>.From(new[]
             {
                 new NamedField("b", FieldValue.Of(true)),
                 new NamedField("f", FieldValue.Of(-123.456)),
@@ -46,12 +46,12 @@ public sealed class RoundTripAndVerifyTests
                 new NamedField("n", FieldValue.Null),
                 new NamedField("s", FieldValue.Of("text-\U0001F600")),
             }),
-            ValueList<string>.Empty,
+            ValueArray<string>.Empty,
             omission: null);
         var original = new ObservationMaterialization(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.Empty,
-            ValueList<MaterializedSource>.From(new[] { source }),
+            ValueArray<MaterializedNode>.Empty,
+            ValueArray<MaterializedSource>.From(new[] { source }),
             CompletenessMap.Complete);
 
         Assert.That(RoundTrip(original).Sources, Is.EqualTo(original.Sources));
@@ -62,14 +62,14 @@ public sealed class RoundTripAndVerifyTests
     {
         var original = new ObservationMaterialization(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.Empty,
-            ValueList<MaterializedSource>.From(new[]
+            ValueArray<MaterializedNode>.Empty,
+            ValueArray<MaterializedSource>.From(new[]
             {
                 new MaterializedSource(
                     new StateSourceKey("s"),
                     new StateSourceContractRef(new StateSourceContractId("s"), new ContractVersion(1, 0)),
-                    ValueList<NamedField>.Empty,
-                    ValueList<string>.From(new[] { "secret" }),
+                    ValueArray<NamedField>.Empty,
+                    ValueArray<string>.From(new[] { "secret" }),
                     CompletenessReason.Stale),
             }),
             CompletenessMap.From(

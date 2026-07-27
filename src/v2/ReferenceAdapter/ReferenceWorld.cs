@@ -56,22 +56,22 @@ namespace SignalRouter.V2.ReferenceAdapter
         public static AdapterDescriptor Descriptor => new AdapterDescriptor(
             "reference-adapter",
             new ContractVersion(1, 0),
-            ValueList<FramePhase>.From(new[] { FramePhase.Update, FramePhase.LateUpdate }),
+            ValueArray<FramePhase>.From(new[] { FramePhase.Update, FramePhase.LateUpdate }),
             FramePhase.LateUpdate,
-            ValueList<CapabilityProfileSupport>.From(new[]
+            ValueArray<CapabilityProfileSupport>.From(new[]
             {
                 new CapabilityProfileSupport(
-                    SetLabel, ValueList<CompletionProfileRef>.From(new[] { AppliedProfile })),
+                    SetLabel, ValueArray<CompletionProfileRef>.From(new[] { AppliedProfile })),
                 new CapabilityProfileSupport(
-                    SlowSetLabel, ValueList<CompletionProfileRef>.From(new[] { FrameCommittedProfile })),
+                    SlowSetLabel, ValueArray<CompletionProfileRef>.From(new[] { FrameCommittedProfile })),
             }),
             syncExecutionBoundMilliseconds: 5,
-            ValueList<CompletionLatencyBound>.From(new[]
+            ValueArray<CompletionLatencyBound>.From(new[]
             {
                 new CompletionLatencyBound(AppliedProfile, maxFrames: 1),
                 new CompletionLatencyBound(FrameCommittedProfile, maxFrames: 4),
             }),
-            ValueList<InputClassification>.From(new[]
+            ValueArray<InputClassification>.From(new[]
             {
                 new InputClassification(ManagedInputClass, InputClass.Managed),
                 new InputClassification(ObservedInputClass, InputClass.Observed),

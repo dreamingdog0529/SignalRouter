@@ -153,7 +153,7 @@ public sealed class RecordObservationServicesTests
             new TestCanonicalStateCodec(), stateStoreMaxTotalBytes: 700);
         fixture.Runtime.Registry.UpdateAttributes(
             fixture.SaveNode,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute(
                     "label", FieldValue.Of(new string('x', 400)), Sensitivity.Standard),
@@ -185,7 +185,7 @@ public sealed class RecordObservationServicesTests
         var fixture = BuildWithRecordView(new TestCanonicalStateCodec(), coordinator: coordinator);
         fixture.Executor.OnExecute = _ => fixture.Runtime.Registry.UpdateAttributes(
             fixture.SaveNode,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute("label", FieldValue.Of("Saved"), Sensitivity.Standard),
             }),
@@ -227,7 +227,7 @@ public sealed class RecordObservationServicesTests
         // A precondition rejection never enters Observing, yet every E4 carries an
         // after record-view (guarantees.md §5.4, kernel-execution.md §5).
         var failingPrecondition = new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(new ClauseId("c0"), new ComparisonExpression(
                     new FieldPath("nodes/save/attributes/label"),

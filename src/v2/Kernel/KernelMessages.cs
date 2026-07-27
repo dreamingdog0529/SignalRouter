@@ -13,14 +13,14 @@ namespace SignalRouter.V2.Kernel
     /// <summary>Receives an assertion batch's answers. Called on the pump thread.</summary>
     public interface IAssertionObserver
     {
-        void OnEvaluated(ValueList<PredicateEvaluationResult> results);
+        void OnEvaluated(ValueArray<PredicateEvaluationResult> results);
     }
 
     /// <summary>One assertion batch: N registered predicates against ONE pinned read (verification.md §3.2).</summary>
     public sealed class AssertionBatch
     {
         public AssertionBatch(
-            ValueList<PredicateContractRef> predicates,
+            ValueArray<PredicateContractRef> predicates,
             Principal principal,
             IAssertionObserver observer)
         {
@@ -39,7 +39,7 @@ namespace SignalRouter.V2.Kernel
             Observer = observer ?? throw new ArgumentNullException(nameof(observer));
         }
 
-        public ValueList<PredicateContractRef> Predicates { get; }
+        public ValueArray<PredicateContractRef> Predicates { get; }
 
         public Principal Principal { get; }
 
@@ -141,7 +141,7 @@ namespace SignalRouter.V2.Kernel
             Operation kind,
             NodeRegistration? registration,
             NodeRef node,
-            ValueList<NodeAttribute>? updates,
+            ValueArray<NodeAttribute>? updates,
             CapabilityContractRef capability,
             bool available,
             IRegistrationObserver? observer)
@@ -161,7 +161,7 @@ namespace SignalRouter.V2.Kernel
 
         internal NodeRef Node { get; }
 
-        internal ValueList<NodeAttribute>? Updates { get; }
+        internal ValueArray<NodeAttribute>? Updates { get; }
 
         internal CapabilityContractRef Capability { get; }
 

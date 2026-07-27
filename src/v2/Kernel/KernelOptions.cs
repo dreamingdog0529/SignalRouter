@@ -65,7 +65,7 @@ namespace SignalRouter.V2.Kernel
         public KernelOptions(
             IMonotonicClock monotonicClock,
             byte[] redactionKey,
-            ValueList<PrincipalDomainBinding> principalDomains,
+            ValueArray<PrincipalDomainBinding> principalDomains,
             SecurityDomainId recordDomain,
             int mailboxControlCapacity = 4096,
             int mailboxMaxOutstandingPostFenceOperations = 64,

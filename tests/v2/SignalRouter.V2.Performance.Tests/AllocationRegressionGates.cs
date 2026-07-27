@@ -122,8 +122,8 @@ public sealed class AllocationRegressionGates
                     BenchWorld.AgentView,
                     BenchWorld.AgentDomain,
                     "root"),
-                SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.MaterializedNode>.Empty,
-                SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.MaterializedSource>.Empty,
+                SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.MaterializedNode>.Empty,
+                SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.MaterializedSource>.Empty,
                 SignalRouter.V2.Contracts.CompletenessMap.From(
                     new[]
                     {

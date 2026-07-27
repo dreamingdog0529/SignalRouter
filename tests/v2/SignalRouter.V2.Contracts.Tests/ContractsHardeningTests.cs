@@ -47,8 +47,8 @@ public sealed class ContractsHardeningTests
             new StateSourceContractId("inventory"), new ContractVersion(1, 0));
         AssertEx.Throws<ArgumentException>(() => new MaterializedSource(
             new StateSourceKey("inventory"), contract,
-            ValueList<NamedField>.From(new[] { default(NamedField) }),
-            ValueList<string>.Empty,
+            ValueArray<NamedField>.From(new[] { default(NamedField) }),
+            ValueArray<string>.Empty,
             omission: null));
     }
 
@@ -59,16 +59,16 @@ public sealed class ContractsHardeningTests
             new StateSourceContractId("inventory"), new ContractVersion(1, 0));
         AssertEx.Throws<ArgumentException>(() => new MaterializedSource(
             new StateSourceKey("inventory"), contract,
-            ValueList<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(1L)) }),
-            ValueList<string>.From(new[] { "count" }),
+            ValueArray<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(1L)) }),
+            ValueArray<string>.From(new[] { "count" }),
             omission: null));
 
         // An omitted source may still declare redacted names — the intended
         // projector state for an unavailable source with a sensitive schema.
         var omitted = new MaterializedSource(
             new StateSourceKey("inventory"), contract,
-            ValueList<NamedField>.Empty,
-            ValueList<string>.From(new[] { "secret" }),
+            ValueArray<NamedField>.Empty,
+            ValueArray<string>.From(new[] { "secret" }),
             CompletenessReason.SourceUnavailable);
         Assert.That(omitted.RedactedFieldNames.Count, Is.EqualTo(1));
     }
@@ -80,13 +80,13 @@ public sealed class ContractsHardeningTests
             new StateSourceContractId("inventory"), new ContractVersion(1, 0));
         AssertEx.Throws<ArgumentException>(() => new MaterializedSource(
             new StateSourceKey("inventory"), contract,
-            ValueList<NamedField>.Empty,
-            ValueList<string>.From(new[] { "" }),
+            ValueArray<NamedField>.Empty,
+            ValueArray<string>.From(new[] { "" }),
             omission: null));
         AssertEx.Throws<ArgumentException>(() => new MaterializedSource(
             new StateSourceKey("inventory"), contract,
-            ValueList<NamedField>.Empty,
-            ValueList<string>.From(new[] { "bad" + LoneHighSurrogate }),
+            ValueArray<NamedField>.Empty,
+            ValueArray<string>.From(new[] { "bad" + LoneHighSurrogate }),
             omission: null));
     }
 

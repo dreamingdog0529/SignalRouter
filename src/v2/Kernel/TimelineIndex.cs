@@ -83,7 +83,7 @@ namespace SignalRouter.V2.Kernel
         /// record domain reads entries; every other principal gets the empty
         /// answer, indistinguishably from an empty timeline.
         /// </summary>
-        public ValueList<TimelineEntry> Snapshot(Principal principal)
+        public ValueArray<TimelineEntry> Snapshot(Principal principal)
         {
             if (principal == null)
             {
@@ -93,7 +93,7 @@ namespace SignalRouter.V2.Kernel
             if (!options.TryResolveDomain(principal, out var domain) ||
                 !domain.Equals(options.RecordDomain))
             {
-                return ValueList<TimelineEntry>.Empty;
+                return ValueArray<TimelineEntry>.Empty;
             }
 
             lock (gate)
@@ -104,7 +104,7 @@ namespace SignalRouter.V2.Kernel
                     entries.Add(item.Entry);
                 }
 
-                return ValueList<TimelineEntry>.From(entries);
+                return ValueArray<TimelineEntry>.From(entries);
             }
         }
 

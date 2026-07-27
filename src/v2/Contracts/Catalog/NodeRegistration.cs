@@ -125,8 +125,8 @@ namespace SignalRouter.V2.Contracts
             AuthorKey? authorKey,
             NodeRole role,
             AuthorKey? parent,
-            ValueList<NodeAttribute> attributes,
-            ValueList<CapabilityDeclaration> capabilities,
+            ValueArray<NodeAttribute> attributes,
+            ValueArray<CapabilityDeclaration> capabilities,
             ExposurePolicy exposure)
         {
             if (authorKey.HasValue && authorKey.Value.IsDefault)
@@ -188,9 +188,9 @@ namespace SignalRouter.V2.Contracts
 
         public AuthorKey? Parent { get; }
 
-        public ValueList<NodeAttribute> Attributes { get; }
+        public ValueArray<NodeAttribute> Attributes { get; }
 
-        public ValueList<CapabilityDeclaration> Capabilities { get; }
+        public ValueArray<CapabilityDeclaration> Capabilities { get; }
 
         public ExposurePolicy Exposure { get; }
     }

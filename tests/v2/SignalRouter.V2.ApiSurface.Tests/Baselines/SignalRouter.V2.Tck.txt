@@ -50,9 +50,9 @@ sealed class SignalRouter.V2.Tck.TckOptions
 
 sealed class SignalRouter.V2.Tck.TckReport
   property Aggregate : SignalRouter.V2.Tck.TckAggregate { public get; }
-  property Checks : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Tck.TckCheckResult> { public get; }
+  property Checks : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Tck.TckCheckResult> { public get; }
   property Version : System.String { public get; }
-  public ctor(System.String version, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Tck.TckCheckResult> checks)
+  public ctor(System.String version, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Tck.TckCheckResult> checks)
 
 static class SignalRouter.V2.Tck.TckSuite
   public const field Version : System.String = "tck-core-0.x"

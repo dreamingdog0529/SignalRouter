@@ -191,7 +191,7 @@ namespace SignalRouter.V2.Contracts
     /// <summary>And/Or composition over two or more sub-expressions.</summary>
     public sealed class BooleanExpression : PredicateExpression
     {
-        public BooleanExpression(BooleanOperator @operator, ValueList<PredicateExpression> operands)
+        public BooleanExpression(BooleanOperator @operator, ValueArray<PredicateExpression> operands)
         {
             if (operands == null)
             {
@@ -216,7 +216,7 @@ namespace SignalRouter.V2.Contracts
 
         public BooleanOperator Operator { get; }
 
-        public ValueList<PredicateExpression> Operands { get; }
+        public ValueArray<PredicateExpression> Operands { get; }
 
         public override int NodeCount
         {
