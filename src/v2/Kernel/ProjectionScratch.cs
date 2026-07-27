@@ -10,12 +10,14 @@ namespace SignalRouter.V2.Kernel
     /// pool rental. Pump-thread only, one materialization at a time — nested use
     /// is a kernel fault, never silent corruption.
     ///
-    /// Bounded high-water by construction: every list's length is capped by the
-    /// materialization ceilings and the per-pump byte budget, so retained
-    /// capacity cannot exceed the configured resource profile's own bounds.
-    /// Contents are post-redaction values only (sensitive material never enters
-    /// a materialized aggregate), and <see cref="List{T}.Clear"/> zeroes the
-    /// retained references at the start of every use.
+    /// Most buffers' lengths are capped by the materialization ceilings, but
+    /// candidate selection scales with the visible node count (unbounded until
+    /// `Kernel.MaxLiveNodes` lands), so <see cref="End"/> releases every
+    /// reference the buffers hold — a record must never stay rooted past its
+    /// materialization (an unregistered node would otherwise survive in
+    /// scratch) — and trims any backing storage that grew past the retained
+    /// clamp (the ADR 0013 bounded-high-water rule). Contents are
+    /// post-redaction values only.
     /// </summary>
     internal sealed class ProjectionScratch
     {
@@ -34,6 +36,13 @@ namespace SignalRouter.V2.Kernel
         internal readonly List<NamedField> Fields = new List<NamedField>();
         internal readonly List<string> RedactedNames = new List<string>();
 
+        /// <summary>
+        /// Retained-capacity clamp: matches the default materialization/terminal
+        /// scale of the resource profile. Storage that grew past it during one
+        /// projection (a large visible-node candidate sweep) trims back on exit.
+        /// </summary>
+        private const int RetainedCapacityLimit = 4096;
+
         private bool inUse;
 
         internal void Begin()
@@ -45,20 +54,45 @@ namespace SignalRouter.V2.Kernel
             }
 
             inUse = true;
-            Completeness.Clear();
-            Candidates.Clear();
-            Included.Clear();
-            IncludedKeys.Clear();
-            ChildCounts.Clear();
-            Nodes.Clear();
-            Attributes.Clear();
-            Capabilities.Clear();
-            SourceCandidates.Clear();
-            Sources.Clear();
-            Fields.Clear();
-            RedactedNames.Clear();
         }
 
-        internal void End() => inUse = false;
+        internal void End()
+        {
+            ReleaseAndClamp(Completeness);
+            ReleaseAndClamp(Candidates);
+            ReleaseAndClamp(Included);
+            ReleaseAndClamp(Nodes);
+            ReleaseAndClamp(Attributes);
+            ReleaseAndClamp(Capabilities);
+            ReleaseAndClamp(SourceCandidates);
+            ReleaseAndClamp(Sources);
+            ReleaseAndClamp(Fields);
+            ReleaseAndClamp(RedactedNames);
+
+            var keysOversized = IncludedKeys.Count > RetainedCapacityLimit;
+            IncludedKeys.Clear();
+            if (keysOversized)
+            {
+                IncludedKeys.TrimExcess();
+            }
+
+            var countsOversized = ChildCounts.Count > RetainedCapacityLimit;
+            ChildCounts.Clear();
+            if (countsOversized)
+            {
+                ChildCounts.TrimExcess();
+            }
+
+            inUse = false;
+        }
+
+        private static void ReleaseAndClamp<T>(List<T> buffer)
+        {
+            buffer.Clear();
+            if (buffer.Capacity > RetainedCapacityLimit)
+            {
+                buffer.Capacity = RetainedCapacityLimit;
+            }
+        }
     }
 }
