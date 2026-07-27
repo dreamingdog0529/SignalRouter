@@ -91,6 +91,42 @@ public sealed class AllocationRegressionGates
     }
 
     /// <summary>
+    /// P3c (finding B4): constructing aggregates from canonically-ordered
+    /// immutable input keeps the input arrays — the only allocation is the
+    /// aggregate object itself. Before the fix every construction re-copied and
+    /// re-sorted its lists (~5 copies of the same data per materialization).
+    /// </summary>
+    [Test]
+    public void AggregateConstructionFromSortedInputAllocatesOnlyTheObject()
+    {
+        var attributes = SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.MaterializedAttribute>.From(new[]
+        {
+            new SignalRouter.V2.Contracts.MaterializedAttribute(
+                "label", SignalRouter.V2.Contracts.FieldValue.Of("x"), redacted: false),
+            new SignalRouter.V2.Contracts.MaterializedAttribute(
+                "value", SignalRouter.V2.Contracts.FieldValue.Of(1L), redacted: false),
+        });
+        var capabilities = SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.MaterializedCapability>.From(new[]
+        {
+            new SignalRouter.V2.Contracts.MaterializedCapability(
+                new SignalRouter.V2.Contracts.CapabilityContractRef(
+                    new SignalRouter.V2.Contracts.CapabilityContractId("Invoke"),
+                    new SignalRouter.V2.Contracts.ContractVersion(1, 0)),
+                available: true),
+        });
+        var key = new SignalRouter.V2.Contracts.AuthorKey("n");
+        var role = SignalRouter.V2.Contracts.NodeRole.Button;
+        object? sink = null;
+
+        var bytes = AllocationMeter.BytesPerOperation(() =>
+            sink = new SignalRouter.V2.Contracts.MaterializedNode(
+                key, role, null, attributes, capabilities, 0));
+
+        TestContext.Out.WriteLine($"[allocation-gate] sorted-input node construction: {bytes} B/op (sink: {sink != null})");
+        Assert.That(bytes, Is.EqualTo(72), "one MaterializedNode instance; the input arrays are kept, never re-copied");
+    }
+
+    /// <summary>
     /// P3a (finding B2): a materialization lookup — path parse, node/source
     /// binary search, attribute/field match, completeness longest-prefix — is
     /// allocation-free. Before the fix every lookup split the path (and every
