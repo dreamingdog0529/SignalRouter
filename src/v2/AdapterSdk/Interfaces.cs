@@ -141,7 +141,7 @@ namespace SignalRouter.V2.AdapterSdk
 
         void Unregister(NodeRef node, IRegistrationObserver? observer);
 
-        void UpdateAttributes(NodeRef node, ValueList<NodeAttribute> updates, IRegistrationObserver? observer);
+        void UpdateAttributes(NodeRef node, ValueArray<NodeAttribute> updates, IRegistrationObserver? observer);
 
         void SetCapabilityAvailability(
             NodeRef node, CapabilityContractRef capability, bool available, IRegistrationObserver? observer);

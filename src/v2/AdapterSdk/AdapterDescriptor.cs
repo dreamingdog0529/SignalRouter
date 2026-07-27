@@ -42,7 +42,7 @@ namespace SignalRouter.V2.AdapterSdk
     /// <summary>The completion profiles an adapter supports for one capability (adapter-conformance.md §4).</summary>
     public sealed class CapabilityProfileSupport
     {
-        public CapabilityProfileSupport(CapabilityContractRef capability, ValueList<CompletionProfileRef> profiles)
+        public CapabilityProfileSupport(CapabilityContractRef capability, ValueArray<CompletionProfileRef> profiles)
         {
             if (capability.IsDefault)
             {
@@ -74,7 +74,7 @@ namespace SignalRouter.V2.AdapterSdk
 
         public CapabilityContractRef Capability { get; }
 
-        public ValueList<CompletionProfileRef> Profiles { get; }
+        public ValueArray<CompletionProfileRef> Profiles { get; }
     }
 
     /// <summary>The declared maximum effect-completion latency for one profile, as a frame/pump count.</summary>
@@ -125,12 +125,12 @@ namespace SignalRouter.V2.AdapterSdk
         public AdapterDescriptor(
             string adapterId,
             ContractVersion version,
-            ValueList<FramePhase> framePhases,
+            ValueArray<FramePhase> framePhases,
             FramePhase fencePhase,
-            ValueList<CapabilityProfileSupport> capabilities,
+            ValueArray<CapabilityProfileSupport> capabilities,
             int syncExecutionBoundMilliseconds,
-            ValueList<CompletionLatencyBound> completionLatencies,
-            ValueList<InputClassification> inputClassifications)
+            ValueArray<CompletionLatencyBound> completionLatencies,
+            ValueArray<InputClassification> inputClassifications)
         {
             AdapterId = ContractGrammar.ValidateIdentifier(adapterId, nameof(adapterId));
             Version = version;
@@ -254,17 +254,17 @@ namespace SignalRouter.V2.AdapterSdk
 
         public ContractVersion Version { get; }
 
-        public ValueList<FramePhase> FramePhases { get; }
+        public ValueArray<FramePhase> FramePhases { get; }
 
         public FramePhase FencePhase { get; }
 
-        public ValueList<CapabilityProfileSupport> Capabilities { get; }
+        public ValueArray<CapabilityProfileSupport> Capabilities { get; }
 
         /// <summary>Normative wall-clock bound; tier 3 measures it, and a supported adapter MUST meet it.</summary>
         public int SyncExecutionBoundMilliseconds { get; }
 
-        public ValueList<CompletionLatencyBound> CompletionLatencies { get; }
+        public ValueArray<CompletionLatencyBound> CompletionLatencies { get; }
 
-        public ValueList<InputClassification> InputClassifications { get; }
+        public ValueArray<InputClassification> InputClassifications { get; }
     }
 }

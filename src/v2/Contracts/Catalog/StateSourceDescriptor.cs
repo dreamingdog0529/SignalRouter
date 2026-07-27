@@ -56,7 +56,7 @@ namespace SignalRouter.V2.Contracts
     {
         public StateSourceContractDescriptor(
             StateSourceContractRef contract,
-            ValueList<SourceFieldSchema> fields,
+            ValueArray<SourceFieldSchema> fields,
             bool agentVisible,
             bool recordVisible,
             int maxDocumentBytes)
@@ -96,7 +96,7 @@ namespace SignalRouter.V2.Contracts
 
         public StateSourceContractRef Contract { get; }
 
-        public ValueList<SourceFieldSchema> Fields { get; }
+        public ValueArray<SourceFieldSchema> Fields { get; }
 
         public bool AgentVisible { get; }
 

@@ -87,8 +87,8 @@ public sealed class MalformedInputTests
         {
             var materialization = new ObservationMaterialization(
                 CodecFixtures.Basis(scope: new string('x', length)),
-                ValueList<MaterializedNode>.Empty,
-                ValueList<MaterializedSource>.Empty,
+                ValueArray<MaterializedNode>.Empty,
+                ValueArray<MaterializedSource>.Empty,
                 CompletenessMap.Complete);
             var decoded = Codec.Decode(
                 Codec.Encode(materialization).CopyPayload(),
@@ -100,18 +100,18 @@ public sealed class MalformedInputTests
         {
             var materialization = new ObservationMaterialization(
                 CodecFixtures.Basis(),
-                ValueList<MaterializedNode>.Empty,
-                ValueList<MaterializedSource>.From(new[]
+                ValueArray<MaterializedNode>.Empty,
+                ValueArray<MaterializedSource>.From(new[]
                 {
                     new MaterializedSource(
                         new StateSourceKey("s"),
                         new StateSourceContractRef(
                             new StateSourceContractId("s"), new ContractVersion(1, 0)),
-                        ValueList<NamedField>.From(new[]
+                        ValueArray<NamedField>.From(new[]
                         {
                             new NamedField("v", FieldValue.Of(new string('x', length))),
                         }),
-                        ValueList<string>.Empty,
+                        ValueArray<string>.Empty,
                         omission: null),
                 }),
                 CompletenessMap.Complete);

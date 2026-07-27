@@ -11,26 +11,26 @@ namespace SignalRouter.V2.Contracts
     {
         public ArtifactClassification(
             RecordingOutcome outcome,
-            ValueList<InteractionClassification> interactions,
-            ValueList<RuleViolation> violations,
+            ValueArray<InteractionClassification> interactions,
+            ValueArray<RuleViolation> violations,
             ClosureCheckResult closure,
-            ValueList<StaticReplayHazard> replayHazards)
+            ValueArray<StaticReplayHazard> replayHazards)
         {
             Outcome = outcome;
-            Interactions = interactions ?? throw new ArgumentNullException(nameof(interactions));
-            Violations = violations ?? throw new ArgumentNullException(nameof(violations));
+            Interactions = interactions;
+            Violations = violations;
             Closure = closure;
-            ReplayHazards = replayHazards ?? throw new ArgumentNullException(nameof(replayHazards));
+            ReplayHazards = replayHazards;
         }
 
         public RecordingOutcome Outcome { get; }
 
-        public ValueList<InteractionClassification> Interactions { get; }
+        public ValueArray<InteractionClassification> Interactions { get; }
 
-        public ValueList<RuleViolation> Violations { get; }
+        public ValueArray<RuleViolation> Violations { get; }
 
         public ClosureCheckResult Closure { get; }
 
-        public ValueList<StaticReplayHazard> ReplayHazards { get; }
+        public ValueArray<StaticReplayHazard> ReplayHazards { get; }
     }
 }

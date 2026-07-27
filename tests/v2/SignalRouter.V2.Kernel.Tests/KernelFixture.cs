@@ -46,9 +46,9 @@ internal sealed class RecordingWaitObserver : IWaitObserver
 /// <summary>Records assertion batch answers.</summary>
 internal sealed class RecordingAssertionObserver : IAssertionObserver
 {
-    internal ValueList<PredicateEvaluationResult>? Results { get; private set; }
+    internal ValueArray<PredicateEvaluationResult>? Results { get; private set; }
 
-    public void OnEvaluated(ValueList<PredicateEvaluationResult> results) => Results = results;
+    public void OnEvaluated(ValueArray<PredicateEvaluationResult> results) => Results = results;
 }
 
 /// <summary>
@@ -176,7 +176,7 @@ internal sealed class ScriptedExecutor : IEffectExecutor
 
     public void RequestCancel(EffectPermitToken permit) => CancelRequests.Add(permit);
 
-    internal void CompleteLast(EffectResolution resolution, ValueList<ContinuationRequest>? continuations = null)
+    internal void CompleteLast(EffectResolution resolution, ValueArray<ContinuationRequest>? continuations = null)
     {
         Sink.ReportCompletion(new EffectCompletion(Requests[^1].Permit, resolution, continuations));
     }
@@ -245,7 +245,7 @@ internal sealed class KernelFixture
         var options = new KernelOptions(
             Clock,
             new byte[] { 1, 2, 3, 4 },
-            ValueList<PrincipalDomainBinding>.From(new[]
+            ValueArray<PrincipalDomainBinding>.From(new[]
             {
                 new PrincipalDomainBinding(Principal.WellKnownKinds.AgentSession, AgentDomain),
                 new PrincipalDomainBinding(Principal.WellKnownKinds.LocalUser, HumanDomain),
@@ -269,7 +269,7 @@ internal sealed class KernelFixture
             timelineRetentionBytes: timelineRetentionBytes);
         Runtime = new KernelRuntime(new RuntimeIncarnationId("incarnation-1"), options, coordinator);
 
-        var visibleToAll = new ExposurePolicy(ValueList<SecurityDomainId>.From(new[]
+        var visibleToAll = new ExposurePolicy(ValueArray<SecurityDomainId>.From(new[]
         {
             AgentDomain, HumanDomain, RecordDomain,
         }));
@@ -282,11 +282,11 @@ internal sealed class KernelFixture
             new AuthorKey("save"),
             NodeRole.Button,
             parent: null,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute("label", FieldValue.Of("Save"), Sensitivity.Standard),
             }),
-            ValueList<CapabilityDeclaration>.From(new[]
+            ValueArray<CapabilityDeclaration>.From(new[]
             {
                 new CapabilityDeclaration(Invoke, initiallyAvailable: true),
             }),
@@ -297,8 +297,8 @@ internal sealed class KernelFixture
             new AuthorKey("secret"),
             NodeRole.Button,
             parent: null,
-            ValueList<NodeAttribute>.Empty,
-            ValueList<CapabilityDeclaration>.From(new[]
+            ValueArray<NodeAttribute>.Empty,
+            ValueArray<CapabilityDeclaration>.From(new[]
             {
                 new CapabilityDeclaration(Invoke, initiallyAvailable: true),
             }),
@@ -309,7 +309,7 @@ internal sealed class KernelFixture
             new StateSourceContractDescriptor(
                 new StateSourceContractRef(
                     new StateSourceContractId("inventory"), new ContractVersion(1, 0)),
-                ValueList<SourceFieldSchema>.From(new[]
+                ValueArray<SourceFieldSchema>.From(new[]
                 {
                     new SourceFieldSchema("count", FieldType.Integer, Sensitivity.Standard),
                     new SourceFieldSchema("secret", FieldType.String, Sensitivity.Sensitive),
@@ -320,7 +320,7 @@ internal sealed class KernelFixture
             StateSourceClass.RevisionBound));
 
         Runtime.Bootstrap.RegisterPredicateContract(LabelExists, new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(
                     new ClauseId("c0"),
@@ -397,7 +397,7 @@ internal sealed class KernelFixture
     {
         var answer = Runtime.Ingress.PublishSourceDocument(new SourcePublication(
             new StateSourceKey("inventory"),
-            new SourceDocument(ValueList<NamedField>.From(new[]
+            new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("count", FieldValue.Of(count)),
             })),

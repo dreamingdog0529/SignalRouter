@@ -69,7 +69,7 @@ public sealed class PumpAndIngressTests
     public void SourceDocumentsHaveUniqueFieldsAndPublicationsCarryCausation()
     {
         AssertEx.Throws<ArgumentException>(() => _ = new SourceDocument(
-            ValueList<NamedField>.From(new[]
+            ValueArray<NamedField>.From(new[]
             {
                 new NamedField("count", FieldValue.Of(1L)),
                 new NamedField("count", FieldValue.Of(2L)),
@@ -77,7 +77,7 @@ public sealed class PumpAndIngressTests
 
         var publication = new SourcePublication(
             new StateSourceKey("inventory"),
-            new SourceDocument(ValueList<NamedField>.From(new[]
+            new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("count", FieldValue.Of(1L)),
             })),

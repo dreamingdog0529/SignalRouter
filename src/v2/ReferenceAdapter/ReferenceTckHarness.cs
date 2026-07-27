@@ -66,7 +66,7 @@ namespace SignalRouter.V2.ReferenceAdapter
 
         public PublicationAnswer PublishCount(long count)
         {
-            return host.Ingress.Publish(new SourceDocument(ValueList<NamedField>.From(new[]
+            return host.Ingress.Publish(new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("count", FieldValue.Of(count)),
             })));
@@ -74,7 +74,7 @@ namespace SignalRouter.V2.ReferenceAdapter
 
         public PublicationAnswer PublishUndeclaredField()
         {
-            return host.Ingress.Publish(new SourceDocument(ValueList<NamedField>.From(new[]
+            return host.Ingress.Publish(new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("undeclared", FieldValue.Of(1L)),
             })));

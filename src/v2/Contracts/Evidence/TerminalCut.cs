@@ -28,7 +28,7 @@ namespace SignalRouter.V2.Contracts
             CompletionEvidence? completionEvidence = null,
             PostconditionResult? postcondition = null,
             CancellationEvidence? cancellation = null,
-            ValueList<ContinuationCommitment>? continuations = null)
+            ValueArray<ContinuationCommitment>? continuations = null)
             : base(sequence)
         {
             if (requestId.IsDefault)
@@ -181,7 +181,7 @@ namespace SignalRouter.V2.Contracts
             CompletionEvidence = completionEvidence;
             Postcondition = postcondition;
             Cancellation = cancellation;
-            Continuations = continuations ?? ValueList<ContinuationCommitment>.Empty;
+            Continuations = continuations ?? ValueArray<ContinuationCommitment>.Empty;
         }
 
         public override EvidenceCutKind Kind => EvidenceCutKind.TerminalCut;
@@ -213,6 +213,6 @@ namespace SignalRouter.V2.Contracts
         public CancellationEvidence? Cancellation { get; }
 
         /// <summary>The ordered continuation commitments (guarantees.md §5.8).</summary>
-        public ValueList<ContinuationCommitment> Continuations { get; }
+        public ValueArray<ContinuationCommitment> Continuations { get; }
     }
 }

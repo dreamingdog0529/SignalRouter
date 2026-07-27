@@ -47,7 +47,7 @@ public sealed class CheckpointTimelineTests
         var fixture = new KernelFixture(codec: new TestCanonicalStateCodec());
         fixture.Executor.OnExecute = _ => fixture.Runtime.Registry.UpdateAttributes(
             fixture.SaveNode,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute("label", FieldValue.Of("Saved"), Sensitivity.Standard),
             }),
@@ -199,7 +199,7 @@ public sealed class CheckpointTimelineTests
         // codex review: a zero-effect rejection terminating in the same pump as a
         // source publication must not lend its order to the source-only checkpoint.
         var failingPrecondition = new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(new ClauseId("c0"), new ComparisonExpression(
                     new FieldPath("nodes/save/attributes/label"),
@@ -234,7 +234,7 @@ public sealed class CheckpointTimelineTests
 
         fixture.Runtime.Registry.UpdateAttributes(
             fixture.SaveNode,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute(
                     "label", FieldValue.Of(new string('x', 600)), Sensitivity.Standard),
@@ -248,7 +248,7 @@ public sealed class CheckpointTimelineTests
 
         fixture.Runtime.Registry.UpdateAttributes(
             fixture.SaveNode,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute("label", FieldValue.Of("small"), Sensitivity.Standard),
             }),

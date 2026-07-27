@@ -23,7 +23,7 @@ public sealed class WaitSharedReadTests
         {
             ReadCount++;
             return new SampledDocument(
-                new SourceDocument(ValueList<NamedField>.From(new[]
+                new SourceDocument(ValueArray<NamedField>.From(new[]
                 {
                     new NamedField("flag", FieldValue.Of(true)),
                 })),
@@ -40,7 +40,7 @@ public sealed class WaitSharedReadTests
             new StateSourceContractDescriptor(
                 new StateSourceContractRef(
                     new StateSourceContractId("sampled"), new ContractVersion(1, 0)),
-                ValueList<SourceFieldSchema>.From(new[]
+                ValueArray<SourceFieldSchema>.From(new[]
                 {
                     new SourceFieldSchema("flag", FieldType.Boolean, Sensitivity.Standard),
                 }),
@@ -98,7 +98,7 @@ public sealed class WaitSharedReadTests
         // labelExists compares nodes/save/attributes/label to "Saved".
         fixture.Runtime.Registry.UpdateAttributes(
             fixture.SaveNode,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute("label", FieldValue.Of("Saved"), Sensitivity.Standard),
             }),

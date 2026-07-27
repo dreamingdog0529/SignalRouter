@@ -68,7 +68,7 @@ namespace SignalRouter.V2.Contracts
             RecordingCloseReason reason,
             long declaredEventCount,
             ContentId finalCheckpoint,
-            ValueList<ContentId> declaredReachableContentIds)
+            ValueArray<ContentId> declaredReachableContentIds)
             : base(sequence)
         {
             if (reason.IsDefault)
@@ -94,8 +94,7 @@ namespace SignalRouter.V2.Contracts
             Reason = reason;
             DeclaredEventCount = declaredEventCount;
             FinalCheckpoint = finalCheckpoint;
-            DeclaredReachableContentIds = declaredReachableContentIds
-                ?? throw new ArgumentNullException(nameof(declaredReachableContentIds));
+            DeclaredReachableContentIds = declaredReachableContentIds;
         }
 
         public override EvidenceCutKind Kind => EvidenceCutKind.RecordingClosed;
@@ -108,6 +107,6 @@ namespace SignalRouter.V2.Contracts
         public ContentId FinalCheckpoint { get; }
 
         /// <summary>The declared reachable-ContentId set the reader recomputes and verifies.</summary>
-        public ValueList<ContentId> DeclaredReachableContentIds { get; }
+        public ValueArray<ContentId> DeclaredReachableContentIds { get; }
     }
 }

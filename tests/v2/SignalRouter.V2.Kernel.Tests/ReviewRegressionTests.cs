@@ -53,7 +53,7 @@ public sealed class ReviewRegressionTests
         fixture.PumpUntilIdle();
         fixture.Executor.CompleteLast(
             EffectResolution.Succeeded(Applied()),
-            ValueList<ContinuationRequest>.From(new[]
+            ValueArray<ContinuationRequest>.From(new[]
             {
                 new ContinuationRequest(
                     KernelFixture.Invoke,
@@ -127,7 +127,7 @@ public sealed class ReviewRegressionTests
         // Undeclared field: rejected before any swap or revision advance.
         var undeclared = fixture.Runtime.Ingress.PublishSourceDocument(new SourcePublication(
             new StateSourceKey("inventory"),
-            new SourceDocument(ValueList<NamedField>.From(new[]
+            new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("bogus", FieldValue.Of(1L)),
             })),
@@ -139,7 +139,7 @@ public sealed class ReviewRegressionTests
         // Wrong runtime type: rejected the same way.
         fixture.Runtime.Ingress.PublishSourceDocument(new SourcePublication(
             new StateSourceKey("inventory"),
-            new SourceDocument(ValueList<NamedField>.From(new[]
+            new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("count", FieldValue.Of("not-a-number")),
             })),
@@ -181,7 +181,7 @@ public sealed class ReviewRegressionTests
         var childCount = new PredicateContractRef(
             new PredicateContractId("childCount"), new ContractVersion(1, 0));
         fixture.Runtime.Bootstrap.RegisterPredicateContract(childCount, new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(new ClauseId("c0"), new CountExpression(
                     new FieldPath("nodes/save/children"), ComparisonOperator.Ge, 1)),
@@ -190,17 +190,17 @@ public sealed class ReviewRegressionTests
         // One hidden child, one visible child under the visible parent.
         fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("hidden-child"), NodeRole.Container, new AuthorKey("save"),
-            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty,
+            ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty,
             ExposurePolicy.Hidden));
         fixture.Runtime.Start(fixture.Executor);
 
         var observer = new RecordingAssertionObserver();
         fixture.Runtime.Control.EvaluateAssertions(new AssertionBatch(
-            ValueList<PredicateContractRef>.From(new[] { childCount }),
+            ValueArray<PredicateContractRef>.From(new[] { childCount }),
             KernelFixture.Agent, observer));
         fixture.PumpUntilIdle();
         Assert.That(
-            observer.Results!.Single().Outcome, Is.EqualTo(PredicateEvaluationOutcome.False),
+            observer.Results!.Value.Single().Outcome, Is.EqualTo(PredicateEvaluationOutcome.False),
             "the hidden child is invisible to the count");
     }
 
@@ -226,7 +226,7 @@ public sealed class ReviewRegressionTests
         var registration = new RecordingRegistrationObserver();
         fixture.Runtime.Registry.Register(new NodeRegistration(
             new AuthorKey("late"), NodeRole.Button, null,
-            ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty,
+            ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty,
             ExposurePolicy.Hidden), registration);
         var wait = new RecordingWaitObserver();
         fixture.Runtime.Control.ArmWait(

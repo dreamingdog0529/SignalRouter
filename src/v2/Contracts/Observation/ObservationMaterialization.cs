@@ -94,8 +94,8 @@ namespace SignalRouter.V2.Contracts
             AuthorKey key,
             NodeRole role,
             AuthorKey? parent,
-            ValueList<MaterializedAttribute> attributes,
-            ValueList<MaterializedCapability> capabilities,
+            ValueArray<MaterializedAttribute> attributes,
+            ValueArray<MaterializedCapability> capabilities,
             int visibleChildCount)
         {
             if (key.IsDefault)
@@ -149,9 +149,9 @@ namespace SignalRouter.V2.Contracts
         /// </summary>
         public AuthorKey? Parent { get; }
 
-        public ValueList<MaterializedAttribute> Attributes { get; }
+        public ValueArray<MaterializedAttribute> Attributes { get; }
 
-        public ValueList<MaterializedCapability> Capabilities { get; }
+        public ValueArray<MaterializedCapability> Capabilities { get; }
 
         public int VisibleChildCount { get; }
 
@@ -178,8 +178,8 @@ namespace SignalRouter.V2.Contracts
         internal static string CapabilityOrderKey(CapabilityContractRef contract) =>
             contract.Id.Value + "@" + contract.Version;
 
-        private static ValueList<T> SortUnique<T>(
-            ValueList<T> items, Func<T, string> orderKey, string parameterName)
+        private static ValueArray<T> SortUnique<T>(
+            ValueArray<T> items, Func<T, string> orderKey, string parameterName)
         {
             var sorted = new List<T>(items);
             sorted.Sort((left, right) => string.CompareOrdinal(orderKey(left), orderKey(right)));
@@ -192,7 +192,7 @@ namespace SignalRouter.V2.Contracts
                 }
             }
 
-            return ValueList<T>.From(sorted);
+            return ValueArray<T>.From(sorted);
         }
     }
 
@@ -206,8 +206,8 @@ namespace SignalRouter.V2.Contracts
         public MaterializedSource(
             StateSourceKey key,
             StateSourceContractRef contract,
-            ValueList<NamedField> fields,
-            ValueList<string> redactedFieldNames,
+            ValueArray<NamedField> fields,
+            ValueArray<string> redactedFieldNames,
             CompletenessReason? omission)
         {
             if (key.IsDefault)
@@ -297,8 +297,8 @@ namespace SignalRouter.V2.Contracts
                 }
             }
 
-            Fields = ValueList<NamedField>.From(sortedFields);
-            RedactedFieldNames = ValueList<string>.From(sortedRedacted);
+            Fields = ValueArray<NamedField>.From(sortedFields);
+            RedactedFieldNames = ValueArray<string>.From(sortedRedacted);
             Omission = omission;
         }
 
@@ -307,10 +307,10 @@ namespace SignalRouter.V2.Contracts
         public StateSourceContractRef Contract { get; }
 
         /// <summary>Post-redaction published fields (a sensitive value never appears here).</summary>
-        public ValueList<NamedField> Fields { get; }
+        public ValueArray<NamedField> Fields { get; }
 
         /// <summary>Declared sensitive field names — presence without content.</summary>
-        public ValueList<string> RedactedFieldNames { get; }
+        public ValueArray<string> RedactedFieldNames { get; }
 
         public CompletenessReason? Omission { get; }
 
@@ -343,8 +343,8 @@ namespace SignalRouter.V2.Contracts
     {
         public ObservationMaterialization(
             ObservationBasis basis,
-            ValueList<MaterializedNode> nodes,
-            ValueList<MaterializedSource> sources,
+            ValueArray<MaterializedNode> nodes,
+            ValueArray<MaterializedSource> sources,
             CompletenessMap completeness)
         {
             Basis = basis ?? throw new ArgumentNullException(nameof(basis));
@@ -380,15 +380,15 @@ namespace SignalRouter.V2.Contracts
                 }
             }
 
-            Nodes = ValueList<MaterializedNode>.From(sortedNodes);
-            Sources = ValueList<MaterializedSource>.From(sortedSources);
+            Nodes = ValueArray<MaterializedNode>.From(sortedNodes);
+            Sources = ValueArray<MaterializedSource>.From(sortedSources);
         }
 
         public ObservationBasis Basis { get; }
 
-        public ValueList<MaterializedNode> Nodes { get; }
+        public ValueArray<MaterializedNode> Nodes { get; }
 
-        public ValueList<MaterializedSource> Sources { get; }
+        public ValueArray<MaterializedSource> Sources { get; }
 
         public CompletenessMap Completeness { get; }
     }

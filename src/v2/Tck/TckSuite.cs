@@ -88,7 +88,7 @@ namespace SignalRouter.V2.Tck
                     "Staged: the fixture and reset contract executes under the replay harness (docs/v2 item 5)."),
             };
 
-            return new TckReport(Version, ValueList<TckCheckResult>.From(checks));
+            return new TckReport(Version, ValueArray<TckCheckResult>.From(checks));
         }
 
         // ── Check bodies ─────────────────────────────────────────────────────
@@ -98,13 +98,13 @@ namespace SignalRouter.V2.Tck
             var duplicate = new CollectingRegistrationObserver();
             harness.Runtime.Registry.Register(new NodeRegistration(
                 harness.VisibleTargetKey, NodeRole.Container, parent: null,
-                ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty,
+                ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty,
                 ExposurePolicy.Hidden), duplicate);
 
             var fresh = new CollectingRegistrationObserver();
             harness.Runtime.Registry.Register(new NodeRegistration(
                 new AuthorKey("tck-fresh-node"), NodeRole.Container, parent: null,
-                ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty,
+                ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty,
                 ExposurePolicy.Hidden), fresh);
             harness.DriveFrames(1);
 
@@ -458,11 +458,11 @@ namespace SignalRouter.V2.Tck
                 "the world did not become quiescent within " + options.QuiescenceFrameBound + " frames");
         }
 
-        private static ValueList<PredicateEvaluationOutcome> EvaluateBatch(ITckHarness harness)
+        private static ValueArray<PredicateEvaluationOutcome> EvaluateBatch(ITckHarness harness)
         {
             var observer = new CollectingAssertionObserver();
             harness.Runtime.Control.EvaluateAssertions(new AssertionBatch(
-                ValueList<PredicateContractRef>.From(new[]
+                ValueArray<PredicateContractRef>.From(new[]
                 {
                     harness.CountAtLeastOne,
                     harness.CountAtLeastTwo,
@@ -470,15 +470,15 @@ namespace SignalRouter.V2.Tck
                 harness.AgentPrincipal,
                 observer));
             harness.DriveFrames(1);
-            Require(observer.Results != null && observer.Results.Count == 2,
+            Require(observer.Results.HasValue && observer.Results.Value.Count == 2,
                 "the assertion batch must answer every predicate in order");
             var outcomes = new List<PredicateEvaluationOutcome>(2);
-            foreach (var result in observer.Results!)
+            foreach (var result in observer.Results!.Value)
             {
                 outcomes.Add(result.Outcome);
             }
 
-            return ValueList<PredicateEvaluationOutcome>.From(outcomes);
+            return ValueArray<PredicateEvaluationOutcome>.From(outcomes);
         }
 
         private static List<string> TraceKinds(ITckHarness harness)
@@ -552,9 +552,9 @@ namespace SignalRouter.V2.Tck
 
         private sealed class CollectingAssertionObserver : IAssertionObserver
         {
-            internal ValueList<PredicateEvaluationResult>? Results { get; private set; }
+            internal ValueArray<PredicateEvaluationResult>? Results { get; private set; }
 
-            public void OnEvaluated(ValueList<PredicateEvaluationResult> results) => Results = results;
+            public void OnEvaluated(ValueArray<PredicateEvaluationResult> results) => Results = results;
         }
     }
 }

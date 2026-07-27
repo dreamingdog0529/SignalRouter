@@ -39,7 +39,7 @@ public sealed class AdmissionTests
 
         // Same RequestId, different payload: RequestIdConflict.
         var conflicting = fixture.Submit("r1", targetKey: "save", payload: new InvocationPayload(
-            ValueList<NamedField>.Empty));
+            ValueArray<NamedField>.Empty));
         _ = conflicting; // identical because schema is empty — force difference via target
         var conflictObserver = fixture.Submit("r1", targetKey: "secret");
         fixture.Pump(maxTurns: 4);

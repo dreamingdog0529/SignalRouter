@@ -55,7 +55,7 @@ namespace SignalRouter.V2.Contracts
     {
         private readonly Dictionary<FieldPath, FieldType> fields;
 
-        public PredicateCatalog(ValueList<FieldSchema> fields)
+        public PredicateCatalog(ValueArray<FieldSchema> fields)
         {
             if (fields == null)
             {
@@ -77,7 +77,7 @@ namespace SignalRouter.V2.Contracts
             Fields = fields;
         }
 
-        public ValueList<FieldSchema> Fields { get; }
+        public ValueArray<FieldSchema> Fields { get; }
 
         public bool TryGetType(FieldPath path, out FieldType type)
         {

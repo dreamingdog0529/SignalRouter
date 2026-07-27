@@ -16,11 +16,11 @@ public sealed class PredicateModelTests
     public void ClauseIdsMustBeUniqueAndDefinitionNonEmpty()
     {
         AssertEx.Throws<ArgumentException>(() => _ = new PredicateDefinition(
-            ValueList<PredicateClause>.Empty));
+            ValueArray<PredicateClause>.Empty));
 
         var clause = new PredicateClause(new ClauseId("c1"), Leaf());
         AssertEx.Throws<ArgumentException>(() => _ = new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 clause,
                 new PredicateClause(new ClauseId("c1"), Leaf("nodes/b/attributes/y")),
@@ -31,7 +31,7 @@ public sealed class PredicateModelTests
     public void BooleanCompositionRequiresAtLeastTwoOperands()
     {
         AssertEx.Throws<ArgumentException>(() => _ = new BooleanExpression(
-            BooleanOperator.And, ValueList<PredicateExpression>.From(new[] { Leaf() })));
+            BooleanOperator.And, ValueArray<PredicateExpression>.From(new[] { Leaf() })));
     }
 
     [Test]
@@ -64,7 +64,7 @@ public sealed class PredicateModelTests
     {
         var tree = new NotExpression(new BooleanExpression(
             BooleanOperator.And,
-            ValueList<PredicateExpression>.From(new[] { Leaf(), Leaf("nodes/b/attributes/y") })));
+            ValueArray<PredicateExpression>.From(new[] { Leaf(), Leaf("nodes/b/attributes/y") })));
 
         Assert.That(tree.NodeCount, Is.EqualTo(4));
         Assert.That(tree.Depth, Is.EqualTo(3));
@@ -81,7 +81,7 @@ public sealed class PredicateModelTests
         AssertEx.Throws<ArgumentException>(() => _ = new CountExpression(
             new FieldPath("sources/s/items"), (ComparisonOperator)99, 1));
         AssertEx.Throws<ArgumentException>(() => _ = new BooleanExpression(
-            (BooleanOperator)99, ValueList<PredicateExpression>.From(new[] { Leaf(), Leaf("b/c") })));
+            (BooleanOperator)99, ValueArray<PredicateExpression>.From(new[] { Leaf(), Leaf("b/c") })));
     }
 
     [Test]

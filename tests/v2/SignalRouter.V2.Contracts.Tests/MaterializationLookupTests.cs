@@ -26,26 +26,26 @@ public sealed class MaterializationLookupTests
             new AuthorKey("save"),
             NodeRole.Button,
             parent: null,
-            ValueList<MaterializedAttribute>.From(new[]
+            ValueArray<MaterializedAttribute>.From(new[]
             {
                 new MaterializedAttribute("label", FieldValue.Of("Save"), redacted: false),
                 new MaterializedAttribute("nullable", FieldValue.Null, redacted: false),
                 new MaterializedAttribute("secret", default, redacted: true),
             }),
-            ValueList<MaterializedCapability>.Empty,
+            ValueArray<MaterializedCapability>.Empty,
             visibleChildCount: 2);
         var source = new MaterializedSource(
             new StateSourceKey("inventory"),
             new StateSourceContractRef(new StateSourceContractId("inventory"), new ContractVersion(1, 0)),
             sourceOmission.HasValue
-                ? ValueList<NamedField>.Empty
-                : ValueList<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(5L)) }),
-            ValueList<string>.From(new[] { "secretField" }),
+                ? ValueArray<NamedField>.Empty
+                : ValueArray<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(5L)) }),
+            ValueArray<string>.From(new[] { "secretField" }),
             sourceOmission);
         return new MaterializationLookup(new ObservationMaterialization(
             basis,
-            ValueList<MaterializedNode>.From(new[] { node }),
-            ValueList<MaterializedSource>.From(new[] { source }),
+            ValueArray<MaterializedNode>.From(new[] { node }),
+            ValueArray<MaterializedSource>.From(new[] { source }),
             completeness ?? CompletenessMap.Complete));
     }
 

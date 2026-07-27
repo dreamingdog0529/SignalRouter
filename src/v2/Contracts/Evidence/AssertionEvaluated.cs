@@ -64,9 +64,9 @@ namespace SignalRouter.V2.Contracts
             bool completeForScope,
             PredicateContractRef predicate,
             ArgumentDigest operands,
-            ValueList<ClauseEvaluation> clauses,
+            ValueArray<ClauseEvaluation> clauses,
             PredicateEvaluationOutcome outcome,
-            ValueList<string> witnessPaths)
+            ValueArray<string> witnessPaths)
             : base(sequence)
         {
             if (incarnation.IsDefault)
@@ -115,9 +115,9 @@ namespace SignalRouter.V2.Contracts
             CompleteForScope = completeForScope;
             Predicate = predicate;
             Operands = operands;
-            Clauses = clauses ?? throw new ArgumentNullException(nameof(clauses));
+            Clauses = clauses;
             Outcome = outcome;
-            WitnessPaths = witnessPaths ?? throw new ArgumentNullException(nameof(witnessPaths));
+            WitnessPaths = witnessPaths;
         }
 
         public override EvidenceCutKind Kind => EvidenceCutKind.AssertionEvaluated;
@@ -145,11 +145,11 @@ namespace SignalRouter.V2.Contracts
         /// <summary>Redacted operands; secret operands are secret references.</summary>
         public ArgumentDigest Operands { get; }
 
-        public ValueList<ClauseEvaluation> Clauses { get; }
+        public ValueArray<ClauseEvaluation> Clauses { get; }
 
         public PredicateEvaluationOutcome Outcome { get; }
 
         /// <summary>Bounded, redacted witness paths.</summary>
-        public ValueList<string> WitnessPaths { get; }
+        public ValueArray<string> WitnessPaths { get; }
     }
 }

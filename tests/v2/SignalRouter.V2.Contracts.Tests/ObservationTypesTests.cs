@@ -67,12 +67,12 @@ public sealed class ObservationTypesTests
             new AuthorKey("save"),
             NodeRole.Button,
             parent: null,
-            ValueList<MaterializedAttribute>.From(new[]
+            ValueArray<MaterializedAttribute>.From(new[]
             {
                 new MaterializedAttribute("zeta", FieldValue.Of("z"), redacted: false),
                 new MaterializedAttribute("alpha", FieldValue.Of("a"), redacted: false),
             }),
-            ValueList<MaterializedCapability>.From(new[]
+            ValueArray<MaterializedCapability>.From(new[]
             {
                 new MaterializedCapability(invoke, available: true),
                 new MaterializedCapability(abort, available: false),
@@ -101,12 +101,12 @@ public sealed class ObservationTypesTests
             new StateSourceContractId("inventory"), new ContractVersion(1, 0));
         AssertEx.Throws<ArgumentException>(() => new MaterializedSource(
             new StateSourceKey("inventory"), contract,
-            ValueList<NamedField>.Empty, ValueList<string>.Empty,
+            ValueArray<NamedField>.Empty, ValueArray<string>.Empty,
             CompletenessReason.Redacted));
         AssertEx.Throws<ArgumentException>(() => new MaterializedSource(
             new StateSourceKey("inventory"), contract,
-            ValueList<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(1L)) }),
-            ValueList<string>.Empty,
+            ValueArray<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(1L)) }),
+            ValueArray<string>.Empty,
             CompletenessReason.Stale));
     }
 
@@ -119,21 +119,21 @@ public sealed class ObservationTypesTests
             new StateSourceContractId("inventory"), new ContractVersion(1, 0));
         var shuffled = new MaterializedSource(
             new StateSourceKey("inventory"), contract,
-            ValueList<NamedField>.From(new[]
+            ValueArray<NamedField>.From(new[]
             {
                 new NamedField("zeta", FieldValue.Of(1L)),
                 new NamedField("alpha", FieldValue.Of(2L)),
             }),
-            ValueList<string>.From(new[] { "z-secret", "a-secret" }),
+            ValueArray<string>.From(new[] { "z-secret", "a-secret" }),
             omission: null);
         var ordered = new MaterializedSource(
             new StateSourceKey("inventory"), contract,
-            ValueList<NamedField>.From(new[]
+            ValueArray<NamedField>.From(new[]
             {
                 new NamedField("alpha", FieldValue.Of(2L)),
                 new NamedField("zeta", FieldValue.Of(1L)),
             }),
-            ValueList<string>.From(new[] { "a-secret", "z-secret" }),
+            ValueArray<string>.From(new[] { "a-secret", "z-secret" }),
             omission: null);
 
         Assert.That(shuffled, Is.EqualTo(ordered));
@@ -146,20 +146,20 @@ public sealed class ObservationTypesTests
     {
         var node = new MaterializedNode(
             new AuthorKey("save"), NodeRole.Button, null,
-            ValueList<MaterializedAttribute>.Empty, ValueList<MaterializedCapability>.Empty, 0);
+            ValueArray<MaterializedAttribute>.Empty, ValueArray<MaterializedCapability>.Empty, 0);
         AssertEx.Throws<ArgumentException>(() => new ObservationMaterialization(
             Basis(),
-            ValueList<MaterializedNode>.From(new[] { node, node }),
-            ValueList<MaterializedSource>.Empty,
+            ValueArray<MaterializedNode>.From(new[] { node, node }),
+            ValueArray<MaterializedSource>.Empty,
             CompletenessMap.Complete));
 
         var zebra = new MaterializedNode(
             new AuthorKey("zebra"), NodeRole.Button, null,
-            ValueList<MaterializedAttribute>.Empty, ValueList<MaterializedCapability>.Empty, 0);
+            ValueArray<MaterializedAttribute>.Empty, ValueArray<MaterializedCapability>.Empty, 0);
         var materialization = new ObservationMaterialization(
             Basis(),
-            ValueList<MaterializedNode>.From(new[] { zebra, node }),
-            ValueList<MaterializedSource>.Empty,
+            ValueArray<MaterializedNode>.From(new[] { zebra, node }),
+            ValueArray<MaterializedSource>.Empty,
             CompletenessMap.Complete);
         Assert.That(materialization.Nodes[0].Key, Is.EqualTo(new AuthorKey("save")));
     }

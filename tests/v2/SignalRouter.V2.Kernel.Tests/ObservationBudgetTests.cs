@@ -18,7 +18,7 @@ public sealed class ObservationBudgetTests
         new(new ViewContractId("agent-standard"), new ContractVersion(1, 0));
 
     private static readonly ExposurePolicy VisibleToAgent =
-        new(ValueList<SecurityDomainId>.From(new[] { KernelFixture.AgentDomain }));
+        new(ValueArray<SecurityDomainId>.From(new[] { KernelFixture.AgentDomain }));
 
     private static void RegisterButtons(KernelFixture fixture, int count)
     {
@@ -26,7 +26,7 @@ public sealed class ObservationBudgetTests
         {
             fixture.Runtime.Bootstrap.RegisterNode(new NodeRegistration(
                 new AuthorKey("extra-" + i), NodeRole.Button, parent: null,
-                ValueList<NodeAttribute>.Empty, ValueList<CapabilityDeclaration>.Empty,
+                ValueArray<NodeAttribute>.Empty, ValueArray<CapabilityDeclaration>.Empty,
                 VisibleToAgent));
         }
     }
@@ -109,7 +109,7 @@ public sealed class ObservationBudgetTests
             new StateSourceContractDescriptor(
                 new StateSourceContractRef(
                     new StateSourceContractId("sampled"), new ContractVersion(1, 0)),
-                ValueList<SourceFieldSchema>.From(new[]
+                ValueArray<SourceFieldSchema>.From(new[]
                 {
                     new SourceFieldSchema("phase", FieldType.String, Sensitivity.Standard),
                 }),
@@ -122,7 +122,7 @@ public sealed class ObservationBudgetTests
         var probe = new PredicateContractRef(
             new PredicateContractId("phaseProbe"), new ContractVersion(1, 0));
         fixture.Runtime.Bootstrap.RegisterPredicateContract(probe, new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(new ClauseId("c0"), new ComparisonExpression(
                     new FieldPath("sources/sampled/phase"),
@@ -137,7 +137,7 @@ public sealed class ObservationBudgetTests
     {
         var observer = new RecordingAssertionObserver();
         fixture.Runtime.Control.EvaluateAssertions(new AssertionBatch(
-            ValueList<PredicateContractRef>.From(new[]
+            ValueArray<PredicateContractRef>.From(new[]
             {
                 new PredicateContractRef(
                     new PredicateContractId("phaseProbe"), new ContractVersion(1, 0)),
@@ -145,7 +145,7 @@ public sealed class ObservationBudgetTests
             KernelFixture.Agent,
             observer));
         fixture.PumpUntilIdle();
-        return observer.Results!.Single().Outcome;
+        return observer.Results!.Value.Single().Outcome;
     }
 
     [Test]
@@ -156,7 +156,7 @@ public sealed class ObservationBudgetTests
         var reader = new ScriptedSampledReader
         {
             Reading = new SampledDocument(
-                new SourceDocument(ValueList<NamedField>.From(new[]
+                new SourceDocument(ValueArray<NamedField>.From(new[]
                 {
                     new NamedField("phase", FieldValue.Of("loading")),
                     new NamedField("undeclared", FieldValue.Of(1L)),
@@ -170,7 +170,7 @@ public sealed class ObservationBudgetTests
             Is.EqualTo(PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.SourceUnavailable)));
 
         reader.Reading = new SampledDocument(
-            new SourceDocument(ValueList<NamedField>.From(new[]
+            new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("phase", FieldValue.Of(42L)),
             })),
@@ -181,7 +181,7 @@ public sealed class ObservationBudgetTests
             "a mistyped field is a contract violation, not a value");
 
         reader.Reading = new SampledDocument(
-            new SourceDocument(ValueList<NamedField>.From(new[]
+            new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("phase", FieldValue.Of("loading")),
             })),
@@ -197,7 +197,7 @@ public sealed class ObservationBudgetTests
         var reader = new ScriptedSampledReader
         {
             Reading = new SampledDocument(
-                new SourceDocument(ValueList<NamedField>.From(new[]
+                new SourceDocument(ValueArray<NamedField>.From(new[]
                 {
                     new NamedField("phase", FieldValue.Of("this-phase-name-exceeds-the-ceiling")),
                 })),
@@ -217,7 +217,7 @@ public sealed class ObservationBudgetTests
         var longLabel = new PredicateContractRef(
             new PredicateContractId("longLabel"), new ContractVersion(1, 0));
         fixture.Runtime.Bootstrap.RegisterPredicateContract(longLabel, new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(new ClauseId("c0"), new ComparisonExpression(
                     new FieldPath("nodes/save/attributes/label"),
@@ -227,7 +227,7 @@ public sealed class ObservationBudgetTests
         fixture.Runtime.Start(fixture.Executor);
         fixture.Runtime.Registry.UpdateAttributes(
             fixture.SaveNode,
-            ValueList<NodeAttribute>.From(new[]
+            ValueArray<NodeAttribute>.From(new[]
             {
                 new NodeAttribute(
                     "label", FieldValue.Of("this-value-is-longer-than-eight-units"), Sensitivity.Standard),
@@ -237,13 +237,13 @@ public sealed class ObservationBudgetTests
 
         var observer = new RecordingAssertionObserver();
         fixture.Runtime.Control.EvaluateAssertions(new AssertionBatch(
-            ValueList<PredicateContractRef>.From(new[] { longLabel }),
+            ValueArray<PredicateContractRef>.From(new[] { longLabel }),
             KernelFixture.Agent,
             observer));
         fixture.PumpUntilIdle();
 
         Assert.That(
-            observer.Results!.Single().Outcome,
+            observer.Results!.Value.Single().Outcome,
             Is.EqualTo(PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.Incompleteness)),
             "an over-ceiling value is BudgetTruncated completeness, never a silent False");
     }

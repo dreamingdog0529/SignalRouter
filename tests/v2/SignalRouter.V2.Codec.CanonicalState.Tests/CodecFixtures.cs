@@ -36,8 +36,8 @@ internal static class CodecFixtures
         string view = "v", string domain = "d", string scope = "root",
         RuntimeIncarnationId? incarnation = null, SourceRevision? revision = null) => new(
         Basis(view, domain, scope, incarnation, revision),
-        ValueList<MaterializedNode>.Empty,
-        ValueList<MaterializedSource>.Empty,
+        ValueArray<MaterializedNode>.Empty,
+        ValueArray<MaterializedSource>.Empty,
         CompletenessMap.Complete);
 
     /// <summary>The GoldenVectors.md vector-2 world, built in permutable input order.</summary>
@@ -57,8 +57,8 @@ internal static class CodecFixtures
             new AuthorKey("save"),
             NodeRole.Button,
             new AuthorKey("panel"),
-            ValueList<MaterializedAttribute>.From(attributes),
-            ValueList<MaterializedCapability>.From(new[]
+            ValueArray<MaterializedAttribute>.From(attributes),
+            ValueArray<MaterializedCapability>.From(new[]
             {
                 new MaterializedCapability(
                     new CapabilityContractRef(new CapabilityContractId("Invoke"), new ContractVersion(1, 0)),
@@ -68,13 +68,13 @@ internal static class CodecFixtures
         var source = new MaterializedSource(
             new StateSourceKey("inventory"),
             new StateSourceContractRef(new StateSourceContractId("inventory"), new ContractVersion(1, 0)),
-            ValueList<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(5L)) }),
-            ValueList<string>.From(new[] { "secret" }),
+            ValueArray<NamedField>.From(new[] { new NamedField("count", FieldValue.Of(5L)) }),
+            ValueArray<string>.From(new[] { "secret" }),
             omission: null);
         return new ObservationMaterialization(
             Basis("agent-standard", "agent-domain"),
-            ValueList<MaterializedNode>.From(new[] { node }),
-            ValueList<MaterializedSource>.From(new[] { source }),
+            ValueArray<MaterializedNode>.From(new[] { node }),
+            ValueArray<MaterializedSource>.From(new[] { source }),
             CompletenessMap.From(
                 new[]
                 {

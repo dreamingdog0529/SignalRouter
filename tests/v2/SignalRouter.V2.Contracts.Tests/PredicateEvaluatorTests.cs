@@ -18,7 +18,7 @@ public sealed class PredicateEvaluatorTests
     {
         var clauses = expressions
             .Select((expression, index) => new PredicateClause(new ClauseId($"c{index}"), expression));
-        return new PredicateDefinition(ValueList<PredicateClause>.From(clauses));
+        return new PredicateDefinition(ValueArray<PredicateClause>.From(clauses));
     }
 
     private static PredicateEvaluationOutcome Evaluate(
@@ -137,22 +137,22 @@ public sealed class PredicateEvaluatorTests
 
         Assert.That(
             Evaluate(lookup, new BooleanExpression(BooleanOperator.And,
-                ValueList<PredicateExpression>.From(new[] { falseLeaf, hiddenLeaf }))),
+                ValueArray<PredicateExpression>.From(new[] { falseLeaf, hiddenLeaf }))),
             Is.EqualTo(PredicateEvaluationOutcome.False),
             "False AND Unevaluable = False");
         Assert.That(
             Evaluate(lookup, new BooleanExpression(BooleanOperator.And,
-                ValueList<PredicateExpression>.From(new[] { trueLeaf, hiddenLeaf }))),
+                ValueArray<PredicateExpression>.From(new[] { trueLeaf, hiddenLeaf }))),
             Is.EqualTo(PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.Redacted)),
             "True AND Unevaluable = Unevaluable");
         Assert.That(
             Evaluate(lookup, new BooleanExpression(BooleanOperator.Or,
-                ValueList<PredicateExpression>.From(new[] { trueLeaf, hiddenLeaf }))),
+                ValueArray<PredicateExpression>.From(new[] { trueLeaf, hiddenLeaf }))),
             Is.EqualTo(PredicateEvaluationOutcome.Satisfied),
             "True OR Unevaluable = True");
         Assert.That(
             Evaluate(lookup, new BooleanExpression(BooleanOperator.Or,
-                ValueList<PredicateExpression>.From(new[] { falseLeaf, hiddenLeaf }))),
+                ValueArray<PredicateExpression>.From(new[] { falseLeaf, hiddenLeaf }))),
             Is.EqualTo(PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.Redacted)),
             "False OR Unevaluable = Unevaluable");
         Assert.That(
@@ -163,7 +163,7 @@ public sealed class PredicateEvaluatorTests
         // Commutativity: operand order never changes the answer.
         Assert.That(
             Evaluate(lookup, new BooleanExpression(BooleanOperator.And,
-                ValueList<PredicateExpression>.From(new[] { hiddenLeaf, falseLeaf }))),
+                ValueArray<PredicateExpression>.From(new[] { hiddenLeaf, falseLeaf }))),
             Is.EqualTo(PredicateEvaluationOutcome.False));
     }
 
@@ -202,7 +202,7 @@ public sealed class PredicateEvaluatorTests
             maxDepth: 16, maxNodeCount: 256, maxOperandLength: 4096,
             maxBatchSize: 32, maxEvaluationSteps: 2);
         var definition = Define(new BooleanExpression(BooleanOperator.And,
-            ValueList<PredicateExpression>.From(new PredicateExpression[]
+            ValueArray<PredicateExpression>.From(new PredicateExpression[]
             {
                 new ExistsExpression(new FieldPath(Label)),
                 new ExistsExpression(new FieldPath(Label)),

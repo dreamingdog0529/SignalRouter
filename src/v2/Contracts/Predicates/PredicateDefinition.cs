@@ -30,7 +30,7 @@ namespace SignalRouter.V2.Contracts
     /// </summary>
     public sealed class PredicateDefinition
     {
-        public PredicateDefinition(ValueList<PredicateClause> clauses)
+        public PredicateDefinition(ValueArray<PredicateClause> clauses)
         {
             if (clauses == null)
             {
@@ -55,7 +55,7 @@ namespace SignalRouter.V2.Contracts
             Clauses = clauses;
         }
 
-        public ValueList<PredicateClause> Clauses { get; }
+        public ValueArray<PredicateClause> Clauses { get; }
 
         /// <summary>Total AST node count across clauses (structural-bounds accounting).</summary>
         public int NodeCount

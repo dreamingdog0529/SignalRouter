@@ -47,7 +47,7 @@ namespace SignalRouter.V2.Contracts
                         return IncompleteOr(path, FieldLookup.OutOfScope);
                     }
 
-                    // Indexed: a ValueList foreach boxes its enumerator (B1).
+                    // Indexed: a ValueArray foreach boxes its enumerator (B1).
                     var attributes = node.Attributes;
                     for (var i = 0; i < attributes.Count; i++)
                     {
@@ -132,7 +132,7 @@ namespace SignalRouter.V2.Contracts
                 return FieldLookup.Incomplete(source.Omission.Value);
             }
 
-            // Indexed: a ValueList foreach boxes its enumerator (B1).
+            // Indexed: a ValueArray foreach boxes its enumerator (B1).
             var redactedNames = source.RedactedFieldNames;
             for (var i = 0; i < redactedNames.Count; i++)
             {

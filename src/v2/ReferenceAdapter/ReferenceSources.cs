@@ -31,16 +31,16 @@ namespace SignalRouter.V2.ReferenceAdapter
                 ReferenceWorld.TargetKey,
                 NodeRole.Button,
                 parent: null,
-                ValueList<NodeAttribute>.From(new[]
+                ValueArray<NodeAttribute>.From(new[]
                 {
                     new NodeAttribute("label", FieldValue.Of("initial"), Sensitivity.Standard),
                 }),
-                ValueList<CapabilityDeclaration>.From(new[]
+                ValueArray<CapabilityDeclaration>.From(new[]
                 {
                     new CapabilityDeclaration(ReferenceWorld.SetLabel, initiallyAvailable: true),
                     new CapabilityDeclaration(ReferenceWorld.SlowSetLabel, initiallyAvailable: true),
                 }),
-                new ExposurePolicy(ValueList<SecurityDomainId>.From(new[]
+                new ExposurePolicy(ValueArray<SecurityDomainId>.From(new[]
                 {
                     ReferenceWorld.AgentDomain,
                     ReferenceWorld.HumanDomain,
@@ -52,7 +52,7 @@ namespace SignalRouter.V2.ReferenceAdapter
                 new StateSourceContractDescriptor(
                     new StateSourceContractRef(
                         new StateSourceContractId("tck-counter"), new ContractVersion(1, 0)),
-                    ValueList<SourceFieldSchema>.From(new[]
+                    ValueArray<SourceFieldSchema>.From(new[]
                     {
                         new SourceFieldSchema("count", FieldType.Integer, Sensitivity.Standard),
                     }),
@@ -71,7 +71,7 @@ namespace SignalRouter.V2.ReferenceAdapter
         }
 
         private static PredicateDefinition CountPredicate(long threshold) =>
-            new PredicateDefinition(ValueList<PredicateClause>.From(new[]
+            new PredicateDefinition(ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(
                     new ClauseId("c0"),

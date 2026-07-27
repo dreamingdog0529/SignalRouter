@@ -2,19 +2,19 @@
 
 sealed class SignalRouter.V2.AdapterSdk.AdapterDescriptor
   property AdapterId : System.String { public get; }
-  property Capabilities : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.CapabilityProfileSupport> { public get; }
-  property CompletionLatencies : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.CompletionLatencyBound> { public get; }
+  property Capabilities : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.CapabilityProfileSupport> { public get; }
+  property CompletionLatencies : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.CompletionLatencyBound> { public get; }
   property FencePhase : SignalRouter.V2.AdapterSdk.FramePhase { public get; }
-  property FramePhases : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.FramePhase> { public get; }
-  property InputClassifications : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.InputClassification> { public get; }
+  property FramePhases : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.FramePhase> { public get; }
+  property InputClassifications : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.InputClassification> { public get; }
   property SyncExecutionBoundMilliseconds : System.Int32 { public get; }
   property Version : SignalRouter.V2.Contracts.ContractVersion { public get; }
-  public ctor(System.String adapterId, SignalRouter.V2.Contracts.ContractVersion version, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.FramePhase> framePhases, SignalRouter.V2.AdapterSdk.FramePhase fencePhase, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.CapabilityProfileSupport> capabilities, System.Int32 syncExecutionBoundMilliseconds, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.CompletionLatencyBound> completionLatencies, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.InputClassification> inputClassifications)
+  public ctor(System.String adapterId, SignalRouter.V2.Contracts.ContractVersion version, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.FramePhase> framePhases, SignalRouter.V2.AdapterSdk.FramePhase fencePhase, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.CapabilityProfileSupport> capabilities, System.Int32 syncExecutionBoundMilliseconds, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.CompletionLatencyBound> completionLatencies, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.InputClassification> inputClassifications)
 
 sealed class SignalRouter.V2.AdapterSdk.CapabilityProfileSupport
   property Capability : SignalRouter.V2.Contracts.CapabilityContractRef { public get; }
-  property Profiles : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.CompletionProfileRef> { public get; }
-  public ctor(SignalRouter.V2.Contracts.CapabilityContractRef capability, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.CompletionProfileRef> profiles)
+  property Profiles : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CompletionProfileRef> { public get; }
+  public ctor(SignalRouter.V2.Contracts.CapabilityContractRef capability, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CompletionProfileRef> profiles)
 
 readonly struct SignalRouter.V2.AdapterSdk.CompletionLatencyBound
   implements System.IEquatable<SignalRouter.V2.AdapterSdk.CompletionLatencyBound>
@@ -47,10 +47,10 @@ readonly struct SignalRouter.V2.AdapterSdk.EffectAdoption
   static property Adopted : SignalRouter.V2.AdapterSdk.EffectAdoption { public get; }
 
 sealed class SignalRouter.V2.AdapterSdk.EffectCompletion
-  property Continuations : SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.ContinuationRequest> { public get; }
+  property Continuations : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.ContinuationRequest> { public get; }
   property Permit : SignalRouter.V2.AdapterSdk.EffectPermitToken { public get; }
   property Resolution : SignalRouter.V2.AdapterSdk.EffectResolution { public get; }
-  public ctor(SignalRouter.V2.AdapterSdk.EffectPermitToken permit, SignalRouter.V2.AdapterSdk.EffectResolution resolution, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.AdapterSdk.ContinuationRequest>? continuations = null)
+  public ctor(SignalRouter.V2.AdapterSdk.EffectPermitToken permit, SignalRouter.V2.AdapterSdk.EffectResolution resolution, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.ContinuationRequest>? continuations = null)
 
 readonly struct SignalRouter.V2.AdapterSdk.EffectPermitToken
   implements System.IEquatable<SignalRouter.V2.AdapterSdk.EffectPermitToken>
@@ -137,7 +137,7 @@ interface SignalRouter.V2.AdapterSdk.INodeRegistry
   public method Register(SignalRouter.V2.Contracts.NodeRegistration registration, SignalRouter.V2.AdapterSdk.IRegistrationObserver? observer) : System.Void
   public method SetCapabilityAvailability(SignalRouter.V2.Contracts.NodeRef node, SignalRouter.V2.Contracts.CapabilityContractRef capability, System.Boolean available, SignalRouter.V2.AdapterSdk.IRegistrationObserver? observer) : System.Void
   public method Unregister(SignalRouter.V2.Contracts.NodeRef node, SignalRouter.V2.AdapterSdk.IRegistrationObserver? observer) : System.Void
-  public method UpdateAttributes(SignalRouter.V2.Contracts.NodeRef node, SignalRouter.V2.Contracts.ValueList<SignalRouter.V2.Contracts.NodeAttribute> updates, SignalRouter.V2.AdapterSdk.IRegistrationObserver? observer) : System.Void
+  public method UpdateAttributes(SignalRouter.V2.Contracts.NodeRef node, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.NodeAttribute> updates, SignalRouter.V2.AdapterSdk.IRegistrationObserver? observer) : System.Void
 
 interface SignalRouter.V2.AdapterSdk.INodeSource
   public method Attach(SignalRouter.V2.AdapterSdk.IBootstrapRegistry bootstrap, SignalRouter.V2.AdapterSdk.INodeRegistry registry) : System.Void

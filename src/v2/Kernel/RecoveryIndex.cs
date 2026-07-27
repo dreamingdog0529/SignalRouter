@@ -130,11 +130,11 @@ namespace SignalRouter.V2.Kernel
         }
 
         /// <summary>Incarnation teardown: strand every pending entry (guarantees.md §7).</summary>
-        internal ValueList<RequestId> DrainPending()
+        internal ValueArray<RequestId> DrainPending()
         {
             var stranded = new List<RequestId>(pending.Keys);
             pending.Clear();
-            return ValueList<RequestId>.From(stranded);
+            return ValueArray<RequestId>.From(stranded);
         }
     }
 }

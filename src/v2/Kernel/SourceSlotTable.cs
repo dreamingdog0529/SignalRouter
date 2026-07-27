@@ -92,7 +92,7 @@ namespace SignalRouter.V2.Kernel
                 }
             }
 
-            documents[key] = new SourceDocument(ValueList<NamedField>.From(retained));
+            documents[key] = new SourceDocument(ValueArray<NamedField>.From(retained));
             store.AdvanceRevision();
             return true;
         }

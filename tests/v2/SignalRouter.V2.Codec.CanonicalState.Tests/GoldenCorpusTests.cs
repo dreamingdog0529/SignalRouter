@@ -36,11 +36,11 @@ public sealed class GoldenCorpusTests
             new AuthorKey("b"),
             new NodeRole("r"),
             new AuthorKey("a"),
-            ValueList<MaterializedAttribute>.From(new[]
+            ValueArray<MaterializedAttribute>.From(new[]
             {
                 new MaterializedAttribute("x", FieldValue.Of(true), redacted: false),
             }),
-            ValueList<MaterializedCapability>.From(new[]
+            ValueArray<MaterializedCapability>.From(new[]
             {
                 new MaterializedCapability(
                     new CapabilityContractRef(new CapabilityContractId("Cap"), new ContractVersion(2, 3)),
@@ -49,25 +49,25 @@ public sealed class GoldenCorpusTests
             visibleChildCount: 1);
         var nodeA = new MaterializedNode(
             new AuthorKey("a"), new NodeRole("r"), null,
-            ValueList<MaterializedAttribute>.Empty,
-            ValueList<MaterializedCapability>.Empty,
+            ValueArray<MaterializedAttribute>.Empty,
+            ValueArray<MaterializedCapability>.Empty,
             visibleChildCount: 0);
         var sourceS2 = new MaterializedSource(
             new StateSourceKey("s2"),
             new StateSourceContractRef(new StateSourceContractId("s2"), new ContractVersion(1, 0)),
-            ValueList<NamedField>.Empty,
-            ValueList<string>.From(new[] { "z" }),
+            ValueArray<NamedField>.Empty,
+            ValueArray<string>.From(new[] { "z" }),
             omission: CompletenessReason.Stale);
         var sourceS1 = new MaterializedSource(
             new StateSourceKey("s1"),
             new StateSourceContractRef(new StateSourceContractId("s1"), new ContractVersion(1, 0)),
-            ValueList<NamedField>.From(new[] { new NamedField("m", FieldValue.Null) }),
-            ValueList<string>.Empty,
+            ValueArray<NamedField>.From(new[] { new NamedField("m", FieldValue.Null) }),
+            ValueArray<string>.Empty,
             omission: null);
         return new ObservationMaterialization(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.From(new[] { nodeB, nodeA }),
-            ValueList<MaterializedSource>.From(new[] { sourceS2, sourceS1 }),
+            ValueArray<MaterializedNode>.From(new[] { nodeB, nodeA }),
+            ValueArray<MaterializedSource>.From(new[] { sourceS2, sourceS1 }),
             CompletenessMap.From(
                 new[]
                 {
@@ -121,14 +121,14 @@ public sealed class GoldenCorpusTests
         // CompareOrdinal — an implementation that sorts encoded bytes drifts here.
         var nodeFullwidthA = new MaterializedNode(
             new AuthorKey("Ａ"), new NodeRole("r"), null,
-            ValueList<MaterializedAttribute>.Empty, ValueList<MaterializedCapability>.Empty, 0);
+            ValueArray<MaterializedAttribute>.Empty, ValueArray<MaterializedCapability>.Empty, 0);
         var nodeLinearB = new MaterializedNode(
             new AuthorKey("\U00010000"), new NodeRole("r"), null,
-            ValueList<MaterializedAttribute>.Empty, ValueList<MaterializedCapability>.Empty, 0);
+            ValueArray<MaterializedAttribute>.Empty, ValueArray<MaterializedCapability>.Empty, 0);
         var result = Codec.Encode(new ObservationMaterialization(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.From(new[] { nodeFullwidthA, nodeLinearB }),
-            ValueList<MaterializedSource>.Empty,
+            ValueArray<MaterializedNode>.From(new[] { nodeFullwidthA, nodeLinearB }),
+            ValueArray<MaterializedSource>.Empty,
             CompletenessMap.Complete));
 
         var hex = CodecFixtures.ToHex(result.CopyPayload());
@@ -174,18 +174,18 @@ public sealed class GoldenCorpusTests
         // form). A writer that emits a non-minimal 127 or splits 128 wrongly drifts.
         var result = Codec.Encode(new ObservationMaterialization(
             CodecFixtures.Basis(),
-            ValueList<MaterializedNode>.Empty,
-            ValueList<MaterializedSource>.From(new[]
+            ValueArray<MaterializedNode>.Empty,
+            ValueArray<MaterializedSource>.From(new[]
             {
                 new MaterializedSource(
                     new StateSourceKey("s"),
                     new StateSourceContractRef(new StateSourceContractId("s"), new ContractVersion(1, 0)),
-                    ValueList<NamedField>.From(new[]
+                    ValueArray<NamedField>.From(new[]
                     {
                         new NamedField("q", FieldValue.Of(new string('a', 128))),
                         new NamedField("p", FieldValue.Of(new string('a', 127))),
                     }),
-                    ValueList<string>.Empty,
+                    ValueArray<string>.Empty,
                     omission: null),
             }),
             CompletenessMap.Complete));

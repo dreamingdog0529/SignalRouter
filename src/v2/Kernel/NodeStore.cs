@@ -122,7 +122,7 @@ namespace SignalRouter.V2.Kernel
             return true;
         }
 
-        internal bool TryUpdateAttributes(NodeRef node, ValueList<NodeAttribute> updates)
+        internal bool TryUpdateAttributes(NodeRef node, ValueArray<NodeAttribute> updates)
         {
             if (updates == null)
             {

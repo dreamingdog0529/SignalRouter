@@ -124,7 +124,7 @@ public sealed class BenchWorld
         var options = new KernelOptions(
             new FixedClock(),
             new byte[] { 1, 2, 3, 4 },
-            ValueList<PrincipalDomainBinding>.From(new[]
+            ValueArray<PrincipalDomainBinding>.From(new[]
             {
                 new PrincipalDomainBinding(Principal.WellKnownKinds.AgentSession, AgentDomain),
                 new PrincipalDomainBinding(Principal.WellKnownKinds.TestHarness, RecordDomain),
@@ -144,7 +144,7 @@ public sealed class BenchWorld
         runtime.Bootstrap.RegisterCapabilityContract(new CapabilityContractDescriptor(
             Invoke, ArgumentSchema.Empty, precondition: null, Applied, postcondition: null));
 
-        var visible = new ExposurePolicy(ValueList<SecurityDomainId>.From(new[]
+        var visible = new ExposurePolicy(ValueArray<SecurityDomainId>.From(new[]
         {
             AgentDomain, RecordDomain,
         }));
@@ -155,12 +155,12 @@ public sealed class BenchWorld
                 new AuthorKey("node-" + ordinal),
                 NodeRole.Button,
                 parent: null,
-                ValueList<NodeAttribute>.From(new[]
+                ValueArray<NodeAttribute>.From(new[]
                 {
                     new NodeAttribute("label", FieldValue.Of("Label " + ordinal), Sensitivity.Standard),
                     new NodeAttribute("value", FieldValue.Of((long)i), Sensitivity.Standard),
                 }),
-                ValueList<CapabilityDeclaration>.From(new[]
+                ValueArray<CapabilityDeclaration>.From(new[]
                 {
                     new CapabilityDeclaration(Invoke, initiallyAvailable: true),
                 }),
@@ -172,7 +172,7 @@ public sealed class BenchWorld
             new StateSourceContractDescriptor(
                 new StateSourceContractRef(
                     new StateSourceContractId("inventory"), new ContractVersion(1, 0)),
-                ValueList<SourceFieldSchema>.From(new[]
+                ValueArray<SourceFieldSchema>.From(new[]
                 {
                     new SourceFieldSchema("count", FieldType.Integer, Sensitivity.Standard),
                 }),
@@ -188,7 +188,7 @@ public sealed class BenchWorld
         // Compares the first node's label to a value it never has: the wait
         // stays armed through every reevaluation.
         runtime.Bootstrap.RegisterPredicateContract(NeverSatisfied, new PredicateDefinition(
-            ValueList<PredicateClause>.From(new[]
+            ValueArray<PredicateClause>.From(new[]
             {
                 new PredicateClause(
                     new ClauseId("c0"),
@@ -304,7 +304,7 @@ public sealed class BenchWorld
     {
         var answer = Runtime.Ingress.PublishSourceDocument(new SourcePublication(
             new StateSourceKey("inventory"),
-            new SourceDocument(ValueList<NamedField>.From(new[]
+            new SourceDocument(ValueArray<NamedField>.From(new[]
             {
                 new NamedField("count", FieldValue.Of(count)),
             })),

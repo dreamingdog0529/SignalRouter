@@ -51,7 +51,7 @@ public sealed class InteractionMachineTests
     public void ValidatingRejectsAFailedPrecondition()
     {
         // Precondition: the label must equal "Ready" — it is "Save".
-        var precondition = new PredicateDefinition(ValueList<PredicateClause>.From(new[]
+        var precondition = new PredicateDefinition(ValueArray<PredicateClause>.From(new[]
         {
             new PredicateClause(new ClauseId("c0"), new ComparisonExpression(
                 new FieldPath("nodes/save/attributes/label"),
@@ -110,7 +110,7 @@ public sealed class InteractionMachineTests
         // Postcondition: label == "Saved". The effect does not change it → the
         // terminal is Faulted(CompletionPostconditionNotSatisfied)
         // (verification.md §3.4).
-        var postcondition = new PredicateDefinition(ValueList<PredicateClause>.From(new[]
+        var postcondition = new PredicateDefinition(ValueArray<PredicateClause>.From(new[]
         {
             new PredicateClause(new ClauseId("c0"), new ComparisonExpression(
                 new FieldPath("nodes/save/attributes/label"),
@@ -129,7 +129,7 @@ public sealed class InteractionMachineTests
         satisfied.Executor.OnExecute = _ =>
             satisfied.Runtime.Registry.UpdateAttributes(
                 satisfied.SaveNode,
-                ValueList<NodeAttribute>.From(new[]
+                ValueArray<NodeAttribute>.From(new[]
                 {
                     new NodeAttribute("label", FieldValue.Of("Saved"), Sensitivity.Standard),
                 }),
