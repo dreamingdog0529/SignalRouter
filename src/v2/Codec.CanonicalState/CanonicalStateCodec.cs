@@ -61,21 +61,21 @@ namespace SignalRouter.V2.Codec.CanonicalState
             // Canonical-form enforcement (ADR 0012): one re-encode comparison
             // subsumes every alternative-encoding attack — non-minimal framing that
             // parsed, out-of-order lists, and anything else the structural parse
-            // could not see.
-            var reencoded = EncodePayload(materialization);
-            if (reencoded.Length != canonicalPayload.Length)
+            // could not see. The re-encode stages in a pooled buffer and compares
+            // as a span: enforcement allocates nothing.
+            var writer = PayloadWriter.Rent();
+            try
             {
-                throw new CanonicalStateFormatException(
-                    "NonCanonical", -1, "The payload is not in canonical form.");
-            }
-
-            for (var i = 0; i < reencoded.Length; i++)
-            {
-                if (reencoded[i] != canonicalPayload[i])
+                WritePayload(ref writer, materialization);
+                if (!writer.WrittenSpan.SequenceEqual(canonicalPayload))
                 {
                     throw new CanonicalStateFormatException(
                         "NonCanonical", -1, "The payload is not in canonical form.");
                 }
+            }
+            finally
+            {
+                writer.Dispose();
             }
 
             return materialization;
@@ -106,12 +106,25 @@ namespace SignalRouter.V2.Codec.CanonicalState
 
         private static byte[] EncodePayload(ObservationMaterialization materialization)
         {
-            var writer = new PayloadWriter();
+            var writer = PayloadWriter.Rent();
+            try
+            {
+                WritePayload(ref writer, materialization);
+                return writer.ToArray();
+            }
+            finally
+            {
+                writer.Dispose();
+            }
+        }
+
+        private static void WritePayload(ref PayloadWriter writer, ObservationMaterialization materialization)
+        {
             writer.WriteMagic();
             writer.WriteVaruint(RepresentationVersion);
 
             // Projection identity — no temporal legs (ADR 0012).
-            WriteContract(writer, materialization.Basis.View.Id.Value, materialization.Basis.View.Version);
+            WriteContract(ref writer, materialization.Basis.View.Id.Value, materialization.Basis.View.Version);
             writer.WriteString(materialization.Basis.Domain.Value);
             writer.WriteString(materialization.Basis.Scope);
 
@@ -141,14 +154,14 @@ namespace SignalRouter.V2.Codec.CanonicalState
                     else
                     {
                         writer.WriteRaw(0x00);
-                        WriteValue(writer, attribute.Value);
+                        WriteValue(ref writer, attribute.Value);
                     }
                 }
 
                 writer.WriteVaruint(node.Capabilities.Count);
                 foreach (var capability in node.Capabilities)
                 {
-                    WriteContract(writer, capability.Contract.Id.Value, capability.Contract.Version);
+                    WriteContract(ref writer, capability.Contract.Id.Value, capability.Contract.Version);
                     writer.WriteBool(capability.Available);
                 }
 
@@ -159,7 +172,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
             foreach (var source in materialization.Sources)
             {
                 writer.WriteString(source.Key.Value);
-                WriteContract(writer, source.Contract.Id.Value, source.Contract.Version);
+                WriteContract(ref writer, source.Contract.Id.Value, source.Contract.Version);
                 if (source.Omission.HasValue)
                 {
                     writer.WriteRaw(0x01);
@@ -174,7 +187,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
                 foreach (var field in source.Fields)
                 {
                     writer.WriteString(field.Name);
-                    WriteValue(writer, field.Value);
+                    WriteValue(ref writer, field.Value);
                 }
 
                 writer.WriteVaruint(source.RedactedFieldNames.Count);
@@ -191,18 +204,16 @@ namespace SignalRouter.V2.Codec.CanonicalState
                 writer.WriteString(entry.Region.Value);
                 writer.WriteString(CompletenessReasonCodes.ToCode(entry.Reason));
             }
-
-            return writer.ToArray();
         }
 
-        private static void WriteContract(PayloadWriter writer, string id, ContractVersion version)
+        private static void WriteContract(ref PayloadWriter writer, string id, ContractVersion version)
         {
             writer.WriteString(id);
             writer.WriteVaruint(version.Major);
             writer.WriteVaruint(version.Minor);
         }
 
-        private static void WriteValue(PayloadWriter writer, FieldValue value)
+        private static void WriteValue(ref PayloadWriter writer, FieldValue value)
         {
             switch (value.Kind)
             {
