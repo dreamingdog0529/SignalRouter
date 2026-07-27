@@ -151,6 +151,21 @@ are named here and receive their defaults when the owning module lands.
 | `ObservationViews.MaxMaterializationBytes` | 256 KiB | aggregate byte ceiling per materialization (codec-free views included, where `StateStore.MaxBlobBytes` cannot apply); overflow surfaces as `BudgetTruncated` completeness |
 | Reserved | — | `RecordingSink.*` (declared at open), `Protocol.*` (message/slot caps) |
 
+### 5.2 Semantic-resource ceilings (Proposed)
+
+The representation work of the performance track
+([performance.md](performance.md), [adr 0013](../adr/0013-performance-normativity-and-allocation-policy.md))
+adds internal indexes and scratch whose capacities must not become profile keys of
+their own: a raw table capacity is an implementation detail, not a resource an
+adversary manipulates. Profile revisions therefore bound the **semantic**
+resources — live node count, per-node attribute count, distinct dynamic
+identifier vocabulary per registration surface, source and capability counts —
+and internal structures derive their capacities from those ceilings. Each
+semantic ceiling will be enforced, when its key lands, at its owning boundary
+with an answer from the guarantees taxonomy, like every other bound in §5.
+Reserved until the representation work lands: `Kernel.MaxLiveNodes`,
+`Kernel.MaxAttributesPerNode`, `Kernel.MaxDistinctDynamicNames`.
+
 ## 6. Artifact trust
 
 Replay artifacts execute real capabilities and are treated as untrusted input:

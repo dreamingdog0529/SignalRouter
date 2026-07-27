@@ -185,7 +185,12 @@ conflated:
 ### 7.1 Kernel model tests
 
 Engine-independent tests of the kernel, stores, comparator, and protocol session logic.
-Run in plain .NET CI on every change.
+Run in plain .NET CI on every change. This tier also hosts the **performance
+gates** ([performance.md](performance.md) §3) as they land: exact
+kernel-owner-thread allocation counters and proportionality checks, certified
+in Release configuration.
+They live here and never in the TCK — the TCK path interleaves adapter, clock,
+and callback work whose allocations are not the kernel's to promise.
 
 ### 7.2 The TCK (technology compatibility kit)
 
