@@ -40,19 +40,24 @@ namespace SignalRouter.V2.Codec.CanonicalState
         public void Dispose()
         {
             var rented = buffer;
+            var used = written;
             buffer = null!;
             written = 0;
             if (rented != null)
             {
-                // Canonical payloads carry post-redaction values only; no secret
-                // material can be in the staging bytes (semantic-model.md §7).
+                // Canonical payloads are post-redaction but domain-scoped
+                // (observation-state.md §5): the written range is cleared before
+                // the buffer re-enters the process-wide pool, so no later renter
+                // can read another domain's canonical bytes (ADR 0013).
+                Array.Clear(rented, 0, used);
                 ArrayPool<byte>.Shared.Return(rented);
             }
         }
 
         private void Ensure(int additional)
         {
-            var required = written + additional;
+            // checked: a wrapped size must fail loudly, never skip growth.
+            var required = checked(written + additional);
             if (required <= buffer.Length)
             {
                 return;
@@ -60,6 +65,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
 
             var grown = ArrayPool<byte>.Shared.Rent(Math.Max(required, buffer.Length * 2));
             buffer.AsSpan(0, written).CopyTo(grown);
+            Array.Clear(buffer, 0, written); // domain-scoped bytes never re-enter the pool readable
             ArrayPool<byte>.Shared.Return(buffer);
             buffer = grown;
         }
