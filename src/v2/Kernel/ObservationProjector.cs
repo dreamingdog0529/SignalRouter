@@ -66,16 +66,20 @@ namespace SignalRouter.V2.Kernel
             long logicalNow,
             ObservationBudget budget,
             int maxFieldBytes,
-            int maxCompletenessEntries)
+            int maxCompletenessEntries,
+            ProjectionScratch scratch)
         {
             var effectiveFieldBytes = Math.Min(maxFieldBytes, descriptor.MaxFieldBytes);
             var maxNodes = Math.Min(budget.MaxNodes, descriptor.MaxNodes);
-            var completeness = new List<CompletenessEntry>();
+            scratch.Begin();
+            try
+            {
+            var completeness = scratch.Completeness;
             var truncated = false;
             var bytesUsed = 0;
 
             // Candidate selection: keyed, visible to the domain, inside the scope.
-            var candidates = new List<NodeRecord>();
+            var candidates = scratch.Candidates;
             foreach (var record in store.LiveRecords)
             {
                 if (!record.Registration.AuthorKey.HasValue)
@@ -100,8 +104,8 @@ namespace SignalRouter.V2.Kernel
                 left.Registration.AuthorKey!.Value.Value, right.Registration.AuthorKey!.Value.Value));
 
             // Deterministic budget cut: first N candidates in ordinal key order.
-            var included = new List<NodeRecord>();
-            var includedKeys = new HashSet<string>(StringComparer.Ordinal);
+            var included = scratch.Included;
+            var includedKeys = scratch.IncludedKeys;
             foreach (var record in candidates)
             {
                 var cost = NodeCost(record, effectiveFieldBytes);
@@ -118,7 +122,7 @@ namespace SignalRouter.V2.Kernel
 
             // Visible child counts, over the same visibility/scope rules; keyless
             // children participate only when the view includes them.
-            var childCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var childCounts = scratch.ChildCounts;
             foreach (var record in store.LiveRecords)
             {
                 if (!record.Registration.Parent.HasValue ||
@@ -138,11 +142,12 @@ namespace SignalRouter.V2.Kernel
                 childCounts[parentKey] = count + 1;
             }
 
-            var nodes = new List<MaterializedNode>(included.Count);
+            var nodes = scratch.Nodes;
             foreach (var record in included)
             {
                 var key = record.Registration.AuthorKey!.Value;
-                var attributes = new List<MaterializedAttribute>(record.Attributes.Count);
+                var attributes = scratch.Attributes;
+                attributes.Clear();
                 foreach (var attribute in record.Attributes.Values)
                 {
                     if (attribute.Sensitivity == Sensitivity.Sensitive)
@@ -165,7 +170,8 @@ namespace SignalRouter.V2.Kernel
 
                 attributes.Sort(AttributeOrder);
 
-                var capabilities = new List<MaterializedCapability>(record.Availability.Count);
+                var capabilities = scratch.Capabilities;
+                capabilities.Clear();
                 foreach (var availability in record.Availability)
                 {
                     capabilities.Add(new MaterializedCapability(availability.Key, availability.Value));
@@ -205,7 +211,7 @@ namespace SignalRouter.V2.Kernel
             // Sources: family selects the exposure opt-in (observation-state.md
             // §7.2). Candidates sort by key before the budget cut so registration
             // order never changes snapshot membership.
-            var sourceCandidates = new List<StateSourceRegistration>();
+            var sourceCandidates = scratch.SourceCandidates;
             foreach (var registration in sourceTable.Registrations)
             {
                 var visible = descriptor.Family == ViewFamily.Record
@@ -220,12 +226,12 @@ namespace SignalRouter.V2.Kernel
             sourceCandidates.Sort((left, right) =>
                 string.CompareOrdinal(left.Key.Value, right.Key.Value));
 
-            var sources = new List<MaterializedSource>();
+            var sources = scratch.Sources;
             foreach (var registration in sourceCandidates)
             {
                 var materialized = MaterializeSource(
                     sourceTable, registration, logicalNow, effectiveFieldBytes,
-                    completeness, out var cost);
+                    completeness, scratch, out var cost);
                 if (bytesUsed + cost > budget.MaxBytes)
                 {
                     truncated = true;
@@ -243,14 +249,19 @@ namespace SignalRouter.V2.Kernel
                 sources.Add(materialized);
             }
 
-            var basis = new ObservationBasis(
+                        var basis = new ObservationBasis(
                 store.Incarnation, store.Revision, descriptor.Contract, domain, descriptor.Scope);
             var materialization = new ObservationMaterialization(
                 basis,
                 ValueArray<MaterializedNode>.From(nodes),
                 ValueArray<MaterializedSource>.From(sources),
                 CompletenessMap.From(completeness, maxCompletenessEntries, rootTruncated: truncated));
-            return new ProjectionResult(materialization, truncated, bytesUsed);
+                return new ProjectionResult(materialization, truncated, bytesUsed);
+            }
+            finally
+            {
+                scratch.End();
+            }
         }
 
         private static MaterializedSource MaterializeSource(
@@ -259,10 +270,12 @@ namespace SignalRouter.V2.Kernel
             long logicalNow,
             int maxFieldUnits,
             List<CompletenessEntry> completeness,
+            ProjectionScratch scratch,
             out int approximateBytes)
         {
             var descriptor = registration.Descriptor;
-            var redactedNames = new List<string>();
+            var redactedNames = scratch.RedactedNames;
+            redactedNames.Clear();
             foreach (var schema in descriptor.Fields)
             {
                 if (schema.Sensitivity == Sensitivity.Sensitive)
@@ -311,7 +324,8 @@ namespace SignalRouter.V2.Kernel
             }
 
             approximateBytes = 32;
-            var fields = new List<NamedField>();
+            var fields = scratch.Fields;
+            fields.Clear();
             if (document != null)
             {
                 // Redaction at value production: sensitive fields never enter the

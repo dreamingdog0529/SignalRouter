@@ -60,6 +60,7 @@ namespace SignalRouter.V2.Kernel
         private Interaction? active;
         private SubmissionMessage? stalledAdmission;
         private bool started;
+        private readonly ProjectionScratch projectionScratch = new ProjectionScratch();
         private bool sampledVisibleToAgent;
         private bool sampledVisibleToRecord;
         private ViewContractDescriptor? kernelRawRecordView;
@@ -988,7 +989,8 @@ namespace SignalRouter.V2.Kernel
                 pumpObservationNodesRemaining < options.ObservationBudgetNodes;
             var result = ObservationProjector.Materialize(
                 nodeStore, sourceTable, effective, domain, currentLogicalNow, budget,
-                options.MaxObservationFieldBytes, options.MaxCompletenessEntries);
+                options.MaxObservationFieldBytes, options.MaxCompletenessEntries,
+                projectionScratch);
             if (result.Truncated && partialBudget)
             {
                 // Mid-pump budget pressure: restart against a fresh pump budget and
@@ -1058,7 +1060,8 @@ namespace SignalRouter.V2.Kernel
         {
             projection = ObservationProjector.Materialize(
                 nodeStore, sourceTable, descriptor, options.RecordDomain, currentLogicalNow,
-                budget, options.MaxObservationFieldBytes, options.MaxCompletenessEntries);
+                budget, options.MaxObservationFieldBytes, options.MaxCompletenessEntries,
+                projectionScratch);
             var canonical = options.CanonicalStateCodec!.Encode(projection.Materialization);
             return new RecordMaterialization(
                 new ObservationSnapshot(
@@ -1720,7 +1723,8 @@ namespace SignalRouter.V2.Kernel
                 nodeStore, sourceTable, descriptor, domain, currentLogicalNow,
                 new ObservationBudget(options.MaxMaterializationBytes, options.MaxMaterializationNodes),
                 options.MaxObservationFieldBytes,
-                options.MaxCompletenessEntries);
+                options.MaxCompletenessEntries,
+                projectionScratch);
             return new MaterializationLookup(result.Materialization);
         }
 
