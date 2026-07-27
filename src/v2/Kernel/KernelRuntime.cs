@@ -60,6 +60,8 @@ namespace SignalRouter.V2.Kernel
         private Interaction? active;
         private SubmissionMessage? stalledAdmission;
         private bool started;
+        private bool sampledVisibleToAgent;
+        private bool sampledVisibleToRecord;
         private bool tornDown;
         private int pumping;
         private long lastMonotonic = long.MinValue;
@@ -140,6 +142,12 @@ namespace SignalRouter.V2.Kernel
 
             executor = effectExecutor ?? throw new ArgumentNullException(nameof(effectExecutor));
             executor.Attach(Completions);
+
+            // Source registration is bootstrap-only, so the sampled-exposure
+            // answer per family is frozen from here on — cache it instead of
+            // rescanning the registry per armed wait (review finding on P1d).
+            sampledVisibleToAgent = sourceTable.HasSampledVisibleTo(ViewFamily.Agent);
+            sampledVisibleToRecord = sourceTable.HasSampledVisibleTo(ViewFamily.Record);
             started = true;
         }
 
@@ -1504,11 +1512,22 @@ namespace SignalRouter.V2.Kernel
             }
 
             lastWaitEvaluationRevision = revision;
+
+            // One evaluation read per domain, shared across every wait of that
+            // domain (performance-track finding A3): without sampled sources a
+            // materialization is a pure function of the revision, so the reads
+            // are interchangeable — the batch-assertion path always worked this
+            // way. Domains exposing sampled sources keep a fresh read per wait
+            // (observation-state.md §7: sampled sources read at materialization
+            // time), exactly the historical behavior.
+            Dictionary<SecurityDomainId, MaterializationLookup>? sharedReaders = null;
             List<OperationId>? satisfied = null;
             foreach (var pair in waits)
             {
                 var result = PredicateEvaluator.Evaluate(
-                    pair.Value.Definition, PinReader(pair.Value.Domain), PredicateStructuralBounds.Default);
+                    pair.Value.Definition,
+                    WaitEvaluationReader(pair.Value.Domain, ref sharedReaders),
+                    PredicateStructuralBounds.Default);
                 if (result.Outcome.Kind == PredicateEvaluationKind.Satisfied)
                 {
                     (satisfied ??= new List<OperationId>()).Add(pair.Key);
@@ -1522,6 +1541,33 @@ namespace SignalRouter.V2.Kernel
                     ResolveWait(operation, PredicateResolution.Satisfied);
                 }
             }
+        }
+
+        /// <summary>
+        /// The evaluation read for one armed wait: shared per domain when the
+        /// materialization is revision-pure, fresh per wait when a sampled source
+        /// is exposed to the domain's family.
+        /// </summary>
+        private MaterializationLookup WaitEvaluationReader(
+            SecurityDomainId domain,
+            ref Dictionary<SecurityDomainId, MaterializationLookup>? sharedReaders)
+        {
+            var sampledExposed = domain.Equals(options.RecordDomain)
+                ? sampledVisibleToRecord
+                : sampledVisibleToAgent;
+            if (sampledExposed)
+            {
+                return PinReader(domain);
+            }
+
+            sharedReaders ??= new Dictionary<SecurityDomainId, MaterializationLookup>();
+            if (!sharedReaders.TryGetValue(domain, out var reader))
+            {
+                reader = PinReader(domain);
+                sharedReaders.Add(domain, reader);
+            }
+
+            return reader;
         }
 
         private void ProcessAssertions(AssertionBatch batch)
