@@ -175,6 +175,17 @@ namespace SignalRouter.V2.Kernel
             }
         }
 
+        /// <summary>All three class depths under one lock acquisition (the pump report reads them together).</summary>
+        internal void ReadDepths(out int controlDepth, out int publicationDepth, out int submissionDepth)
+        {
+            lock (gate)
+            {
+                controlDepth = control.Count + postFence.Count;
+                publicationDepth = publications.Count;
+                submissionDepth = humanSubmissions.Count + submissions.Count;
+            }
+        }
+
         internal int ControlDepth
         {
             get
