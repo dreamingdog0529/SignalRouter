@@ -88,7 +88,19 @@ public sealed class PredicateModelTests
     public void FieldPathsAreSegmentedAndRejectMalformedShapes()
     {
         var path = new FieldPath("sources/inventory/items");
-        Assert.That(path.Segments, Is.EqualTo(new[] { "sources", "inventory", "items" }));
+        var segments = new List<string>();
+        foreach (var segment in path.Segments)
+        {
+            segments.Add(segment.ToString());
+        }
+
+        Assert.That(segments, Is.EqualTo(new[] { "sources", "inventory", "items" }));
+        Assert.That(path.SegmentCount, Is.EqualTo(3));
+        Assert.That(
+            new FieldPath("sources/inventory").IsSegmentPrefixOf(path), Is.True);
+        Assert.That(
+            new FieldPath("sources/invent").IsSegmentPrefixOf(path), Is.False,
+            "a string prefix that is not a segment boundary never matches");
         AssertEx.Throws<ArgumentException>(() => _ = new FieldPath("/leading"));
         AssertEx.Throws<ArgumentException>(() => _ = new FieldPath("trailing/"));
         AssertEx.Throws<ArgumentException>(() => _ = new FieldPath("a//b"));

@@ -30,32 +30,50 @@ namespace SignalRouter.V2.Contracts
 
         public FieldLookup Lookup(FieldPath path)
         {
-            var segments = path.Segments;
-            if (segments.Count == 4 && segments[0] == "nodes" && segments[2] == "attributes")
+            // Span-parsed path shapes — no splitting, no allocation on a lookup.
+            var remaining = path.Value.AsSpan();
+            var first = NextSegment(ref remaining);
+            if (first.SequenceEqual("nodes".AsSpan()))
             {
-                if (!TryFindNode(segments[1], out var node))
+                var key = NextSegment(ref remaining);
+                var kind = NextSegment(ref remaining);
+                var name = NextSegment(ref remaining);
+                if (remaining.Length == 0 && !name.IsEmpty && kind.SequenceEqual("attributes".AsSpan()))
                 {
-                    // Unregistered, hidden, and out-of-scope nodes answer
-                    // identically; a truncated region answers its reason.
-                    return IncompleteOr(path, FieldLookup.OutOfScope);
-                }
-
-                foreach (var attribute in node.Attributes)
-                {
-                    if (string.Equals(attribute.Name, segments[3], StringComparison.Ordinal))
+                    if (!TryFindNode(key, out var node))
                     {
-                        return attribute.Redacted
-                            ? FieldLookup.Redacted
-                            : FieldLookup.Present(attribute.Value);
+                        // Unregistered, hidden, and out-of-scope nodes answer
+                        // identically; a truncated region answers its reason.
+                        return IncompleteOr(path, FieldLookup.OutOfScope);
                     }
+
+                    // Indexed: a ValueList foreach boxes its enumerator (B1).
+                    var attributes = node.Attributes;
+                    for (var i = 0; i < attributes.Count; i++)
+                    {
+                        var attribute = attributes[i];
+                        if (attribute.Name.AsSpan().SequenceEqual(name))
+                        {
+                            return attribute.Redacted
+                                ? FieldLookup.Redacted
+                                : FieldLookup.Present(attribute.Value);
+                        }
+                    }
+
+                    return IncompleteOr(path, FieldLookup.Absent);
                 }
 
-                return IncompleteOr(path, FieldLookup.Absent);
+                return FieldLookup.OutOfScope;
             }
 
-            if (segments.Count == 3 && segments[0] == "sources")
+            if (first.SequenceEqual("sources".AsSpan()))
             {
-                return LookupSource(path, segments[1], segments[2]);
+                var sourceKey = NextSegment(ref remaining);
+                var fieldName = NextSegment(ref remaining);
+                if (remaining.Length == 0 && !fieldName.IsEmpty)
+                {
+                    return LookupSource(path, sourceKey, fieldName);
+                }
             }
 
             return FieldLookup.OutOfScope;
@@ -63,23 +81,45 @@ namespace SignalRouter.V2.Contracts
 
         public CollectionCountLookup CountCollection(FieldPath path)
         {
-            var segments = path.Segments;
-            if (segments.Count == 3 && segments[0] == "nodes" && segments[2] == "children")
+            var remaining = path.Value.AsSpan();
+            var first = NextSegment(ref remaining);
+            if (first.SequenceEqual("nodes".AsSpan()))
             {
-                if (!TryFindNode(segments[1], out var node))
+                var key = NextSegment(ref remaining);
+                var kind = NextSegment(ref remaining);
+                if (remaining.Length == 0 && kind.SequenceEqual("children".AsSpan()))
                 {
-                    return materialization.Completeness.TryGetReason(path, out var reason)
-                        ? CollectionCountLookup.Incomplete(reason)
-                        : CollectionCountLookup.OutOfScope;
-                }
+                    if (!TryFindNode(key, out var node))
+                    {
+                        return materialization.Completeness.TryGetReason(path, out var reason)
+                            ? CollectionCountLookup.Incomplete(reason)
+                            : CollectionCountLookup.OutOfScope;
+                    }
 
-                return CollectionCountLookup.Present(node.VisibleChildCount);
+                    return CollectionCountLookup.Present(node.VisibleChildCount);
+                }
             }
 
             return CollectionCountLookup.OutOfScope;
         }
 
-        private FieldLookup LookupSource(FieldPath path, string sourceKey, string fieldName)
+        /// <summary>The next '/'-delimited segment; empty when the path is exhausted.</summary>
+        private static ReadOnlySpan<char> NextSegment(ref ReadOnlySpan<char> remaining)
+        {
+            var separator = remaining.IndexOf('/');
+            if (separator < 0)
+            {
+                var last = remaining;
+                remaining = default;
+                return last;
+            }
+
+            var segment = remaining.Slice(0, separator);
+            remaining = remaining.Slice(separator + 1);
+            return segment;
+        }
+
+        private FieldLookup LookupSource(FieldPath path, ReadOnlySpan<char> sourceKey, ReadOnlySpan<char> fieldName)
         {
             if (!TryFindSource(sourceKey, out var source))
             {
@@ -92,19 +132,22 @@ namespace SignalRouter.V2.Contracts
                 return FieldLookup.Incomplete(source.Omission.Value);
             }
 
-            foreach (var redacted in source.RedactedFieldNames)
+            // Indexed: a ValueList foreach boxes its enumerator (B1).
+            var redactedNames = source.RedactedFieldNames;
+            for (var i = 0; i < redactedNames.Count; i++)
             {
-                if (string.Equals(redacted, fieldName, StringComparison.Ordinal))
+                if (redactedNames[i].AsSpan().SequenceEqual(fieldName))
                 {
                     return FieldLookup.Redacted;
                 }
             }
 
-            foreach (var field in source.Fields)
+            var fields = source.Fields;
+            for (var i = 0; i < fields.Count; i++)
             {
-                if (string.Equals(field.Name, fieldName, StringComparison.Ordinal))
+                if (fields[i].Name.AsSpan().SequenceEqual(fieldName))
                 {
-                    return FieldLookup.Present(field.Value);
+                    return FieldLookup.Present(fields[i].Value);
                 }
             }
 
@@ -118,17 +161,18 @@ namespace SignalRouter.V2.Contracts
                 : fallback;
         }
 
-        private bool TryFindNode(string key, out MaterializedNode node)
+        private bool TryFindNode(ReadOnlySpan<char> key, out MaterializedNode node)
         {
             // Nodes are ordinally sorted at construction
             // (ObservationMaterialization invariant): binary search, not a scan.
+            // Span CompareTo with Ordinal is the same order as CompareOrdinal.
             var nodes = materialization.Nodes;
             var low = 0;
             var high = nodes.Count - 1;
             while (low <= high)
             {
                 var middle = low + ((high - low) >> 1);
-                var comparison = string.CompareOrdinal(nodes[middle].Key.Value, key);
+                var comparison = nodes[middle].Key.Value.AsSpan().CompareTo(key, StringComparison.Ordinal);
                 if (comparison == 0)
                 {
                     node = nodes[middle];
@@ -149,7 +193,7 @@ namespace SignalRouter.V2.Contracts
             return false;
         }
 
-        private bool TryFindSource(string key, out MaterializedSource source)
+        private bool TryFindSource(ReadOnlySpan<char> key, out MaterializedSource source)
         {
             // Sources share the same construction-time ordinal sort.
             var sources = materialization.Sources;
@@ -158,7 +202,7 @@ namespace SignalRouter.V2.Contracts
             while (low <= high)
             {
                 var middle = low + ((high - low) >> 1);
-                var comparison = string.CompareOrdinal(sources[middle].Key.Value, key);
+                var comparison = sources[middle].Key.Value.AsSpan().CompareTo(key, StringComparison.Ordinal);
                 if (comparison == 0)
                 {
                     source = sources[middle];
