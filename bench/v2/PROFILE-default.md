@@ -19,13 +19,15 @@ informational measurements. The pre-optimization record is
 | Build | Release |
 | ResourceProfile in force | `default@1` ([security-resources.md](../../docs/v2/spec/security-resources.md) §5.1), bench world overrides: observation/materialization ceilings 8 MiB / 4096 nodes |
 | Tools | BenchmarkDotNet 0.15.8 + MemoryDiagnoser (timings, L2); `AllocationMeter` exact per-thread counters (L1) |
-| Command | `dotnet run -c Release --project bench/v2/SignalRouter.V2.Benchmarks -- --filter '*'` (single full run, all 15 benchmarks, one process) |
+| Command | `dotnet run -c Release --project bench/v2/SignalRouter.V2.Benchmarks -- --filter '*'` (one invocation covering all 15 benchmarks; BenchmarkDotNet runs each case in its own workload process) |
 
 **Scope note — identifier representation.** The conditional kernel-internal
 handle phase ([ADR 0014](../../docs/v2/adr/0014-two-layer-identifier-representation.md))
 was **not implemented**: its evidence bar required profiles showing identifier
-comparison/lookup cost as a significant factor, and every measurement in this
-profile shows that cost in the noise next to materialization and encoding.
+comparison/lookup cost as a significant factor, and no measurement in this
+profile isolates identifier cost as a leading factor — the dominant measured
+costs are materialization and encoding, and the identifier-heavy lookup row
+gates at zero allocation. Absence of that evidence leaves the bar unmet;
 Contracts identifiers therefore remain string-backed throughout.
 
 ## Rows

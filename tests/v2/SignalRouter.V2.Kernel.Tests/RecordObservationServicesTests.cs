@@ -131,6 +131,48 @@ public sealed class RecordObservationServicesTests
     }
 
     [Test]
+    public void ReleasingARecordingFreesOnlyItsOwnLeases()
+    {
+        // codex review (performance track consolidation): ReleaseOwner is now
+        // driven by the owner→lease reverse index instead of a full store scan —
+        // this pins the observable lease semantics the index must preserve: a
+        // release frees exactly the releasing owner's pins, and another owner's
+        // evidence pin keeps blocking eviction.
+        var fixture = BuildWithRecordView(
+            new TestCanonicalStateCodec(), stateStoreMaxTotalBytes: 700);
+        fixture.Runtime.Registry.UpdateAttributes(
+            fixture.SaveNode,
+            ValueArray<NodeAttribute>.From(new[]
+            {
+                new NodeAttribute(
+                    "label", FieldValue.Of(new string('x', 400)), Sensitivity.Standard),
+            }),
+            observer: null);
+        fixture.PumpUntilIdle();
+
+        var services = fixture.Runtime.RecordObservation;
+        services.TryMaterializeView(RecordView, "root", null, out var first, out _);
+        var older = new OperationId("recording-older");
+        Assert.That(services.TryLease(first!, older), Is.EqualTo(LeaseAnswer.Retained));
+
+        fixture.PublishInventory(1);
+        fixture.PumpUntilIdle();
+        services.TryMaterializeView(RecordView, "root", null, out var second, out _);
+        var newer = new OperationId("recording-newer");
+        Assert.That(
+            services.TryLease(second!, newer), Is.EqualTo(LeaseAnswer.OverBudget),
+            "another recording's evidence pin is never sacrificed for a new lease");
+
+        services.ReleaseRecording(older);
+        Assert.That(
+            services.TryLease(second!, newer), Is.EqualTo(LeaseAnswer.Retained),
+            "the released recording's blob is evictable, so the new lease fits");
+
+        // Releasing an owner with no remaining leases is a no-op, not a fault.
+        services.ReleaseRecording(older);
+    }
+
+    [Test]
     public void AnOverBoundBlobIsRefusedStructurally()
     {
         var fixture = BuildWithRecordView(

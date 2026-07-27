@@ -104,6 +104,14 @@ namespace SignalRouter.V2.Kernel
         }
 
         private readonly Dictionary<StoreKey, Entry> entries = new Dictionary<StoreKey, Entry>();
+
+        // Reverse lease index: owner → the keys it currently pins. Kept exactly in
+        // step with Entry.Pins so ReleaseOwner touches only the owner's own leases
+        // — never a scan over unrelated retained blobs (performance.md §2,
+        // proportionality).
+        private readonly Dictionary<LeaseOwner, HashSet<StoreKey>> ownerLeases =
+            new Dictionary<LeaseOwner, HashSet<StoreKey>>();
+
         private readonly int maxBlobBytes;
         private readonly long maxTotalBytes;
         private long totalBytes;
@@ -169,19 +177,32 @@ namespace SignalRouter.V2.Kernel
 
         internal bool TryPin(SecurityDomainId domain, ContentId id, LeaseOwner owner)
         {
-            if (!entries.TryGetValue(new StoreKey(domain, id), out var entry))
+            var key = new StoreKey(domain, id);
+            if (!entries.TryGetValue(key, out var entry))
             {
                 return false;
             }
 
             entry.Pins.TryGetValue(owner, out var count);
             entry.Pins[owner] = count + 1;
+            if (count == 0)
+            {
+                if (!ownerLeases.TryGetValue(owner, out var keys))
+                {
+                    keys = new HashSet<StoreKey>();
+                    ownerLeases.Add(owner, keys);
+                }
+
+                keys.Add(key);
+            }
+
             return true;
         }
 
         internal void Release(SecurityDomainId domain, ContentId id, LeaseOwner owner)
         {
-            if (!entries.TryGetValue(new StoreKey(domain, id), out var entry) ||
+            var key = new StoreKey(domain, id);
+            if (!entries.TryGetValue(key, out var entry) ||
                 !entry.Pins.TryGetValue(owner, out var count))
             {
                 return;
@@ -190,6 +211,7 @@ namespace SignalRouter.V2.Kernel
             if (count <= 1)
             {
                 entry.Pins.Remove(owner);
+                DropLease(owner, key);
             }
             else
             {
@@ -199,16 +221,39 @@ namespace SignalRouter.V2.Kernel
 
         internal void ReleaseOwner(LeaseOwner owner)
         {
-            foreach (var entry in entries.Values)
+            if (!ownerLeases.TryGetValue(owner, out var keys))
             {
-                entry.Pins.Remove(owner);
+                return;
             }
+
+            foreach (var key in keys)
+            {
+                if (entries.TryGetValue(key, out var entry))
+                {
+                    entry.Pins.Remove(owner);
+                }
+            }
+
+            ownerLeases.Remove(owner);
         }
 
         internal void Clear()
         {
             entries.Clear();
+            ownerLeases.Clear();
             totalBytes = 0;
+        }
+
+        private void DropLease(LeaseOwner owner, StoreKey key)
+        {
+            if (ownerLeases.TryGetValue(owner, out var keys))
+            {
+                keys.Remove(key);
+                if (keys.Count == 0)
+                {
+                    ownerLeases.Remove(owner);
+                }
+            }
         }
 
         private void EvictUnpinned(long bytesNeeded)
