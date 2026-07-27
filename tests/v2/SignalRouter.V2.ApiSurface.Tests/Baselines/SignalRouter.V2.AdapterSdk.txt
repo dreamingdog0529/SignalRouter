@@ -216,7 +216,7 @@ readonly struct SignalRouter.V2.AdapterSdk.PumpBudget
   property MaxTurns : System.Int32 { public get; }
   public ctor(System.Int32 maxTurns, System.Int64 deadline, SignalRouter.V2.AdapterSdk.LogicalTime logicalNow, SignalRouter.V2.AdapterSdk.FramePhase framePhase)
 
-sealed class SignalRouter.V2.AdapterSdk.PumpReport
+readonly struct SignalRouter.V2.AdapterSdk.PumpReport
   property AwaitingAdapterCompletion : System.Boolean { public get; }
   property AwaitingFramePhase : SignalRouter.V2.AdapterSdk.FramePhase? { public get; }
   property ControlQueueDepth : System.Int32 { public get; }

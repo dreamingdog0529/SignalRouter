@@ -178,16 +178,6 @@ namespace SignalRouter.V2.Contracts
                 throw new ArgumentException("A present parent must be non-default.", nameof(parent));
             }
 
-            if (attributes == null)
-            {
-                throw new ArgumentNullException(nameof(attributes));
-            }
-
-            if (capabilities == null)
-            {
-                throw new ArgumentNullException(nameof(capabilities));
-            }
-
             if (visibleChildCount < 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(visibleChildCount));
@@ -321,16 +311,6 @@ namespace SignalRouter.V2.Contracts
                     "A materialized source requires a non-default contract.", nameof(contract));
             }
 
-            if (fields == null)
-            {
-                throw new ArgumentNullException(nameof(fields));
-            }
-
-            if (redactedFieldNames == null)
-            {
-                throw new ArgumentNullException(nameof(redactedFieldNames));
-            }
-
             if (omission.HasValue &&
                 omission.Value != CompletenessReason.SourceUnavailable &&
                 omission.Value != CompletenessReason.Stale &&
@@ -453,16 +433,6 @@ namespace SignalRouter.V2.Contracts
             CompletenessMap completeness)
         {
             Basis = basis ?? throw new ArgumentNullException(nameof(basis));
-            if (nodes == null)
-            {
-                throw new ArgumentNullException(nameof(nodes));
-            }
-
-            if (sources == null)
-            {
-                throw new ArgumentNullException(nameof(sources));
-            }
-
             Completeness = completeness ?? throw new ArgumentNullException(nameof(completeness));
 
             // Already-sorted immutable input is kept as-is (the projector emits

@@ -67,11 +67,6 @@ namespace SignalRouter.V2.Contracts
                     "Descriptor requires a non-default contract reference.", nameof(contract));
             }
 
-            if (fields == null)
-            {
-                throw new ArgumentNullException(nameof(fields));
-            }
-
             if (maxDocumentBytes < 1)
             {
                 throw new ArgumentOutOfRangeException(

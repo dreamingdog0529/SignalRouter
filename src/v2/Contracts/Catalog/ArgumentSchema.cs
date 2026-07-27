@@ -66,11 +66,6 @@ namespace SignalRouter.V2.Contracts
 
         public ArgumentSchema(ValueArray<ArgumentField> fields)
         {
-            if (fields == null)
-            {
-                throw new ArgumentNullException(nameof(fields));
-            }
-
             byName = new Dictionary<string, ArgumentField>(StringComparer.Ordinal);
             foreach (var field in fields)
             {

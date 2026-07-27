@@ -144,16 +144,6 @@ namespace SignalRouter.V2.Contracts
                 throw new ArgumentException("A present parent key must be non-default.", nameof(parent));
             }
 
-            if (attributes == null)
-            {
-                throw new ArgumentNullException(nameof(attributes));
-            }
-
-            if (capabilities == null)
-            {
-                throw new ArgumentNullException(nameof(capabilities));
-            }
-
             var attributeNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (var attribute in attributes)
             {

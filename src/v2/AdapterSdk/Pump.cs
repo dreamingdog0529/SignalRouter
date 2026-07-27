@@ -120,9 +120,11 @@ namespace SignalRouter.V2.AdapterSdk
     /// <summary>
     /// The truthful pump answer (kernel-execution.md §6): what ran, what remains,
     /// and what the kernel is waiting on — so hosts can schedule further pumps and
-    /// bound their drive-until-quiescent loops.
+    /// bound their drive-until-quiescent loops. A value type: the quiescent pump
+    /// allocates nothing (performance.md §2, ADR 0013 — the report is inside the
+    /// zero obligation).
     /// </summary>
-    public sealed class PumpReport
+    public readonly struct PumpReport
     {
         public PumpReport(
             int turnsExecuted,

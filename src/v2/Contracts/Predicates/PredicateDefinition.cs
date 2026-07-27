@@ -32,11 +32,6 @@ namespace SignalRouter.V2.Contracts
     {
         public PredicateDefinition(ValueArray<PredicateClause> clauses)
         {
-            if (clauses == null)
-            {
-                throw new ArgumentNullException(nameof(clauses));
-            }
-
             if (clauses.Count == 0)
             {
                 throw new ArgumentException("A predicate requires at least one clause.", nameof(clauses));

@@ -57,11 +57,6 @@ namespace SignalRouter.V2.Contracts
 
         public PredicateCatalog(ValueArray<FieldSchema> fields)
         {
-            if (fields == null)
-            {
-                throw new ArgumentNullException(nameof(fields));
-            }
-
             this.fields = new Dictionary<FieldPath, FieldType>();
             foreach (var field in fields)
             {
