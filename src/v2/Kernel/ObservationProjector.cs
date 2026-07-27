@@ -46,6 +46,18 @@ namespace SignalRouter.V2.Kernel
     /// </summary>
     internal static class ObservationProjector
     {
+        // Cached comparisons: the aggregates verify canonical order instead of
+        // re-sorting immutable input, so the projector emits canonical order
+        // and construction becomes copy-free (plan P3c).
+        private static readonly Comparison<MaterializedAttribute> AttributeOrder =
+            static (left, right) => string.CompareOrdinal(left.Name, right.Name);
+
+        private static readonly Comparison<MaterializedCapability> CapabilityOrder =
+            MaterializedCapability.CompareCanonical;
+
+        private static readonly Comparison<NamedField> FieldOrder =
+            static (left, right) => string.CompareOrdinal(left.Name, right.Name);
+
         internal static ProjectionResult Materialize(
             NodeStore store,
             SourceSlotTable sourceTable,
@@ -151,11 +163,15 @@ namespace SignalRouter.V2.Kernel
                     attributes.Add(new MaterializedAttribute(attribute.Name, attribute.Value, redacted: false));
                 }
 
+                attributes.Sort(AttributeOrder);
+
                 var capabilities = new List<MaterializedCapability>(record.Availability.Count);
                 foreach (var availability in record.Availability)
                 {
                     capabilities.Add(new MaterializedCapability(availability.Key, availability.Value));
                 }
+
+                capabilities.Sort(CapabilityOrder);
 
                 // A parent outside the materialized set terminates traversal as a
                 // completeness condition, never a dangling key that would reveal a
@@ -332,6 +348,8 @@ namespace SignalRouter.V2.Kernel
                 }
             }
 
+            fields.Sort(FieldOrder);
+            redactedNames.Sort(StringComparer.Ordinal);
             return new MaterializedSource(
                 registration.Key,
                 descriptor.Contract,

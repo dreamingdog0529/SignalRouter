@@ -852,6 +852,7 @@ sealed class SignalRouter.V2.Contracts.MaterializedCapability
   public method Equals(SignalRouter.V2.Contracts.MaterializedCapability? other) : System.Boolean
   public override method Equals(System.Object? obj) : System.Boolean
   public override method GetHashCode() : System.Int32
+  public static method CompareCanonical(SignalRouter.V2.Contracts.MaterializedCapability left, SignalRouter.V2.Contracts.MaterializedCapability right) : System.Int32
 
 sealed class SignalRouter.V2.Contracts.MaterializedNode
   implements System.IEquatable<SignalRouter.V2.Contracts.MaterializedNode>
