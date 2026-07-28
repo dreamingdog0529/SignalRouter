@@ -16,6 +16,12 @@ sealed class SignalRouter.V2.Kernel.AssertionBatch
   property Principal : SignalRouter.V2.Contracts.Principal { public get; }
   public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> predicates, SignalRouter.V2.Contracts.Principal principal, SignalRouter.V2.Kernel.IAssertionObserver observer)
 
+sealed class SignalRouter.V2.Kernel.CloseEvidence
+  property FinalSnapshot : SignalRouter.V2.Kernel.RecordMaterialization { public get; }
+  property Reason : SignalRouter.V2.Contracts.RecordingCloseReason { public get; }
+  property Recording : SignalRouter.V2.Contracts.OperationId { public get; }
+  public ctor(SignalRouter.V2.Contracts.OperationId recording, SignalRouter.V2.Contracts.RecordingCloseReason reason, SignalRouter.V2.Kernel.RecordMaterialization finalSnapshot)
+
 enum SignalRouter.V2.Kernel.EvidenceReadiness
   : System.Int32
   Fault = 2
@@ -46,10 +52,31 @@ interface SignalRouter.V2.Kernel.IKernelQueries
 
 interface SignalRouter.V2.Kernel.IRecordObservationServices
   property CanAddress : System.Boolean { public get; }
+  public method ReleaseLease(SignalRouter.V2.Contracts.ContentId id, SignalRouter.V2.Contracts.OperationId recording) : System.Void
   public method ReleaseRecording(SignalRouter.V2.Contracts.OperationId recording) : System.Void
+  public method SnapshotCatalog() : SignalRouter.V2.Kernel.RecordingCatalog
   public method TryGetAfterMaterialization(SignalRouter.V2.Contracts.RequestId request, out SignalRouter.V2.Kernel.RecordMaterialization? materialization) : System.Boolean
   public method TryLease(SignalRouter.V2.Kernel.RecordMaterialization materialization, SignalRouter.V2.Contracts.OperationId recording) : SignalRouter.V2.Kernel.LeaseAnswer
   public method TryMaterializeView(SignalRouter.V2.Contracts.ViewContractRef view, System.String scope, SignalRouter.V2.Contracts.SourceRevision? expectedBasis, out SignalRouter.V2.Kernel.RecordMaterialization? materialization, out System.Boolean basisMismatch) : System.Boolean
+
+interface SignalRouter.V2.Kernel.IRecordingControl
+  public method CloseRecording(SignalRouter.V2.Contracts.OperationId recording, SignalRouter.V2.Kernel.IRecordingObserver observer) : System.Void
+  public method OpenRecording(SignalRouter.V2.Kernel.RecordingOpenRequest request, SignalRouter.V2.Kernel.IRecordingObserver observer) : SignalRouter.V2.Contracts.OperationId
+
+interface SignalRouter.V2.Kernel.IRecordingCoordinator
+  implements SignalRouter.V2.Kernel.IEvidenceCoordinator
+  property AdmissionPolicy : SignalRouter.V2.Kernel.RecordingAdmissionPolicy { public get; }
+  property CloseRequested : SignalRouter.V2.Contracts.IncompleteReason? { public get; }
+  public method Bind(SignalRouter.V2.Kernel.IRecordObservationServices services) : System.Void
+  public method CommitCloseEvidence(SignalRouter.V2.Kernel.CloseEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  public method NotifyTeardown() : System.Void
+  public method PrepareOpenEvidence(SignalRouter.V2.Kernel.OpenEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+
+interface SignalRouter.V2.Kernel.IRecordingObserver
+  public method OnClosed(SignalRouter.V2.Contracts.OperationId recording, SignalRouter.V2.Contracts.RecordingCloseReason reason) : System.Void
+  public method OnFailed(SignalRouter.V2.Contracts.OperationId recording, System.String reasonCode) : System.Void
+  public method OnOpenRefused(SignalRouter.V2.Contracts.OperationId recording, System.String reasonCode) : System.Void
+  public method OnOpened(SignalRouter.V2.Contracts.OperationId recording) : System.Void
 
 interface SignalRouter.V2.Kernel.ISnapshotObserver
   public method OnPinned(SignalRouter.V2.Contracts.OperationId operation, SignalRouter.V2.Kernel.PinnedSnapshot snapshot) : System.Void
@@ -105,6 +132,7 @@ sealed class SignalRouter.V2.Kernel.KernelRuntime
   property Ingress : SignalRouter.V2.AdapterSdk.IIngressSink { public get; }
   property Queries : SignalRouter.V2.Kernel.IKernelQueries { public get; }
   property RecordObservation : SignalRouter.V2.Kernel.IRecordObservationServices { public get; }
+  property Recording : SignalRouter.V2.Kernel.IRecordingControl { public get; }
   property Registry : SignalRouter.V2.AdapterSdk.INodeRegistry { public get; }
   property Timeline : SignalRouter.V2.Kernel.TimelineIndex { public get; }
   property Trace : SignalRouter.V2.Kernel.KernelTraceRing { public get; }
@@ -131,6 +159,17 @@ sealed class SignalRouter.V2.Kernel.NoOpEvidenceCoordinator
   public method PrepareAdmissionEvidence(SignalRouter.V2.Kernel.AdmissionEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   public method PrepareEffectPermit(SignalRouter.V2.Kernel.PermitEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   static property Instance : SignalRouter.V2.Kernel.NoOpEvidenceCoordinator { public get; }
+
+sealed class SignalRouter.V2.Kernel.OpenEvidence
+  property BaseSnapshot : SignalRouter.V2.Kernel.RecordMaterialization { public get; }
+  property Catalog : SignalRouter.V2.Kernel.RecordingCatalog { public get; }
+  property Incarnation : SignalRouter.V2.Contracts.RuntimeIncarnationId { public get; }
+  property Profile : SignalRouter.V2.Contracts.ReplayComparisonProfileRef { public get; }
+  property RecordView : SignalRouter.V2.Contracts.ViewContractRef { public get; }
+  property Recording : SignalRouter.V2.Contracts.OperationId { public get; }
+  property RedactionPolicy : SignalRouter.V2.Contracts.RedactionPolicyId { public get; }
+  property Scope : System.String { public get; }
+  public ctor(SignalRouter.V2.Contracts.OperationId recording, SignalRouter.V2.Contracts.ReplayComparisonProfileRef profile, SignalRouter.V2.Contracts.ViewContractRef recordView, System.String scope, SignalRouter.V2.Contracts.RedactionPolicyId redactionPolicy, SignalRouter.V2.Kernel.RecordingCatalog catalog, SignalRouter.V2.Kernel.RecordMaterialization baseSnapshot, SignalRouter.V2.Contracts.RuntimeIncarnationId incarnation)
 
 sealed class SignalRouter.V2.Kernel.PermitEvidence
   property Order : SignalRouter.V2.Contracts.LogicalOrder { public get; }
@@ -159,6 +198,24 @@ sealed class SignalRouter.V2.Kernel.RecordMaterialization
   property Canonical : SignalRouter.V2.Contracts.CanonicalStateResult { public get; }
   property Materialization : SignalRouter.V2.Contracts.ObservationMaterialization { public get; }
   property Snapshot : SignalRouter.V2.Contracts.ObservationSnapshot { public get; }
+
+enum SignalRouter.V2.Kernel.RecordingAdmissionPolicy
+  : System.Int32
+  RefuseUnkeyedTargets = 0
+
+sealed class SignalRouter.V2.Kernel.RecordingCatalog
+  property CompletionBindings : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CompletionBinding> { public get; }
+  property PredicateContracts : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> { public get; }
+  property StateSourceContracts : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.StateSourceBinding> { public get; }
+  property StateSourceTableVersion : System.Int32 { public get; }
+  public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CompletionBinding> completionBindings, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.StateSourceBinding> stateSourceContracts, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> predicateContracts, System.Int32 stateSourceTableVersion)
+
+sealed class SignalRouter.V2.Kernel.RecordingOpenRequest
+  property Profile : SignalRouter.V2.Contracts.ReplayComparisonProfileRef { public get; }
+  property RecordView : SignalRouter.V2.Contracts.ViewContractRef { public get; }
+  property RedactionPolicy : SignalRouter.V2.Contracts.RedactionPolicyId { public get; }
+  property Scope : System.String { public get; }
+  public ctor(SignalRouter.V2.Contracts.ReplayComparisonProfileRef profile, SignalRouter.V2.Contracts.ViewContractRef recordView, System.String scope, SignalRouter.V2.Contracts.RedactionPolicyId redactionPolicy)
 
 sealed class SignalRouter.V2.Kernel.TerminalEvidence
   property AfterWatermark : SignalRouter.V2.Contracts.SourceRevision { public get; }

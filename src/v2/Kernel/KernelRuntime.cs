@@ -19,6 +19,9 @@ namespace SignalRouter.V2.Kernel
         // The disposition of a kernel-decided pre-permit cancellation (ADR 0015).
         private const string PreEffectDisposition = "PreEffect";
 
+        // Cached: EventKind construction validates per access (performance track D1a).
+        private static readonly EventKind RecordingLifecycleKind = new EventKind("RecordingLifecycle");
+
         private readonly KernelOptions options;
         private readonly IEvidenceCoordinator coordinator;
         private readonly Mailbox mailbox;
@@ -93,6 +96,29 @@ namespace SignalRouter.V2.Kernel
         private volatile bool executingEffect;
         private readonly bool coordinatorIsNoOp;
 
+        // The recording lifecycle (ADR 0015): the kernel owns fence and
+        // membership truth; the coordinator owns durability. Null when the
+        // injected coordinator has no recording surface.
+        private readonly IRecordingCoordinator? recordingCoordinator;
+        private RecordingPhase recordingPhase;
+        private OperationId recordingOperation;
+        private IRecordingObserver? recordingObserver;
+        private RecordingOpenRequest? recordingRequest;
+        private OpenEvidence? pendingOpenEvidence;
+        private CloseEvidence? pendingCloseEvidence;
+        private RecordingCloseReason pendingCloseReason;
+        private long recordingCounter;
+
+        private enum RecordingPhase
+        {
+            NotRecording,
+            OpeningDraining,
+            OpeningCommitting,
+            Active,
+            ClosingDraining,
+            ClosingCommitting,
+        }
+
         public KernelRuntime(
             RuntimeIncarnationId incarnation,
             KernelOptions options,
@@ -104,6 +130,7 @@ namespace SignalRouter.V2.Kernel
             // skips building admission evidence (incl. the recorded-arguments
             // projection) entirely — recording-off admissions pay nothing new.
             coordinatorIsNoOp = ReferenceEquals(coordinator, NoOpEvidenceCoordinator.Instance);
+            recordingCoordinator = coordinator as IRecordingCoordinator;
             mailbox = new Mailbox(options);
             nodeStore = new NodeStore(incarnation);
             sourceTable = new SourceSlotTable();
@@ -122,6 +149,7 @@ namespace SignalRouter.V2.Kernel
             Completions = new CompletionSink(this);
             Control = new ControlFacade(this);
             RecordObservation = new RecordObservationFacade(this);
+            Recording = new RecordingControlFacade(this);
         }
 
         public RuntimeIncarnationId Incarnation => nodeStore.Incarnation;
@@ -146,6 +174,9 @@ namespace SignalRouter.V2.Kernel
         /// <summary>The StateStore-first capability the recording module consumes (ADR 0011). Pump-thread only.</summary>
         public IRecordObservationServices RecordObservation { get; }
 
+        /// <summary>The split-phase recording lifecycle control (ADR 0015).</summary>
+        public IRecordingControl Recording { get; }
+
         /// <summary>Wires the adapter surfaces and freezes the bootstrap registry.</summary>
         public void Start(IEffectExecutor effectExecutor)
         {
@@ -162,6 +193,10 @@ namespace SignalRouter.V2.Kernel
             // rescanning the registry per armed wait (review finding on P1d).
             sampledVisibleToAgent = sourceTable.HasSampledVisibleTo(ViewFamily.Agent);
             sampledVisibleToRecord = sourceTable.HasSampledVisibleTo(ViewFamily.Record);
+
+            // The assembly seam (ADR 0015): the coordinator receives the
+            // pump-thread observation services exactly once, before any callback.
+            recordingCoordinator?.Bind(RecordObservation);
             started = true;
         }
 
@@ -201,6 +236,18 @@ namespace SignalRouter.V2.Kernel
                     }
 
                     ResolveTimedOutWaits();
+
+                    // The coordinator's only degradation channel: a requested
+                    // close (SizeLimit, SinkFault, terminate-policy E5) drives
+                    // the ordinary close fence (ADR 0015).
+                    if (recordingPhase == RecordingPhase.Active)
+                    {
+                        var requested = recordingCoordinator!.CloseRequested;
+                        if (requested.HasValue)
+                        {
+                            BeginRecordingClose(RecordingCloseReason.Incomplete(requested.Value));
+                        }
+                    }
                 }
 
                 var turns = 0;
@@ -251,6 +298,11 @@ namespace SignalRouter.V2.Kernel
                 return true;
             }
 
+            if (!tornDown && TryProgressRecordingLifecycle())
+            {
+                return true;
+            }
+
             if (tornDown)
             {
                 // The incarnation is over: fence stale submissions and drop stale
@@ -283,6 +335,7 @@ namespace SignalRouter.V2.Kernel
             {
                 // Head-only retry preserves admission order: later stalls (and
                 // every new mailbox submission) wait behind the oldest one.
+                // Pre-fence stalls are fence members and keep draining.
                 if (ProcessSubmission(stalledAdmissions.Peek()))
                 {
                     stalledAdmissions.Dequeue();
@@ -291,14 +344,21 @@ namespace SignalRouter.V2.Kernel
                 return true;
             }
 
-            if (mailbox.TryDequeueSubmission(out var submission))
+            // The recording fences are a dedicated admission freeze (ADR 0015):
+            // while opening or closing drains, new mutations wait in the mailbox
+            // — held, not refused.
+            if (recordingPhase == RecordingPhase.NotRecording ||
+                recordingPhase == RecordingPhase.Active)
             {
-                if (!ProcessSubmission(submission))
+                if (mailbox.TryDequeueSubmission(out var submission))
                 {
-                    stalledAdmissions.Enqueue(submission);
-                }
+                    if (!ProcessSubmission(submission))
+                    {
+                        stalledAdmissions.Enqueue(submission);
+                    }
 
-                return true;
+                    return true;
+                }
             }
 
             if (active == null && admitted.Count > 0)
@@ -355,6 +415,8 @@ namespace SignalRouter.V2.Kernel
                     stalledAdmissions.Count > 0 ||
                     committingEvidence.Count > 0 ||
                     deferredSnapshots.Count > 0 ||
+                    (recordingPhase != RecordingPhase.NotRecording &&
+                        recordingPhase != RecordingPhase.Active) ||
                     (!awaitingCompletion && (admitted.Count > 0 || active != null))));
             return new PumpReport(
                 turns,
@@ -403,6 +465,18 @@ namespace SignalRouter.V2.Kernel
                 }
 
                 Reject(submission, new RejectionReason("AdmissionGated"));
+                return true;
+            }
+
+            // The recording open policy (ADR 0015, guarantees.md §5.2): a strict
+            // recording requires AuthorKey-resolvable targets, refused before E2
+            // — the coordinator cannot mint this rejection through the evidence
+            // answer.
+            if (recordingPhase == RecordingPhase.Active &&
+                recordingCoordinator!.AdmissionPolicy == RecordingAdmissionPolicy.RefuseUnkeyedTargets &&
+                record.Registration.AuthorKey == null)
+            {
+                Reject(submission, new RejectionReason("UnkeyedTarget"));
                 return true;
             }
 
@@ -1041,6 +1115,12 @@ namespace SignalRouter.V2.Kernel
                     break;
                 case SnapshotRequestMessage snapshotRequest:
                     ProcessSnapshotRequest(snapshotRequest);
+                    break;
+                case OpenRecordingMessage openRecording:
+                    ProcessOpenRecording(openRecording);
+                    break;
+                case CloseRecordingMessage closeRecording:
+                    ProcessCloseRecording(closeRecording);
                     break;
                 case ReleaseSnapshotMessage release:
                     ReleasePinnedSnapshot(release.Operation);
@@ -1751,11 +1831,315 @@ namespace SignalRouter.V2.Kernel
             batch.Observer.OnEvaluated(ValueArray<PredicateEvaluationResult>.From(results));
         }
 
+        // ── Recording lifecycle (ADR 0015) ───────────────────────────────────
+
+        private void ProcessOpenRecording(OpenRecordingMessage message)
+        {
+            if (tornDown)
+            {
+                message.Observer.OnOpenRefused(message.Operation, "TornDown");
+                return;
+            }
+
+            if (recordingCoordinator == null)
+            {
+                message.Observer.OnOpenRefused(message.Operation, "NoRecordingCoordinator");
+                return;
+            }
+
+            if (options.CanonicalStateCodec == null)
+            {
+                // A runtime that cannot address state cannot support recording
+                // (observation-state.md §5.1) — honest refusal, never placeholders.
+                message.Observer.OnOpenRefused(message.Operation, "CodecUnavailable");
+                return;
+            }
+
+            if (recordingPhase != RecordingPhase.NotRecording)
+            {
+                message.Observer.OnOpenRefused(message.Operation, "AlreadyRecording");
+                return;
+            }
+
+            recordingOperation = message.Operation;
+            recordingObserver = message.Observer;
+            recordingRequest = message.Request;
+            recordingPhase = RecordingPhase.OpeningDraining;
+        }
+
+        private void ProcessCloseRecording(CloseRecordingMessage message)
+        {
+            if (recordingPhase != RecordingPhase.Active ||
+                !message.Operation.Equals(recordingOperation))
+            {
+                message.Observer.OnFailed(message.Operation, "NotRecording");
+                return;
+            }
+
+            recordingObserver = message.Observer;
+            BeginRecordingClose(RecordingCloseReason.Completed);
+        }
+
+        private void BeginRecordingClose(RecordingCloseReason reason)
+        {
+            pendingCloseReason = reason;
+            recordingPhase = RecordingPhase.ClosingDraining;
+        }
+
+        /// <summary>
+        /// Drives the open/close fences: draining completes when every fence
+        /// member — the active interaction, queued admissions, parked evidence
+        /// commits, and pre-fence stalled admissions — has reached durability;
+        /// then the base/final snapshot is materialized and leased and the
+        /// E1/E7 obligation commits, with Pending retried across pumps.
+        /// </summary>
+        private bool TryProgressRecordingLifecycle()
+        {
+            switch (recordingPhase)
+            {
+                case RecordingPhase.OpeningDraining:
+                    if (!RecordingFenceQuiescent())
+                    {
+                        return false;
+                    }
+
+                    if (!TryBuildOpenEvidence())
+                    {
+                        return true;
+                    }
+
+                    recordingPhase = RecordingPhase.OpeningCommitting;
+                    return TryCommitOpenEvidence() || true;
+
+                case RecordingPhase.OpeningCommitting:
+                    return TryCommitOpenEvidence();
+
+                case RecordingPhase.ClosingDraining:
+                    if (!RecordingFenceQuiescent())
+                    {
+                        return false;
+                    }
+
+                    // Armed waits resolve as Cancelled before the final snapshot
+                    // (guarantees.md §5.9); each resolution reaches its observer.
+                    if (waits.Count > 0)
+                    {
+                        var operations = new List<OperationId>(waits.Keys);
+                        foreach (var operation in operations)
+                        {
+                            ResolveWait(operation, PredicateResolution.Cancelled);
+                        }
+                    }
+
+                    if (!TryBuildCloseEvidence())
+                    {
+                        return true;
+                    }
+
+                    recordingPhase = RecordingPhase.ClosingCommitting;
+                    return TryCommitCloseEvidence() || true;
+
+                case RecordingPhase.ClosingCommitting:
+                    return TryCommitCloseEvidence();
+
+                default:
+                    return false;
+            }
+        }
+
+        private bool RecordingFenceQuiescent() =>
+            active == null &&
+            admitted.Count == 0 &&
+            committingEvidence.Count == 0 &&
+            stalledAdmissions.Count == 0;
+
+        private bool TryBuildOpenEvidence()
+        {
+            if (pendingOpenEvidence != null)
+            {
+                return true;
+            }
+
+            var request = recordingRequest!;
+            RecordMaterialization? baseSnapshot;
+            try
+            {
+                if (!RecordObservation.TryMaterializeView(
+                    request.RecordView, request.Scope, null, out baseSnapshot, out _))
+                {
+                    FailRecordingOpen("OpenFailed");
+                    return false;
+                }
+            }
+            catch (KernelFaultException)
+            {
+                // An unregistered or non-Record view in the request is the
+                // caller's error, answered as a refusal — never a kernel fault.
+                FailRecordingOpen("UnknownRecordView");
+                return false;
+            }
+
+            if (RecordObservation.TryLease(baseSnapshot!, recordingOperation) != LeaseAnswer.Retained)
+            {
+                FailRecordingOpen("OpenFailed");
+                return false;
+            }
+
+            pendingOpenEvidence = new OpenEvidence(
+                recordingOperation,
+                request.Profile,
+                request.RecordView,
+                request.Scope,
+                request.RedactionPolicy,
+                RecordObservation.SnapshotCatalog(),
+                baseSnapshot!,
+                Incarnation);
+            return true;
+        }
+
+        private bool TryCommitOpenEvidence()
+        {
+            switch (recordingCoordinator!.PrepareOpenEvidence(pendingOpenEvidence!))
+            {
+                case EvidenceReadiness.Ready:
+                    recordingPhase = RecordingPhase.Active;
+                    pendingOpenEvidence = null;
+                    recordingObserver!.OnOpened(recordingOperation);
+                    Emit(
+                        RecordingLifecycleKind, EventCausation.None,
+                        detailCode: "Opened");
+                    return true;
+                case EvidenceReadiness.Fault:
+                    FailRecordingOpen("OpenFailed");
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private void FailRecordingOpen(string reasonCode)
+        {
+            RecordObservation.ReleaseRecording(recordingOperation);
+            var observer = recordingObserver!;
+            var operation = recordingOperation;
+            ResetRecordingState();
+            observer.OnOpenRefused(operation, reasonCode);
+            Emit(
+                RecordingLifecycleKind, EventCausation.None,
+                detailCode: reasonCode);
+        }
+
+        private bool TryBuildCloseEvidence()
+        {
+            if (pendingCloseEvidence != null)
+            {
+                return true;
+            }
+
+            RecordMaterialization? finalSnapshot;
+            try
+            {
+                if (!RecordObservation.TryMaterializeView(
+                    recordingRequest!.RecordView, recordingRequest.Scope, null,
+                    out finalSnapshot, out _))
+                {
+                    FailRecordingClose("CloseFailed");
+                    return false;
+                }
+            }
+            catch (KernelFaultException)
+            {
+                FailRecordingClose("CloseFailed");
+                return false;
+            }
+
+            if (RecordObservation.TryLease(finalSnapshot!, recordingOperation) != LeaseAnswer.Retained)
+            {
+                FailRecordingClose("CloseFailed");
+                return false;
+            }
+
+            pendingCloseEvidence = new CloseEvidence(
+                recordingOperation, pendingCloseReason, finalSnapshot!);
+            return true;
+        }
+
+        private bool TryCommitCloseEvidence()
+        {
+            switch (recordingCoordinator!.CommitCloseEvidence(pendingCloseEvidence!))
+            {
+                case EvidenceReadiness.Ready:
+                {
+                    var observer = recordingObserver!;
+                    var operation = recordingOperation;
+                    var reason = pendingCloseEvidence!.Reason;
+                    RecordObservation.ReleaseRecording(operation);
+                    ResetRecordingState();
+                    observer.OnClosed(operation, reason);
+                    Emit(
+                        RecordingLifecycleKind, EventCausation.None,
+                        detailCode: "Closed");
+                    return true;
+                }
+
+                case EvidenceReadiness.Fault:
+                    // No E7 was written; the reader infers Interrupted — the
+                    // control operation answers Failed (guarantees.md §7).
+                    FailRecordingClose("SinkFault");
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private void FailRecordingClose(string reasonCode)
+        {
+            RecordObservation.ReleaseRecording(recordingOperation);
+            var observer = recordingObserver!;
+            var operation = recordingOperation;
+            ResetRecordingState();
+            observer.OnFailed(operation, reasonCode);
+            Emit(
+                RecordingLifecycleKind, EventCausation.None,
+                detailCode: reasonCode);
+        }
+
+        private void ResetRecordingState()
+        {
+            recordingPhase = RecordingPhase.NotRecording;
+            recordingOperation = default;
+            recordingObserver = null;
+            recordingRequest = null;
+            pendingOpenEvidence = null;
+            pendingCloseEvidence = null;
+            pendingCloseReason = default;
+        }
+
         private void ProcessTeardown()
         {
             if (tornDown)
             {
                 return;
+            }
+
+            // Teardown order (ADR 0015): waits resolve first, then the
+            // coordinator is notified while observation services are still
+            // addressable — its one chance to attempt a durable
+            // Incomplete(IncarnationChanged) close — and only then do the
+            // stores clear and the incarnation mark itself torn down.
+            var operations = new List<OperationId>(waits.Keys);
+            foreach (var operation in operations)
+            {
+                ResolveWait(operation, PredicateResolution.Cancelled);
+            }
+
+            recordingCoordinator?.NotifyTeardown();
+            if (recordingObserver != null && recordingPhase != RecordingPhase.NotRecording)
+            {
+                var observer = recordingObserver;
+                var recording = recordingOperation;
+                ResetRecordingState();
+                observer.OnFailed(recording, "IncarnationChanged");
             }
 
             tornDown = true;
@@ -1770,12 +2154,6 @@ namespace SignalRouter.V2.Kernel
                 Emit(
                     EventKind.IncarnationLifecycle, EventCausation.None,
                     request: stranded, detailCode: "Stranded");
-            }
-
-            var operations = new List<OperationId>(waits.Keys);
-            foreach (var operation in operations)
-            {
-                ResolveWait(operation, PredicateResolution.Cancelled);
             }
 
             // Every deferred snapshot observer is answered exactly once; active
@@ -2627,6 +3005,99 @@ namespace SignalRouter.V2.Kernel
                 }
 
                 runtime.stateStore.ReleaseOwner(LeaseOwner.Of(recording));
+            }
+
+            public RecordingCatalog SnapshotCatalog()
+            {
+                // Deterministic order: the pinned tables sort by contract id so
+                // the same bootstrap yields the same E1 bytes.
+                var completions = new CompletionBinding[runtime.capabilityContracts.Count];
+                var index = 0;
+                foreach (var pair in runtime.capabilityContracts)
+                {
+                    completions[index++] = new CompletionBinding(pair.Key, pair.Value.CompletionProfile);
+                }
+
+                Array.Sort(completions, static (left, right) =>
+                    string.CompareOrdinal(left.Capability.Id.Value, right.Capability.Id.Value));
+
+                var predicates = new PredicateContractRef[runtime.predicateContracts.Count];
+                index = 0;
+                foreach (var pair in runtime.predicateContracts)
+                {
+                    predicates[index++] = pair.Key;
+                }
+
+                Array.Sort(predicates, static (left, right) =>
+                    string.CompareOrdinal(left.Id.Value, right.Id.Value));
+
+                return new RecordingCatalog(
+                    ValueArray<CompletionBinding>.From(completions),
+                    runtime.sourceTable.SnapshotBindings(),
+                    ValueArray<PredicateContractRef>.From(predicates),
+                    stateSourceTableVersion: 1);
+            }
+
+            public void ReleaseLease(ContentId id, OperationId recording)
+            {
+                if (id.IsDefault)
+                {
+                    throw new ArgumentException("A non-default ContentId is required.", nameof(id));
+                }
+
+                if (recording.IsDefault)
+                {
+                    throw new ArgumentException(
+                        "A non-default recording operation is required.", nameof(recording));
+                }
+
+                runtime.stateStore.Release(
+                    runtime.options.RecordDomain, id, LeaseOwner.Of(recording));
+            }
+        }
+
+        private sealed class RecordingControlFacade : IRecordingControl
+        {
+            private readonly KernelRuntime runtime;
+
+            internal RecordingControlFacade(KernelRuntime runtime)
+            {
+                this.runtime = runtime;
+            }
+
+            public OperationId OpenRecording(RecordingOpenRequest request, IRecordingObserver observer)
+            {
+                if (request == null)
+                {
+                    throw new ArgumentNullException(nameof(request));
+                }
+
+                if (observer == null)
+                {
+                    throw new ArgumentNullException(nameof(observer));
+                }
+
+                var operation = new OperationId(
+                    "recording-" + Interlocked.Increment(ref runtime.recordingCounter)
+                        .ToString(CultureInfo.InvariantCulture));
+                runtime.mailbox.EnqueueControl(new OpenRecordingMessage(operation, request, observer));
+                return operation;
+            }
+
+            public void CloseRecording(OperationId recording, IRecordingObserver observer)
+            {
+                if (recording.IsDefault)
+                {
+                    throw new ArgumentException(
+                        "A non-default recording operation is required.", nameof(recording));
+                }
+
+                if (observer == null)
+                {
+                    throw new ArgumentNullException(nameof(observer));
+                }
+
+                runtime.mailbox.EnqueueControl(new CloseRecordingMessage(recording, observer));
             }
         }
     }

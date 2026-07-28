@@ -284,6 +284,36 @@ namespace SignalRouter.V2.Kernel
         internal int ApproximateBytes { get; }
     }
 
+    internal sealed class OpenRecordingMessage : ControlMessage
+    {
+        internal OpenRecordingMessage(
+            OperationId operation, RecordingOpenRequest request, IRecordingObserver observer)
+        {
+            Operation = operation;
+            Request = request;
+            Observer = observer;
+        }
+
+        internal OperationId Operation { get; }
+
+        internal RecordingOpenRequest Request { get; }
+
+        internal IRecordingObserver Observer { get; }
+    }
+
+    internal sealed class CloseRecordingMessage : ControlMessage
+    {
+        internal CloseRecordingMessage(OperationId operation, IRecordingObserver observer)
+        {
+            Operation = operation;
+            Observer = observer;
+        }
+
+        internal OperationId Operation { get; }
+
+        internal IRecordingObserver Observer { get; }
+    }
+
     internal sealed class SubmissionMessage
     {
         internal SubmissionMessage(IntentSubmission submission, bool humanPriority)

@@ -82,6 +82,16 @@ namespace SignalRouter.V2.Kernel
         /// </summary>
         bool TryGetAfterMaterialization(RequestId request, out RecordMaterialization? materialization);
 
+        /// <summary>The E1-pinned contract tables (guarantees.md §5.1; ADR 0015).</summary>
+        RecordingCatalog SnapshotCatalog();
+
+        /// <summary>
+        /// Cut-level release (ADR 0015): a blob's pin is held from lease until
+        /// its cut is durable, then released here; <see cref="ReleaseRecording"/>
+        /// remains the whole-artifact terminal release.
+        /// </summary>
+        void ReleaseLease(ContentId id, OperationId recording);
+
         /// <summary>Releases every pin one recording holds.</summary>
         void ReleaseRecording(OperationId recording);
     }
