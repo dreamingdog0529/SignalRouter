@@ -122,7 +122,8 @@ boundary does not defend is written down, not implied.
 
 ## 12. Relationship to the v1 design
 
-v1 ([docs/design.md](../design.md), ADRs 0001–0008) proved the mission and taught the
+v1 (the first-generation implementation, removed from the repository when this design
+was promoted; its documents live in the git history) proved the mission and taught the
 lessons v2 is built on: where a single dispatcher concentrates too much, where
 retrofitted recording control breeds leases and epochs, where a hash is too opaque to
 diagnose, and where "the same path for everyone" needed a sharper sentence. v2 restates

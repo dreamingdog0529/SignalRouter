@@ -2,7 +2,7 @@
 
 The measurement record of the completed performance track and the first
 released instance of the profile schema of
-[`docs/spec/performance.md`](../../docs/spec/performance.md) §4. Rows
+[`docs/spec/performance.md`](../docs/spec/performance.md) §4. Rows
 marked **L1** are gated in CI by exact allocation counters; **L2** rows are
 informational measurements. The pre-optimization record is
 [`BASELINE.md`](BASELINE.md); every row below cites its baseline counterpart.
@@ -17,12 +17,12 @@ informational measurements. The pre-optimization record is
 | Machine | Intel Core i9-9900K (Coffee Lake, 8C/16T), Windows 11 25H2 |
 | Runtime | .NET 10.0.10, X64 RyuJIT x86-64-v3, Concurrent Workstation GC, no PGO pinning |
 | Build | Release |
-| ResourceProfile in force | `default@1` ([security-resources.md](../../docs/spec/security-resources.md) §5.1), bench world overrides: observation/materialization ceilings 8 MiB / 4096 nodes |
+| ResourceProfile in force | `default@1` ([security-resources.md](../docs/spec/security-resources.md) §5.1), bench world overrides: observation/materialization ceilings 8 MiB / 4096 nodes |
 | Tools | BenchmarkDotNet 0.15.8 + MemoryDiagnoser (timings, L2); `AllocationMeter` exact per-thread counters (L1) |
 | Command | `dotnet run -c Release --project bench/SignalRouter.Benchmarks -- --filter '*'` (one invocation covering all 15 benchmarks; BenchmarkDotNet runs each case in its own workload process) |
 
 **Scope note — identifier representation.** The conditional kernel-internal
-handle phase ([ADR 0014](../../docs/adr/0014-two-layer-identifier-representation.md))
+handle phase ([ADR 0014](../docs/adr/0014-two-layer-identifier-representation.md))
 was **not implemented**: its evidence bar required profiles showing identifier
 comparison/lookup cost as a significant factor, and no measurement in this
 profile isolates identifier cost as a leading factor — the dominant measured

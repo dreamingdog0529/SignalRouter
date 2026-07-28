@@ -1,17 +1,16 @@
-# SignalRouter v2 Design Set
+# SignalRouter Design Set
 
-This directory contains the **clean-slate v2 design** of SignalRouter: a from-first-
+This directory contains the **clean-slate design** of SignalRouter: a from-first-
 principles redesign of the same mission — semantic UI projection, structured commands,
 deterministic record/replay, and MCP agent control — with an engine-agnostic,
 dependency-free core.
 
-**Status: under implementation.** The design set is normative for the v2
-implementation in `src/` (Contracts, AdapterSdk, Kernel, TCK, reference
-adapter, and `Codec.CanonicalState` are shipped; recording/replay and the outer
-modules are staged). The v1 documents ([../design.md](../design.md),
-[../adr/](../adr/)) describe the v1 implementation only; v2 shares no
-compatibility with v1's API, protocol, or artifacts, and this set renumbers its
-ADRs from 0001.
+**Status: the core is implemented.** This design set is normative for the
+implementation in `src/`: Contracts, AdapterSdk, Kernel, both codec leaves,
+Comparison, Recording, Replay, the TCK, and the reference adapter are shipped;
+the protocol gateway and the Unity adapter are the staged outer modules. The
+superseded first-generation implementation and its documents were removed when
+this design was promoted; its ADR numbering restarted from 0001 here.
 
 ## Reading order
 

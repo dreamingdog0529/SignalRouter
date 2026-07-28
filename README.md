@@ -59,12 +59,12 @@ English | [日本語](./README_ja.md)
 <img src="assets/screenshot.png" alt="SignalRouter screenshot">
 -->
 
-SignalRouter is a Unity runtime (with a Pure C# core) that represents UI operations as
-structured, serializable commands. Instead of driving the UI through pixels and
-screenshots, it exposes a **semantic UI tree** — every interactive element with its
-`id`, `role`, `label`, current value, `enabled`/`visible` state, and the operations it
-currently allows — so command sequences can be executed, recorded, and deterministically
-replayed.
+SignalRouter is an engine-agnostic Pure C# runtime (Unity is the first target engine)
+that represents UI operations as structured, serializable commands. Instead of driving
+the UI through pixels and screenshots, it exposes a **semantic UI tree** — every
+interactive element with its identity, role, current value, state, and the operations
+it currently allows — so command sequences can be executed, recorded, and
+deterministically replayed.
 
 That enables two things: **reproducible debugging** (capture a failing session and replay
 the exact command sequence, application handlers and all) and **screenshot-free control by
