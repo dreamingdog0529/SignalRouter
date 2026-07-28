@@ -12,12 +12,49 @@ namespace SignalRouter.V2.Contracts
     /// </summary>
     public sealed class SemanticDiffEntry : IEquatable<SemanticDiffEntry>
     {
+        /// <summary>
+        /// A diff path composes several identifier segments ("nodes/&lt;key&gt;/attributes/&lt;name&gt;"),
+        /// so its bound is a small multiple of one identifier's — a maximum-length
+        /// AuthorKey must still produce a reportable divergence, never a throw.
+        /// </summary>
+        public const int MaxPathLength = 4 * ContractGrammar.MaxIdentifierLength;
+
         public SemanticDiffEntry(string path, string detailCode, string recorded, string actual)
         {
-            Path = ContractGrammar.ValidateIdentifier(path, nameof(path));
+            Path = ValidatePath(path, nameof(path));
             DetailCode = ContractGrammar.ValidateCode(detailCode, nameof(detailCode));
             Recorded = ContractGrammar.ValidateScalarText(recorded, nameof(recorded));
             Actual = ContractGrammar.ValidateScalarText(actual, nameof(actual));
+        }
+
+        private static string ValidatePath(string value, string parameterName)
+        {
+            if (value == null)
+            {
+                throw new ArgumentNullException(parameterName);
+            }
+
+            if (value.Length == 0)
+            {
+                throw new ArgumentException("A diff path must not be empty.", parameterName);
+            }
+
+            if (value.Length > MaxPathLength)
+            {
+                throw new ArgumentException(
+                    $"A diff path must not exceed {MaxPathLength} characters.", parameterName);
+            }
+
+            foreach (var character in value)
+            {
+                if (char.IsControl(character))
+                {
+                    throw new ArgumentException(
+                        "A diff path must not contain control characters.", parameterName);
+                }
+            }
+
+            return ContractGrammar.ValidateScalarText(value, parameterName);
         }
 
         public string Path { get; }
