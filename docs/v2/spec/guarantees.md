@@ -490,7 +490,7 @@ alone fails. This preserves v1's recorder-poisoning stance.
 | Before E2 (admission refused or crash pre-admission) | `NotAdmitted` (submitter sees `Rejected` or no admission ack) | no evidence required; TimelineTrack at most |
 | After E2, before E3 | no effect occurred (E3 is the permit) | artifact `Incomplete`/`Interrupted`; re-execution policy is the caller's, guarded by fingerprint dedup |
 | After E3, before E4 | `OutcomeUnknown` | strict replay stops before this effect |
-| Effect done, E4 append fails (sink fault) | true terminal preserved via `RecoveryIndex` | recording control op reports `Failed`; artifact `Incomplete(SinkFault)` if writable, else `Interrupted` |
+| Effect done, E4 append fails (sink fault) | true terminal preserved via `RecoveryIndex` | the coordinator requests a degraded close: the recording control op answers `Closed` with `Incomplete(SinkFault)` when E7 still commits, and `Failed` only when it cannot; the reader infers `Interrupted` for an unclosed artifact |
 | After E4, before E7 | terminal known and queryable | artifact `Interrupted` (unclosed) |
 | E7 write fault | terminals known | not `Completed`; reader infers `Interrupted` |
 | Pre-effect cancel | `Cancelled` with `phase = BeforeEffect` | replayable with synthetic cancelled token |

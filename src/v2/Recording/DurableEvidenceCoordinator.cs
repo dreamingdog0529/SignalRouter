@@ -35,6 +35,10 @@ namespace SignalRouter.V2.Recording
         private readonly Dictionary<(RequestId Parent, int Ordinal), SemanticFingerprint>
             unresolvedCommitments = new Dictionary<(RequestId, int), SemanticFingerprint>();
         private int openStep;
+        private RequestId? pendingPermitRequest;
+        private RecordMaterialization? pendingPermitBefore;
+        private bool pendingPermitReused;
+        private bool pendingPermitLeased;
 
         public DurableEvidenceCoordinator(IArtifactStore store, RecordingCoordinatorOptions options)
         {
@@ -66,11 +70,15 @@ namespace SignalRouter.V2.Recording
                 return EvidenceReadiness.Fault;
             }
 
-            if (!evidence.Profile.Equals(options.Profile.Reference))
+            if (!evidence.Profile.Equals(options.Profile.Reference) ||
+                !evidence.RecordView.Equals(options.Profile.RecordView) ||
+                !string.Equals(evidence.Scope, options.Profile.Scope, StringComparison.Ordinal) ||
+                !evidence.RedactionPolicy.Equals(options.Profile.RedactionPolicy))
             {
-                // The open pins a profile this coordinator does not carry; an
-                // artifact embedding a mismatched document would be degraded by
-                // every reader (ADR 0016).
+                // Every profile-defining open field must agree with the embedded
+                // document: E1 pins only the reference, so a divergent view,
+                // scope, or redaction policy would record under rules replay
+                // does not apply (ADR 0016).
                 return EvidenceReadiness.Fault;
             }
 
@@ -200,27 +208,51 @@ namespace SignalRouter.V2.Recording
                 return EvidenceReadiness.Ready;
             }
 
-            if (!services!.TryMaterializeView(
-                recordView, scope, evidence.Watermark, out var before, out _))
+            // The permit is a resumable step: the reuse decision and the lease
+            // are cached across Pending retries, so a retry can neither flip
+            // reusedCheckpointBlob (the blob it wrote itself would read as a
+            // checkpoint) nor leak or duplicate the lease.
+            if (!pendingPermitRequest.HasValue || !pendingPermitRequest.Value.Equals(evidence.Request))
             {
-                CloseRequested ??= new IncompleteReason("SinkFault");
-                return EvidenceReadiness.Fault;
-            }
-
-            var beforeId = before!.Snapshot.ContentId;
-            var reused = writer!.ContainsBlob(beforeId);
-            if (!reused)
-            {
-                if (services.TryLease(before, recording) != LeaseAnswer.Retained)
+                if (!services!.TryMaterializeView(
+                    recordView, scope, evidence.Watermark, out var before, out _))
                 {
-                    CloseRequested ??= new IncompleteReason("SizeLimit");
+                    CloseRequested ??= new IncompleteReason("SinkFault");
                     return EvidenceReadiness.Fault;
                 }
 
-                var blobAnswer = AppendBlobBounded(beforeId, before);
-                if (blobAnswer != EvidenceReadiness.Ready)
+                pendingPermitRequest = evidence.Request;
+                pendingPermitBefore = before!;
+                pendingPermitReused = writer!.ContainsBlob(before!.Snapshot.ContentId);
+                pendingPermitLeased = false;
+            }
+
+            var beforeId = pendingPermitBefore!.Snapshot.ContentId;
+            if (!pendingPermitReused)
+            {
+                if (!pendingPermitLeased)
                 {
-                    return blobAnswer;
+                    if (services!.TryLease(pendingPermitBefore, recording) != LeaseAnswer.Retained)
+                    {
+                        CloseRequested ??= new IncompleteReason("SizeLimit");
+                        ClearPendingPermit();
+                        return EvidenceReadiness.Fault;
+                    }
+
+                    pendingPermitLeased = true;
+                }
+
+                var blobAnswer = AppendBlobBounded(beforeId, pendingPermitBefore);
+                if (blobAnswer == EvidenceReadiness.Pending)
+                {
+                    return EvidenceReadiness.Pending;
+                }
+
+                if (blobAnswer == EvidenceReadiness.Fault)
+                {
+                    ReleasePendingPermitLease(beforeId);
+                    ClearPendingPermit();
+                    return EvidenceReadiness.Fault;
                 }
             }
 
@@ -230,14 +262,33 @@ namespace SignalRouter.V2.Recording
                 evidence.Order,
                 evidence.Watermark,
                 beforeId,
-                reused);
+                pendingPermitReused);
             var answer = AppendCut(cut);
-            if (answer == EvidenceReadiness.Ready && !reused)
+            if (answer == EvidenceReadiness.Pending)
             {
-                services.ReleaseLease(beforeId, recording);
+                return EvidenceReadiness.Pending;
             }
 
+            ReleasePendingPermitLease(beforeId);
+            ClearPendingPermit();
             return answer;
+        }
+
+        private void ReleasePendingPermitLease(ContentId beforeId)
+        {
+            if (pendingPermitLeased)
+            {
+                services!.ReleaseLease(beforeId, recording);
+                pendingPermitLeased = false;
+            }
+        }
+
+        private void ClearPendingPermit()
+        {
+            pendingPermitRequest = null;
+            pendingPermitBefore = null;
+            pendingPermitReused = false;
+            pendingPermitLeased = false;
         }
 
         public EvidenceReadiness CommitTerminalEvidence(TerminalEvidence evidence)
@@ -303,6 +354,7 @@ namespace SignalRouter.V2.Recording
             // every reader (R3) — fail fast instead of writing a lie.
             if (evidence.Reason.IsCompleted && unresolvedCommitments.Count > 0)
             {
+                EndRecording();
                 return EvidenceReadiness.Fault;
             }
 
@@ -310,9 +362,18 @@ namespace SignalRouter.V2.Recording
             if (!writer!.ContainsBlob(finalId))
             {
                 var blobAnswer = AppendBlobBounded(finalId, evidence.FinalSnapshot, enforceBounds: false);
-                if (blobAnswer != EvidenceReadiness.Ready)
+                if (blobAnswer == EvidenceReadiness.Fault)
                 {
-                    return blobAnswer;
+                    // The close cannot commit: the kernel resets to NotRecording
+                    // on this answer, and the coordinator must end with it — a
+                    // surviving writer would swallow the next recording.
+                    EndRecording();
+                    return EvidenceReadiness.Fault;
+                }
+
+                if (blobAnswer == EvidenceReadiness.Pending)
+                {
+                    return EvidenceReadiness.Pending;
                 }
             }
 
@@ -327,6 +388,7 @@ namespace SignalRouter.V2.Recording
             switch (AppendCut(closed, enforceBounds: false))
             {
                 case EvidenceReadiness.Fault:
+                    EndRecording();
                     return EvidenceReadiness.Fault;
                 case EvidenceReadiness.Pending:
                     return EvidenceReadiness.Pending;
@@ -374,19 +436,24 @@ namespace SignalRouter.V2.Recording
 
         private EvidenceReadiness AppendCut(EvidenceCut cut, bool enforceBounds = true)
         {
-            // The close path is bound-exempt: an artifact must always be able to
-            // end honestly — E7 (and its final blob) are the SizeLimit close,
-            // not a violation of it (guarantees.md §8).
-            if (enforceBounds &&
-                (cutCount + 1 > options.MaxEventCount ||
-                 writer!.WrittenBytes >= options.MaxArtifactBytes))
+            // One cut slot is reserved for E7 so the declared MaxEventCount is
+            // never exceeded on file: non-close cuts stop one early, and the
+            // close appends into the reserved slot. Bytes: non-close records
+            // preflight their full framed size against MaxArtifactBytes; the
+            // final blob and E7 are byte-exempt — an artifact must always be
+            // able to end honestly (guarantees.md §8; RecordingCoordinatorOptions).
+            if (enforceBounds && cutCount + 1 > options.MaxEventCount - 1)
             {
                 CloseRequested ??= new IncompleteReason("SizeLimit");
                 return EvidenceReadiness.Fault;
             }
 
-            switch (writer!.AppendCut(cut))
+            switch (writer!.AppendCut(
+                cut, enforceBounds ? options.MaxArtifactBytes : long.MaxValue))
             {
+                case WriteAnswer.OverBudget:
+                    CloseRequested ??= new IncompleteReason("SizeLimit");
+                    return EvidenceReadiness.Fault;
                 case WriteAnswer.Committed:
                     nextSequence++;
                     cutCount++;
@@ -404,20 +471,26 @@ namespace SignalRouter.V2.Recording
             ContentId id, RecordMaterialization materialization, bool enforceBounds = true)
         {
             var payload = materialization.Canonical.CopyPayload();
-            if (enforceBounds &&
-                (payload.Length > options.MaxBlobBytes ||
-                 writer!.WrittenBytes + payload.Length > options.MaxArtifactBytes))
+            if (enforceBounds && payload.Length > options.MaxBlobBytes)
             {
                 CloseRequested ??= new IncompleteReason("SizeLimit");
                 return EvidenceReadiness.Fault;
             }
 
-            return writer!.AppendBlob(id, payload) switch
+            return writer!.AppendBlob(
+                id, payload, enforceBounds ? options.MaxArtifactBytes : long.MaxValue) switch
             {
                 WriteAnswer.Committed => EvidenceReadiness.Ready,
                 WriteAnswer.InFlight => EvidenceReadiness.Pending,
+                WriteAnswer.OverBudget => OverBudgetAnswer(),
                 _ => FaultWithSink(),
             };
+        }
+
+        private EvidenceReadiness OverBudgetAnswer()
+        {
+            CloseRequested ??= new IncompleteReason("SizeLimit");
+            return EvidenceReadiness.Fault;
         }
 
         private EvidenceReadiness FaultWithSink()
@@ -428,20 +501,12 @@ namespace SignalRouter.V2.Recording
 
         private void TrackReachable(EvidenceCut cut)
         {
-            switch (cut)
+            // The single shared definition (EvidenceSemantics) — a new cut kind
+            // extends reachability once, for the writer, the reader, and closure
+            // verification together.
+            foreach (var contentId in EvidenceSemantics.ReferencedContentIds(cut))
             {
-                case RecordingOpened opened:
-                    AddReachable(opened.BaseSnapshot);
-                    break;
-                case EffectPermit permit:
-                    AddReachable(permit.BeforeView);
-                    break;
-                case TerminalCut terminal:
-                    AddReachable(terminal.AfterView);
-                    break;
-                case RecordingClosed closed:
-                    AddReachable(closed.FinalCheckpoint);
-                    break;
+                AddReachable(contentId);
             }
         }
 
@@ -466,6 +531,7 @@ namespace SignalRouter.V2.Recording
             cutCount = 0;
             reachableSet.Clear();
             reachableOrder.Clear();
+            ClearPendingPermit();
             unresolvedCommitments.Clear();
             CloseRequested = null;
             openStep = 0;

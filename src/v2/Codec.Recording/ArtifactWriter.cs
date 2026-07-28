@@ -83,7 +83,12 @@ namespace SignalRouter.V2.Codec.Recording
         /// this artifact answers Committed without writing (E3/E4 reuse writes no
         /// second copy).
         /// </summary>
-        public WriteAnswer AppendBlob(ContentId id, ReadOnlySpan<byte> canonicalPayload)
+        public WriteAnswer AppendBlob(ContentId id, ReadOnlySpan<byte> canonicalPayload) =>
+            AppendBlob(id, canonicalPayload, long.MaxValue);
+
+        /// <summary>Budgeted variant: the complete framed blob record must fit, or OverBudget.</summary>
+        public WriteAnswer AppendBlob(
+            ContentId id, ReadOnlySpan<byte> canonicalPayload, long totalByteBudget)
         {
             if (id.IsDefault)
             {
@@ -105,7 +110,7 @@ namespace SignalRouter.V2.Codec.Recording
                     writer.WriteRaw(value);
                 }
 
-                var answer = AppendRecord(RecordKind.Blob, writer.WrittenSpan);
+                var answer = AppendRecord(RecordKind.Blob, writer.WrittenSpan, totalByteBudget);
                 if (answer == WriteAnswer.Committed)
                 {
                     writtenBlobs.Add(id);
@@ -119,7 +124,15 @@ namespace SignalRouter.V2.Codec.Recording
             }
         }
 
-        public WriteAnswer AppendCut(EvidenceCut cut)
+        public WriteAnswer AppendCut(EvidenceCut cut) => AppendCut(cut, long.MaxValue);
+
+        /// <summary>
+        /// Appends a cut only if the complete framed record fits inside
+        /// <paramref name="totalByteBudget"/> (the preflight the declared
+        /// RecordingSink byte bound needs — a partially counted bound is not a
+        /// bound).
+        /// </summary>
+        public WriteAnswer AppendCut(EvidenceCut cut, long totalByteBudget)
         {
             if (cut == null)
             {
@@ -130,7 +143,7 @@ namespace SignalRouter.V2.Codec.Recording
             try
             {
                 RecordingPayloadCodec.WriteCut(ref writer, cut);
-                return AppendRecord(RecordKind.EvidenceCut, writer.WrittenSpan);
+                return AppendRecord(RecordKind.EvidenceCut, writer.WrittenSpan, totalByteBudget);
             }
             finally
             {
@@ -138,7 +151,8 @@ namespace SignalRouter.V2.Codec.Recording
             }
         }
 
-        private WriteAnswer AppendRecord(RecordKind kind, ReadOnlySpan<byte> payload)
+        private WriteAnswer AppendRecord(
+            RecordKind kind, ReadOnlySpan<byte> payload, long totalByteBudget = long.MaxValue)
         {
             if (!headerWritten)
             {
@@ -163,6 +177,11 @@ namespace SignalRouter.V2.Codec.Recording
                 framing.WriteRaw((byte)(crc >> 8));
                 framing.WriteRaw((byte)crc);
                 framing.WriteRaw(RecordingSchema.CommitByte);
+                if (storage.WrittenBytes + framing.WrittenSpan.Length > totalByteBudget)
+                {
+                    return WriteAnswer.OverBudget;
+                }
+
                 return storage.Append(framing.WrittenSpan);
             }
             finally

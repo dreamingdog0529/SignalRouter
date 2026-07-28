@@ -15,6 +15,12 @@ namespace SignalRouter.V2.Codec.Recording
 
         /// <summary>The record could not be made durable.</summary>
         Fault,
+
+        /// <summary>
+        /// The fully framed record would exceed the caller's byte budget; nothing
+        /// was written. A resource refusal is never disguised as a sink fault.
+        /// </summary>
+        OverBudget,
     }
 
     /// <summary>

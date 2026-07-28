@@ -29,7 +29,9 @@ sealed class SignalRouter.V2.Codec.Recording.ArtifactWriter
   property WrittenBytes : System.Int64 { public get; }
   public ctor(SignalRouter.V2.Codec.Recording.IArtifactStorage storage)
   public method AppendBlob(SignalRouter.V2.Contracts.ContentId id, System.ReadOnlySpan<System.Byte> canonicalPayload) : SignalRouter.V2.Codec.Recording.WriteAnswer
+  public method AppendBlob(SignalRouter.V2.Contracts.ContentId id, System.ReadOnlySpan<System.Byte> canonicalPayload, System.Int64 totalByteBudget) : SignalRouter.V2.Codec.Recording.WriteAnswer
   public method AppendCut(SignalRouter.V2.Contracts.EvidenceCut cut) : SignalRouter.V2.Codec.Recording.WriteAnswer
+  public method AppendCut(SignalRouter.V2.Contracts.EvidenceCut cut, System.Int64 totalByteBudget) : SignalRouter.V2.Codec.Recording.WriteAnswer
   public method AppendProfile(SignalRouter.V2.Contracts.ReplayComparisonProfile profile) : SignalRouter.V2.Codec.Recording.WriteAnswer
   public method ContainsBlob(SignalRouter.V2.Contracts.ContentId id) : System.Boolean
   public method Dispose() : System.Void
@@ -84,3 +86,4 @@ enum SignalRouter.V2.Codec.Recording.WriteAnswer
   Committed = 0
   Fault = 2
   InFlight = 1
+  OverBudget = 3
