@@ -117,6 +117,135 @@ namespace SignalRouter.V2.Contracts
             return new CanonicalInvocation(fingerprint, argumentDigest);
         }
 
+        /// <summary>
+        /// Projects the live payload into its portable recorded form (ADR 0015):
+        /// canonical ordinal name order, non-sensitive values typed, sensitive
+        /// values as a contract-scoped <see cref="SecretReference"/>
+        /// (<c>contractId@major.minor/argumentName</c>) plus the same keyed digest
+        /// the argument section embeds. <see cref="DigestOf"/> over the result
+        /// equals the digest <see cref="Canonicalize"/> derives from the payload.
+        /// </summary>
+        public static RecordedArguments Project(
+            CapabilityContractRef contract,
+            InvocationPayload payload,
+            ArgumentSchema schema,
+            byte[] redactionKey)
+        {
+            if (contract.IsDefault)
+            {
+                throw new ArgumentException("Contract must be non-default.", nameof(contract));
+            }
+
+            if (payload == null)
+            {
+                throw new ArgumentNullException(nameof(payload));
+            }
+
+            if (schema == null)
+            {
+                throw new ArgumentNullException(nameof(schema));
+            }
+
+            if (redactionKey == null || redactionKey.Length == 0)
+            {
+                throw new ArgumentException("A non-empty redaction key is required.", nameof(redactionKey));
+            }
+
+            ValidatePayload(payload, schema);
+
+            var names = SortedNames(payload);
+            var fields = new RecordedArgument[names.Count];
+            for (var index = 0; index < names.Count; index++)
+            {
+                var name = names[index];
+                payload.TryGetValue(name, out var value);
+                schema.TryGetField(name, out var declared);
+                if (declared.Sensitivity == Sensitivity.Sensitive &&
+                    value.Kind != FieldValueKind.Null)
+                {
+                    // Both variable components are length-framed: contract ids and
+                    // argument names may legally contain '@' and '/', so bare
+                    // concatenation would not be injective.
+                    var contractId = contract.Id.Value;
+                    var reference = new SecretReference(
+                        contractId.Length.ToString(CultureInfo.InvariantCulture) + ":" + contractId
+                        + "@" + contract.Version.Major.ToString(CultureInfo.InvariantCulture)
+                        + "." + contract.Version.Minor.ToString(CultureInfo.InvariantCulture)
+                        + "/" + name.Length.ToString(CultureInfo.InvariantCulture) + ":" + name);
+                    fields[index] = RecordedArgument.OfSecret(
+                        name,
+                        reference,
+                        new ArgumentDigest(HmacHex(redactionKey, CanonicalRendering(value))));
+                }
+                else
+                {
+                    fields[index] = RecordedArgument.OfValue(name, value);
+                }
+            }
+
+            return new RecordedArguments(ValueArray<RecordedArgument>.From(fields));
+        }
+
+        /// <summary>
+        /// Recomputes the redacted argument digest from the recorded form — the
+        /// replay-side identity check: a resolved or re-admitted argument set that
+        /// does not re-digest to E2's recorded digest is not the recorded
+        /// invocation.
+        /// </summary>
+        public static ArgumentDigest DigestOf(RecordedArguments recorded)
+        {
+            if (recorded == null)
+            {
+                throw new ArgumentNullException(nameof(recorded));
+            }
+
+            var builder = new StringBuilder();
+            for (var index = 0; index < recorded.Fields.Count; index++)
+            {
+                var field = recorded.Fields[index];
+                if (field.IsSecret)
+                {
+                    AppendSensitiveContribution(builder, field.Name, field.SecretValueDigest.Value);
+                }
+                else
+                {
+                    AppendValueContribution(builder, field.Name, field.Value);
+                }
+            }
+
+            return new ArgumentDigest(Sha256Hex(builder.ToString()));
+        }
+
+        // The single source of one field's canonical contribution — the projection
+        // and the live digest path must never drift apart.
+        private static void AppendSensitiveContribution(
+            StringBuilder builder, string name, string keyedDigestHex)
+        {
+            AppendFramed(builder, name);
+            builder.Append(FieldSeparator)
+                .Append("sensitive").Append(FieldSeparator)
+                .Append(keyedDigestHex)
+                .Append(RecordSeparator);
+        }
+
+        private static void AppendValueContribution(StringBuilder builder, string name, FieldValue value)
+        {
+            AppendFramed(builder, name);
+            builder.Append(FieldSeparator)
+                .Append(FieldKindTag(value.Kind)).Append(FieldSeparator);
+            AppendFramed(builder, CanonicalRendering(value));
+            builder.Append(RecordSeparator);
+        }
+
+        // Floats contribute their IEEE-754 bit pattern, aligning argument identity
+        // with the observation codec (ADR 0012): 0.0 and -0.0 are distinct
+        // payloads, and digest inequality implies nothing. FieldValue.Equals stays
+        // numeric; identity and DTO equality are deliberately different relations.
+        private static string CanonicalRendering(FieldValue value) =>
+            value.Kind == FieldValueKind.Float
+                ? BitConverter.DoubleToInt64Bits(value.AsFloat).ToString("x16", CultureInfo.InvariantCulture)
+                : value.ToString();
+
         private static void ValidatePayload(InvocationPayload payload, ArgumentSchema schema)
         {
             foreach (var field in payload.Fields)
@@ -163,8 +292,7 @@ namespace SignalRouter.V2.Contracts
             }
         }
 
-        private static string BuildArgumentsSection(
-            InvocationPayload payload, ArgumentSchema schema, byte[] redactionKey)
+        private static List<string> SortedNames(InvocationPayload payload)
         {
             var names = new List<string>();
             foreach (var field in payload.Fields)
@@ -173,27 +301,29 @@ namespace SignalRouter.V2.Contracts
             }
 
             names.Sort(StringComparer.Ordinal);
+            return names;
+        }
+
+        private static string BuildArgumentsSection(
+            InvocationPayload payload, ArgumentSchema schema, byte[] redactionKey)
+        {
+            var names = SortedNames(payload);
 
             var builder = new StringBuilder();
             foreach (var name in names)
             {
                 payload.TryGetValue(name, out var value);
                 schema.TryGetField(name, out var declared);
-                AppendFramed(builder, name);
-                builder.Append(FieldSeparator);
                 if (declared.Sensitivity == Sensitivity.Sensitive &&
                     value.Kind != FieldValueKind.Null)
                 {
-                    builder.Append("sensitive").Append(FieldSeparator)
-                        .Append(HmacHex(redactionKey, value.ToString()));
+                    AppendSensitiveContribution(
+                        builder, name, HmacHex(redactionKey, CanonicalRendering(value)));
                 }
                 else
                 {
-                    builder.Append(FieldKindTag(value.Kind)).Append(FieldSeparator);
-                    AppendFramed(builder, value.ToString());
+                    AppendValueContribution(builder, name, value);
                 }
-
-                builder.Append(RecordSeparator);
             }
 
             return builder.ToString();

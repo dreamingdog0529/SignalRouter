@@ -83,11 +83,16 @@ appears only as a `SecretReference` (stable identifier plus digest — never the
 value). The kernel projects the live submission payload into this form at
 admission, alongside the existing digest; the digest remains the identity and
 dedup authority, and the recorded projection must re-digest to it (a
-consistency the kernel asserts). `PredicateArmed` and `AssertionEvaluated`
-gain the same recorded-operand representation, and the E6 cuts gain the
-evaluation scope. Replay resolves `SecretReference`s through an
-`ISecretReferenceResolver` in memory only; an unresolvable reference stops
-replay before the affected entry ([recording-replay.md](../spec/recording-replay.md) §7).
+consistency the E2 cut enforces at construction). **E6/E8 need no recorded
+operands**: waits arm registered predicate contracts whose definitions —
+including any secret operands, which are references by construction — E1
+pins, so the cuts' operand digests identify a definition the replay runtime
+resolves from its own allowlisted catalog. The E6 cuts gain the observation
+scope their re-evaluation needs (E8 already carries its own). Replay resolves
+`SecretReference`s through an `ISecretReferenceResolver` in memory only,
+keyed by `(reference, expected digest)` so distinct values behind one
+reference stay distinguishable; an unresolvable reference stops replay
+before the affected entry ([recording-replay.md](../spec/recording-replay.md) §7).
 Redaction itself stays where it is — before materialization, in the
 observation path — this ADR adds no second redaction stage.
 

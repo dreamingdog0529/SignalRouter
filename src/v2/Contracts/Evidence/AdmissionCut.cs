@@ -17,6 +17,7 @@ namespace SignalRouter.V2.Contracts
             LogicalOrder logicalOrder,
             SemanticFingerprint fingerprint,
             CapabilityInvocation invocation,
+            RecordedArguments arguments,
             ResolvedTarget resolvedTarget,
             IdentityEnvelope envelope)
             : base(sequence)
@@ -36,10 +37,30 @@ namespace SignalRouter.V2.Contracts
                 throw new ArgumentException("E2 requires a non-default resolved target.", nameof(resolvedTarget));
             }
 
+            if (invocation == null)
+            {
+                throw new ArgumentNullException(nameof(invocation));
+            }
+
+            if (arguments == null)
+            {
+                throw new ArgumentNullException(nameof(arguments));
+            }
+
+            // The recorded form and the invocation's redacted digest are the same
+            // identity; a cut whose two halves disagree would be unreplayable.
+            if (!InvocationCanonicalizer.DigestOf(arguments).Equals(invocation.Arguments))
+            {
+                throw new ArgumentException(
+                    "The recorded arguments do not re-digest to the invocation's argument digest.",
+                    nameof(arguments));
+            }
+
             RequestId = requestId;
             LogicalOrder = logicalOrder;
             Fingerprint = fingerprint;
-            Invocation = invocation ?? throw new ArgumentNullException(nameof(invocation));
+            Invocation = invocation;
+            Arguments = arguments;
             ResolvedTarget = resolvedTarget;
             Envelope = envelope ?? throw new ArgumentNullException(nameof(envelope));
         }
@@ -53,6 +74,13 @@ namespace SignalRouter.V2.Contracts
         public SemanticFingerprint Fingerprint { get; }
 
         public CapabilityInvocation Invocation { get; }
+
+        /// <summary>
+        /// The portable replay input: the admitted arguments in recorded form
+        /// (typed values; sensitive values as secret references). Re-digesting
+        /// this form yields <see cref="CapabilityInvocation.Arguments"/> (ADR 0015).
+        /// </summary>
+        public RecordedArguments Arguments { get; }
 
         public ResolvedTarget ResolvedTarget { get; }
 

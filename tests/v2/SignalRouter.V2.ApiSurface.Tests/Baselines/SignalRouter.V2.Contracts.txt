@@ -3,13 +3,14 @@
 sealed class SignalRouter.V2.Contracts.AdmissionCut
   : SignalRouter.V2.Contracts.EvidenceCut
   override property Kind : SignalRouter.V2.Contracts.EvidenceCutKind { public get; }
+  property Arguments : SignalRouter.V2.Contracts.RecordedArguments { public get; }
   property Envelope : SignalRouter.V2.Contracts.IdentityEnvelope { public get; }
   property Fingerprint : SignalRouter.V2.Contracts.SemanticFingerprint { public get; }
   property Invocation : SignalRouter.V2.Contracts.CapabilityInvocation { public get; }
   property LogicalOrder : SignalRouter.V2.Contracts.LogicalOrder { public get; }
   property RequestId : SignalRouter.V2.Contracts.RequestId { public get; }
   property ResolvedTarget : SignalRouter.V2.Contracts.ResolvedTarget { public get; }
-  public ctor(SignalRouter.V2.Contracts.EvidenceSequence sequence, SignalRouter.V2.Contracts.RequestId requestId, SignalRouter.V2.Contracts.LogicalOrder logicalOrder, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.CapabilityInvocation invocation, SignalRouter.V2.Contracts.ResolvedTarget resolvedTarget, SignalRouter.V2.Contracts.IdentityEnvelope envelope)
+  public ctor(SignalRouter.V2.Contracts.EvidenceSequence sequence, SignalRouter.V2.Contracts.RequestId requestId, SignalRouter.V2.Contracts.LogicalOrder logicalOrder, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.CapabilityInvocation invocation, SignalRouter.V2.Contracts.RecordedArguments arguments, SignalRouter.V2.Contracts.ResolvedTarget resolvedTarget, SignalRouter.V2.Contracts.IdentityEnvelope envelope)
 
 readonly struct SignalRouter.V2.Contracts.ArgumentDigest
   implements System.IEquatable<SignalRouter.V2.Contracts.ArgumentDigest>
@@ -237,6 +238,12 @@ enum SignalRouter.V2.Contracts.ClosureCheckResult
   UnreachableContentId = 3
   Verified = 0
 
+enum SignalRouter.V2.Contracts.CollectionComparison
+  : System.Int32
+  Multiset = 2
+  Ordered = 0
+  Set = 1
+
 readonly struct SignalRouter.V2.Contracts.CollectionCountLookup
   implements System.IEquatable<SignalRouter.V2.Contracts.CollectionCountLookup>
   property Count : System.Int32 { public get; }
@@ -253,6 +260,33 @@ readonly struct SignalRouter.V2.Contracts.CollectionCountLookup
   static property Absent : SignalRouter.V2.Contracts.CollectionCountLookup { public get; }
   static property OutOfScope : SignalRouter.V2.Contracts.CollectionCountLookup { public get; }
   static property Redacted : SignalRouter.V2.Contracts.CollectionCountLookup { public get; }
+
+sealed class SignalRouter.V2.Contracts.CollectionRule
+  implements System.IEquatable<SignalRouter.V2.Contracts.CollectionRule>
+  property Comparison : SignalRouter.V2.Contracts.CollectionComparison { public get; }
+  property FieldPath : System.String { public get; }
+  public ctor(System.String fieldPath, SignalRouter.V2.Contracts.CollectionComparison comparison)
+  public method Equals(SignalRouter.V2.Contracts.CollectionRule? other) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+
+sealed class SignalRouter.V2.Contracts.ComparedNodeRule
+  implements System.IEquatable<SignalRouter.V2.Contracts.ComparedNodeRule>
+  property Fields : SignalRouter.V2.Contracts.ValueArray<System.String> { public get; }
+  property RoleCode : System.String { public get; }
+  public ctor(System.String roleCode, SignalRouter.V2.Contracts.ValueArray<System.String> fields)
+  public method Equals(SignalRouter.V2.Contracts.ComparedNodeRule? other) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+
+sealed class SignalRouter.V2.Contracts.ComparedSourceRule
+  implements System.IEquatable<SignalRouter.V2.Contracts.ComparedSourceRule>
+  property Fields : SignalRouter.V2.Contracts.ValueArray<System.String> { public get; }
+  property Source : SignalRouter.V2.Contracts.StateSourceKey { public get; }
+  public ctor(SignalRouter.V2.Contracts.StateSourceKey source, SignalRouter.V2.Contracts.ValueArray<System.String> fields)
+  public method Equals(SignalRouter.V2.Contracts.ComparedSourceRule? other) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
 
 sealed class SignalRouter.V2.Contracts.ComparisonExpression
   : SignalRouter.V2.Contracts.PredicateExpression
@@ -572,6 +606,15 @@ sealed class SignalRouter.V2.Contracts.ExposurePolicy
   public method IsVisibleTo(SignalRouter.V2.Contracts.SecurityDomainId domain) : System.Boolean
   static property Hidden : SignalRouter.V2.Contracts.ExposurePolicy { public get; }
 
+sealed class SignalRouter.V2.Contracts.ExtensionPolicy
+  implements System.IEquatable<SignalRouter.V2.Contracts.ExtensionPolicy>
+  property ExtensionId : System.String { public get; }
+  property Mandatory : System.Boolean { public get; }
+  public ctor(System.String extensionId, System.Boolean mandatory)
+  public method Equals(SignalRouter.V2.Contracts.ExtensionPolicy? other) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+
 sealed class SignalRouter.V2.Contracts.ExternalMutationBarrier
   : SignalRouter.V2.Contracts.EvidenceCut
   override property Kind : SignalRouter.V2.Contracts.EvidenceCutKind { public get; }
@@ -804,12 +847,23 @@ enum SignalRouter.V2.Contracts.InteractionShape
 
 static class SignalRouter.V2.Contracts.InvocationCanonicalizer
   public static method Canonicalize(SignalRouter.V2.Contracts.CapabilityContractRef contract, SignalRouter.V2.Contracts.ResolvedTarget target, SignalRouter.V2.Contracts.InvocationPayload payload, SignalRouter.V2.Contracts.ArgumentSchema schema, System.Byte[] redactionKey) : SignalRouter.V2.Contracts.CanonicalInvocation
+  public static method DigestOf(SignalRouter.V2.Contracts.RecordedArguments recorded) : SignalRouter.V2.Contracts.ArgumentDigest
+  public static method Project(SignalRouter.V2.Contracts.CapabilityContractRef contract, SignalRouter.V2.Contracts.InvocationPayload payload, SignalRouter.V2.Contracts.ArgumentSchema schema, System.Byte[] redactionKey) : SignalRouter.V2.Contracts.RecordedArguments
 
 sealed class SignalRouter.V2.Contracts.InvocationPayload
   property Fields : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.NamedField> { public get; }
   public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.NamedField> fields)
   public method TryGetValue(System.String name, out SignalRouter.V2.Contracts.FieldValue value) : System.Boolean
   static property Empty : SignalRouter.V2.Contracts.InvocationPayload { public get; }
+
+sealed class SignalRouter.V2.Contracts.ItemKeyRule
+  implements System.IEquatable<SignalRouter.V2.Contracts.ItemKeyRule>
+  property CollectionPath : System.String { public get; }
+  property KeyField : System.String { public get; }
+  public ctor(System.String collectionPath, System.String keyField)
+  public method Equals(SignalRouter.V2.Contracts.ItemKeyRule? other) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
 
 readonly struct SignalRouter.V2.Contracts.LogicalOrder
   implements System.IComparable<SignalRouter.V2.Contracts.LogicalOrder>, System.IEquatable<SignalRouter.V2.Contracts.LogicalOrder>
@@ -943,6 +997,16 @@ readonly struct SignalRouter.V2.Contracts.NodeRole
   static property ListItem : SignalRouter.V2.Contracts.NodeRole { public get; }
   static property Textbox : SignalRouter.V2.Contracts.NodeRole { public get; }
 
+sealed class SignalRouter.V2.Contracts.NormalizationRule
+  implements System.IEquatable<SignalRouter.V2.Contracts.NormalizationRule>
+  property FieldPath : System.String { public get; }
+  property NormalizerCode : System.String { public get; }
+  public const field Identity : System.String = "Identity"
+  public ctor(System.String fieldPath, System.String normalizerCode)
+  public method Equals(SignalRouter.V2.Contracts.NormalizationRule? other) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+
 sealed class SignalRouter.V2.Contracts.NotExpression
   : SignalRouter.V2.Contracts.PredicateExpression
   override property Depth : System.Int32 { public get; }
@@ -1007,11 +1071,12 @@ sealed class SignalRouter.V2.Contracts.PredicateArmed
   property ArmedSequence : SignalRouter.V2.Contracts.ViewSequence { public get; }
   property Causality : SignalRouter.V2.Contracts.Causality { public get; }
   property Fingerprint : SignalRouter.V2.Contracts.SemanticFingerprint { public get; }
+  property ObservationScope : System.String { public get; }
   property Operands : SignalRouter.V2.Contracts.ArgumentDigest { public get; }
   property OperationId : SignalRouter.V2.Contracts.OperationId { public get; }
   property Predicate : SignalRouter.V2.Contracts.PredicateContractRef { public get; }
   property Scope : SignalRouter.V2.Contracts.ViewContractRef { public get; }
-  public ctor(SignalRouter.V2.Contracts.EvidenceSequence sequence, SignalRouter.V2.Contracts.OperationId operationId, SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.ArgumentDigest operands, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.ViewContractRef scope, SignalRouter.V2.Contracts.Causality causality, SignalRouter.V2.Contracts.ViewSequence armedSequence)
+  public ctor(SignalRouter.V2.Contracts.EvidenceSequence sequence, SignalRouter.V2.Contracts.OperationId operationId, SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.ArgumentDigest operands, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.ViewContractRef scope, System.String observationScope, SignalRouter.V2.Contracts.Causality causality, SignalRouter.V2.Contracts.ViewSequence armedSequence)
 
 sealed class SignalRouter.V2.Contracts.PredicateCatalog
   property Fields : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.FieldSchema> { public get; }
@@ -1211,6 +1276,32 @@ enum SignalRouter.V2.Contracts.QueryAnswerKind
   RuntimeUnavailable = 2
   Terminal = 1
 
+readonly struct SignalRouter.V2.Contracts.RecordedArgument
+  implements System.IEquatable<SignalRouter.V2.Contracts.RecordedArgument>
+  property IsDefault : System.Boolean { public get; }
+  property IsSecret : System.Boolean { public get; }
+  property Name : System.String { public get; }
+  property Secret : SignalRouter.V2.Contracts.SecretReference { public get; }
+  property SecretValueDigest : SignalRouter.V2.Contracts.ArgumentDigest { public get; }
+  property Value : SignalRouter.V2.Contracts.FieldValue { public get; }
+  public method Equals(SignalRouter.V2.Contracts.RecordedArgument other) : System.Boolean
+  public operator op_Equality(SignalRouter.V2.Contracts.RecordedArgument left, SignalRouter.V2.Contracts.RecordedArgument right) : System.Boolean
+  public operator op_Inequality(SignalRouter.V2.Contracts.RecordedArgument left, SignalRouter.V2.Contracts.RecordedArgument right) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+  public override method ToString() : System.String
+  public static method OfSecret(System.String name, SignalRouter.V2.Contracts.SecretReference reference, SignalRouter.V2.Contracts.ArgumentDigest valueDigest) : SignalRouter.V2.Contracts.RecordedArgument
+  public static method OfValue(System.String name, SignalRouter.V2.Contracts.FieldValue value) : SignalRouter.V2.Contracts.RecordedArgument
+
+sealed class SignalRouter.V2.Contracts.RecordedArguments
+  implements System.IEquatable<SignalRouter.V2.Contracts.RecordedArguments>
+  property Fields : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.RecordedArgument> { public get; }
+  public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.RecordedArgument> fields)
+  public method Equals(SignalRouter.V2.Contracts.RecordedArguments? other) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+  static property Empty : SignalRouter.V2.Contracts.RecordedArguments { public get; }
+
 readonly struct SignalRouter.V2.Contracts.RecordingCloseReason
   implements System.IEquatable<SignalRouter.V2.Contracts.RecordingCloseReason>
   property IsCompleted : System.Boolean { public get; }
@@ -1327,6 +1418,23 @@ readonly struct SignalRouter.V2.Contracts.ReplayComparisonOutcome
   static property Diverged : SignalRouter.V2.Contracts.ReplayComparisonOutcome { public get; }
   static property Equal : SignalRouter.V2.Contracts.ReplayComparisonOutcome { public get; }
 
+sealed class SignalRouter.V2.Contracts.ReplayComparisonProfile
+  property CollectionRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CollectionRule> { public get; }
+  property ExtensionPolicies : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ExtensionPolicy> { public get; }
+  property ItemKeyRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ItemKeyRule> { public get; }
+  property NodeMatching : System.String { public get; }
+  property NodeRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedNodeRule> { public get; }
+  property NormalizationRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.NormalizationRule> { public get; }
+  property ProjectableFromVersions : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ContractVersion> { public get; }
+  property RecordView : SignalRouter.V2.Contracts.ViewContractRef { public get; }
+  property RedactionPolicy : SignalRouter.V2.Contracts.RedactionPolicyId { public get; }
+  property Reference : SignalRouter.V2.Contracts.ReplayComparisonProfileRef { public get; }
+  property RequireCompleteForScope : System.Boolean { public get; }
+  property Scope : System.String { public get; }
+  property SourceRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedSourceRule> { public get; }
+  public const field MatchByAuthorKey : System.String = "AuthorKey"
+  public ctor(SignalRouter.V2.Contracts.ReplayComparisonProfileRef reference, SignalRouter.V2.Contracts.ViewContractRef recordView, System.String scope, SignalRouter.V2.Contracts.RedactionPolicyId redactionPolicy, System.String nodeMatching, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedNodeRule> nodeRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedSourceRule> sourceRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ItemKeyRule> itemKeyRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CollectionRule> collectionRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.NormalizationRule> normalizationRules, System.Boolean requireCompleteForScope, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ExtensionPolicy> extensionPolicies, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ContractVersion> projectableFromVersions)
+
 readonly struct SignalRouter.V2.Contracts.ReplayComparisonProfileId
   implements System.IEquatable<SignalRouter.V2.Contracts.ReplayComparisonProfileId>
   property IsDefault : System.Boolean { public get; }
@@ -1430,6 +1538,21 @@ readonly struct SignalRouter.V2.Contracts.SecurityDomainId
   public override method Equals(System.Object? obj) : System.Boolean
   public override method GetHashCode() : System.Int32
   public override method ToString() : System.String
+
+sealed class SignalRouter.V2.Contracts.SemanticDiff
+  property Entries : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.SemanticDiffEntry> { public get; }
+  public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.SemanticDiffEntry> entries)
+
+sealed class SignalRouter.V2.Contracts.SemanticDiffEntry
+  implements System.IEquatable<SignalRouter.V2.Contracts.SemanticDiffEntry>
+  property Actual : System.String { public get; }
+  property DetailCode : System.String { public get; }
+  property Path : System.String { public get; }
+  property Recorded : System.String { public get; }
+  public ctor(System.String path, System.String detailCode, System.String recorded, System.String actual)
+  public method Equals(SignalRouter.V2.Contracts.SemanticDiffEntry? other) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
 
 sealed class SignalRouter.V2.Contracts.SemanticEvent
   property Causation : SignalRouter.V2.Contracts.EventCausation { public get; }
