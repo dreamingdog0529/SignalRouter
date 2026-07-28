@@ -30,6 +30,9 @@ namespace SignalRouter.V2.ReferenceAdapter
         private IPumpable? kernel;
         private long logicalNow;
 
+        /// <summary>Whether the last driven frame observed remaining or in-flight work.</summary>
+        public bool LastFrameHadWork { get; private set; }
+
         public ReferencePumpHost(ReferenceEffectExecutor executor, FrameTickClock clock)
         {
             this.executor = executor ?? throw new ArgumentNullException(nameof(executor));
@@ -56,6 +59,7 @@ namespace SignalRouter.V2.ReferenceAdapter
             for (var i = 0; i < frames; i++)
             {
                 logicalNow++;
+                LastFrameHadWork = false;
                 executor.OnFrame();
                 PumpPhase(pumpable, FramePhase.Update);
                 PumpPhase(pumpable, FramePhase.LateUpdate);
@@ -67,8 +71,9 @@ namespace SignalRouter.V2.ReferenceAdapter
         private void PumpPhase(IPumpable pumpable, FramePhase phase)
         {
             clock.Advance();
-            pumpable.Pump(new PumpBudget(
+            var report = pumpable.Pump(new PumpBudget(
                 TurnsPerPhase, deadline: long.MaxValue, new LogicalTime(logicalNow), phase));
+            LastFrameHadWork |= report.WorkRemaining || report.AwaitingAdapterCompletion;
 
             // The engine's frame work for this phase runs after the pump returned:
             // adopted effects apply (and, at the fence phase, report FrameCommitted)

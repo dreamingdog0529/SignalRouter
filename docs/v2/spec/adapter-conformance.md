@@ -212,6 +212,20 @@ required obligation a TCK version cannot yet check is reported
 `Incomplete` — never `Passed`. A run with required skips MUST NOT be presented as
 tier-2 completion or SDK conformance; it demonstrates only the checked subset.
 
+As of **TCK 1.0** (the recording and replay module), no obligation is staged:
+the formerly skipped checks are live — replay-environment isolation records a
+session on the harness world, replays it into the adapter's
+`IReplayEnvironmentFactory` twin all-`Equal`, and verifies the live world's
+trace never moved; the fixture/reset contract creates the twin twice from one
+recording's E1 and requires the base snapshot `ContentId` to reproduce both
+times ([verification.md](verification.md) §5.3); and the ObservedExternal
+contamination check is promoted from trace-level to evidence-level — the
+recording must carry the E5 barrier naming the contaminated interaction
+([guarantees.md](guarantees.md) §5.5). The harness contract accordingly
+requires a recording-capable runtime (registered record view, canonical-state
+codec, durable evidence coordinator) and the replay-environment factory. A
+conformant adapter reaches `Passed`.
+
 ### 7.3 Engine integration and distribution tests
 
 Adapter-specific tests on the real engine: real thread/frame phases, real input

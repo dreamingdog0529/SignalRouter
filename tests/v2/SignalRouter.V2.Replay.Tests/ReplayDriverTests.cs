@@ -1,5 +1,6 @@
 using System;
 using NUnit.Framework;
+using SignalRouter.V2.AdapterSdk;
 using SignalRouter.V2.Codec.CanonicalState;
 using SignalRouter.V2.Codec.Recording;
 using SignalRouter.V2.Comparison;
@@ -19,12 +20,27 @@ public sealed class ReplayDriverTests
 {
     private sealed class TwinEnvironment : IReplayEnvironment
     {
+        private long logicalNow = 1;
+
         internal TwinEnvironment(KernelRuntime runtime)
         {
             Runtime = runtime;
         }
 
         public KernelRuntime Runtime { get; }
+
+        public bool Advance()
+        {
+            // The finest honest grain for a pump-driven world: one turn.
+            return Runtime.Pump(new PumpBudget(
+                1, long.MaxValue, new LogicalTime(logicalNow++), FramePhase.Update)).WorkRemaining;
+        }
+
+        public void AdvanceAdmissionOnly()
+        {
+            // For a pump-grained world the admission step IS one turn.
+            Advance();
+        }
 
         public void Dispose()
         {

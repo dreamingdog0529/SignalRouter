@@ -16,5 +16,11 @@
     <ProjectReference Include="../AdapterSdk/SignalRouter.V2.AdapterSdk.csproj" />
     <ProjectReference Include="../Contracts/SignalRouter.V2.Contracts.csproj" />
     <ProjectReference Include="../Kernel/SignalRouter.V2.Kernel.csproj" />
+    <!-- The tier-2 recording/replay obligations (item 5): the suite records on
+         the harness runtime, pre-scans, and replays into the adapter's twin. -->
+    <ProjectReference Include="../Comparison/SignalRouter.V2.Comparison.csproj" />
+    <ProjectReference Include="../Replay/SignalRouter.V2.Replay.csproj" />
+    <ProjectReference Include="../Codec.CanonicalState/SignalRouter.V2.Codec.CanonicalState.csproj" />
+    <ProjectReference Include="../Codec.Recording/SignalRouter.V2.Codec.Recording.csproj" />
   </ItemGroup>
 </Project>

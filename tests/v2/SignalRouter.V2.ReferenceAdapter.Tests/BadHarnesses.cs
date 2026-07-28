@@ -177,6 +177,17 @@ internal static class BadHarnesses
 
         public int DriveFrames(int frames) => inner.DriveFrames(frames);
 
+        public Contracts.ReplayComparisonProfile RecordingProfile => inner.RecordingProfile;
+
+        public byte[] RedactionKey => inner.RedactionKey;
+
+        public Contracts.PredicateDefinition DefinitionOf(Contracts.PredicateContractRef predicate) =>
+            inner.DefinitionOf(predicate);
+
+        public byte[] ReadArtifact(Contracts.OperationId recording) => inner.ReadArtifact(recording);
+
+        public Replay.IReplayEnvironmentFactory ReplayEnvironments => inner.ReplayEnvironments;
+
         public void TearDown() => inner.TearDown();
     }
 

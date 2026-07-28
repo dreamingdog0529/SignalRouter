@@ -96,6 +96,14 @@ internal sealed class ReplayArtifactWorld
                     Applied, CompletionEvidenceKind.Applied, default)),
                 continuations: null));
         }
+
+        internal void CompleteCancelledLast()
+        {
+            sink!.ReportCompletion(new EffectCompletion(
+                Requests[^1].Permit,
+                EffectResolution.Cancelled(CancellationPhase.DuringEffect, "PartialEffect"),
+                continuations: null));
+        }
     }
 
     /// <summary>
@@ -340,6 +348,15 @@ internal sealed class ReplayArtifactWorld
     internal void CompletePending()
     {
         executor.CompleteLast();
+        PumpUntilIdle();
+    }
+
+    internal void CompleteCancelled()
+    {
+        // The adapter honors a mid-effect cancel: the effect terminates
+        // Cancelled(DuringEffect) after having started.
+        PumpUntilIdle();
+        executor.CompleteCancelledLast();
         PumpUntilIdle();
     }
 

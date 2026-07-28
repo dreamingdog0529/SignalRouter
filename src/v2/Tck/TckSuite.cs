@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using SignalRouter.V2.AdapterSdk;
+using SignalRouter.V2.Codec.Recording;
+using SignalRouter.V2.Comparison;
 using SignalRouter.V2.Contracts;
 using SignalRouter.V2.Kernel;
+using SignalRouter.V2.Replay;
 
 namespace SignalRouter.V2.Tck
 {
@@ -33,16 +36,15 @@ namespace SignalRouter.V2.Tck
     }
 
     /// <summary>
-    /// TCK 0.x Core Profile (adapter-conformance.md §7.2): black-box checks driven
-    /// through the SDK and runtime surfaces. Staged obligations — replay-environment
-    /// isolation and the fixture/reset contract — are required skips until the
-    /// recording and replay module lands, so the best possible aggregate today is
-    /// <see cref="TckAggregate.Incomplete"/>: this profile never claims SDK
-    /// conformance or tier-2 completion.
+    /// TCK 1.0 Core Profile (adapter-conformance.md §7.2): black-box checks driven
+    /// through the SDK and runtime surfaces. The formerly staged obligations —
+    /// replay-environment isolation and the fixture/reset contract — are live
+    /// with the recording and replay module, so a conformant adapter reaches
+    /// <see cref="TckAggregate.Passed"/>.
     /// </summary>
     public static class TckSuite
     {
-        public const string Version = "tck-core-0.x";
+        public const string Version = "tck-core-1.0";
 
         public static TckReport Run(ITckHarnessFactory factory, TckOptions? options = null)
         {
@@ -78,14 +80,10 @@ namespace SignalRouter.V2.Tck
                     harness => CheckSourcePublication(harness)),
                 RunCheck(factory, "predicate-obligation-repeatable", "predicate-obligation",
                     harness => CheckPredicateObligations(harness)),
-                new TckCheckResult(
-                    "replay-environment-isolation", "replay-isolation", required: true,
-                    TckCheckStatus.Skipped,
-                    "Staged: IReplayEnvironmentFactory is declared with the recording and replay module (docs/v2 item 5)."),
-                new TckCheckResult(
-                    "fixture-reset-contract", "fixture-reset", required: true,
-                    TckCheckStatus.Skipped,
-                    "Staged: the fixture and reset contract executes under the replay harness (docs/v2 item 5)."),
+                RunCheck(factory, "replay-environment-isolation", "replay-isolation",
+                    harness => CheckReplayEnvironmentIsolation(harness, suiteOptions)),
+                RunCheck(factory, "fixture-reset-contract", "fixture-reset",
+                    harness => CheckFixtureResetContract(harness, suiteOptions)),
             };
 
             return new TckReport(Version, ValueArray<TckCheckResult>.From(checks));
@@ -244,17 +242,39 @@ namespace SignalRouter.V2.Tck
 
         private static void CheckContamination(ITckHarness harness, TckOptions options)
         {
+            var recording = OpenRecording(harness, options);
             Submit(harness, harness.SlowCapability, "tck-window");
             harness.DriveFrames(1);
             harness.SimulateExternalMutation();
             harness.DriveFrames(1);
 
-            // Trace-level only in this profile: the E5 evidence cut is staged to the
-            // recording and replay module.
             Require(HasTrace(harness, "ContaminationObserved"),
                 "an Observed mutation landing inside the effect window must contaminate " +
                 "(observation-state.md §7.2)");
             DriveUntilIdle(harness, options);
+
+            // The evidence promotion (guarantees.md §5.5): the mutation is a
+            // durable E5 barrier naming the contaminated interaction, not just
+            // a trace line.
+            CloseRecording(harness, recording, options);
+            var reading = Codec.Recording.ArtifactReader.Read(
+                harness.ReadArtifact(recording), ReadLimits());
+            var contaminated = false;
+            for (var index = 0; index < reading.Cuts.Count; index++)
+            {
+                if (reading.Cuts[index] is ExternalMutationBarrier barrier)
+                {
+                    for (var request = 0; request < barrier.ContaminatedRequests.Count; request++)
+                    {
+                        contaminated |= barrier.ContaminatedRequests[request]
+                            .Equals(new RequestId("tck-window"));
+                    }
+                }
+            }
+
+            Require(contaminated,
+                "the recording must carry an E5 barrier marking the mid-effect " +
+                "interaction contaminated (guarantees.md §5.5)");
         }
 
         private static void CheckSourcePublication(ITckHarness harness)
@@ -305,6 +325,201 @@ namespace SignalRouter.V2.Tck
                 "count>=2 must evaluate False (a decided answer, not Unevaluable); observed " + first[1]);
             Require(first[0].Equals(second[0]) && first[1].Equals(second[1]),
                 "re-evaluating the same batch against unchanged state must answer identically");
+        }
+
+        private static void CheckReplayEnvironmentIsolation(ITckHarness harness, TckOptions options)
+        {
+            // Record one interaction on the live harness world.
+            var recording = OpenRecording(harness, options);
+            Submit(harness, harness.MutatingCapability, "tck-replayed");
+            harness.DriveFrames(DeclaredMaxFrames(harness, harness.MutatingCapability) + 1);
+            RequireTerminal(harness, "tck-replayed", "the recorded interaction");
+            CloseRecording(harness, recording, options);
+
+            var artifact = harness.ReadArtifact(recording);
+            var allowlist = BuildAllowlist(harness, artifact);
+            var scan = ReplayPreScan.Scan(
+                artifact, ReadLimits(), allowlist, new ComparisonVocabulary(),
+                secretResolver: null, new ReplayTrustOptions(ArtifactProvenance.Trusted));
+            Require(scan.Plan != null,
+                "the recorded artifact must pass the trust boundary; refused: " +
+                scan.Refusal?.Code);
+            Require(scan.Plan!.Stop == null,
+                "a clean recording must plan no strict-replay stop");
+
+            // Replay into the adapter's twin; the live world must stay untouched.
+            var traceBefore = TraceKinds(harness);
+            var report = new ReplayDriver(
+                new Codec.CanonicalState.CanonicalStateCodec(), new ComparisonVocabulary())
+                .Execute(
+                    scan.Plan, allowlist, harness.ReplayEnvironments,
+                    secretResolver: null, harness.RedactionKey, ReplayMode.StrictSemantic);
+            Require(report.Outcome.Equals(ReplayComparisonOutcome.Equal),
+                "the twin must replay the recording all-Equal (recording-replay.md §6); " +
+                "answered " + report.Outcome + " detail=" + report.DetailCode);
+
+            // Content and order, not a count: a same-length substitution is
+            // still shared state.
+            var traceAfter = TraceKinds(harness);
+            var untouched = traceAfter.Count == traceBefore.Count;
+            for (var index = 0; untouched && index < traceAfter.Count; index++)
+            {
+                untouched = string.Equals(traceAfter[index], traceBefore[index], StringComparison.Ordinal);
+            }
+
+            Require(untouched,
+                "replay isolation: the twin shares no state with the live runtime — " +
+                "the live trace must not move (recording-replay.md §6)");
+        }
+
+        private static void CheckFixtureResetContract(ITckHarness harness, TckOptions options)
+        {
+            // An empty recording fixes the base the fixture must reproduce.
+            var recording = OpenRecording(harness, options);
+            CloseRecording(harness, recording, options);
+            var reading = ArtifactReader.Read(harness.ReadArtifact(recording), ReadLimits());
+            RecordingOpened? opened = null;
+            for (var index = 0; index < reading.Cuts.Count; index++)
+            {
+                opened ??= reading.Cuts[index] as RecordingOpened;
+            }
+
+            Require(opened != null, "the closed recording must carry its E1");
+
+            // Two independent environments: the fixture contract reproduces the
+            // recorded base exactly, creation after creation (verification.md
+            // §5.3). The base is the world the adapter's declared fixture
+            // produces — this check pins the fixture's determinism against the
+            // recorded E1, not the factory's ability to reproduce an arbitrary
+            // mutated state (a recording taken over a diverged base simply
+            // fails its base comparison at replay). The first twin is genuinely
+            // dirtied before disposal, so a factory that hands back a live
+            // world instead of resetting cannot pass the second round.
+            using (var first = harness.ReplayEnvironments.Create(
+                opened!, NoOpEvidenceCoordinator.Instance))
+            {
+                RequireRecordedBase(harness, first, opened!, "the first twin");
+                DirtyTwin(harness, first, opened!);
+            }
+
+            using (var second = harness.ReplayEnvironments.Create(
+                opened!, NoOpEvidenceCoordinator.Instance))
+            {
+                RequireRecordedBase(
+                    harness, second, opened!, "a fresh twin created after a dirtied one");
+            }
+        }
+
+        private static void RequireRecordedBase(
+            ITckHarness harness, IReplayEnvironment environment, RecordingOpened opened,
+            string whichTwin)
+        {
+            Require(environment.Runtime.RecordObservation.TryMaterializeView(
+                    harness.RecordingProfile.RecordView, harness.RecordingProfile.Scope,
+                    null, out var baseView, out _),
+                "the twin's record view must materialize");
+            Require(baseView!.Snapshot.ContentId.Equals(opened.BaseSnapshot),
+                "the fixture must reproduce the recorded base ContentId, reset after " +
+                "reset (verification.md §5.3); " + whichTwin);
+        }
+
+        private static void DirtyTwin(
+            ITckHarness harness, IReplayEnvironment environment, RecordingOpened opened)
+        {
+            SubmitTo(environment.Runtime, harness, harness.MutatingCapability, "tck-fixture-dirty");
+            for (var i = 0; i < DeclaredMaxFrames(harness, harness.MutatingCapability) + 2; i++)
+            {
+                environment.Advance();
+            }
+
+            Require(environment.Runtime.Queries
+                    .Query(new RequestId("tck-fixture-dirty"), harness.AgentPrincipal)
+                    .Equals(QueryAnswer.Terminal(InteractionOutcome.Succeeded)),
+                "the mutating capability must complete inside the twin");
+            Require(environment.Runtime.RecordObservation.TryMaterializeView(
+                    harness.RecordingProfile.RecordView, harness.RecordingProfile.Scope,
+                    null, out var dirtied, out _),
+                "the dirtied twin's record view must materialize");
+            Require(!dirtied!.Snapshot.ContentId.Equals(opened.BaseSnapshot),
+                "the mutating capability must move the twin off the recorded base — " +
+                "otherwise reset cannot be distinguished from reuse; the recording " +
+                "profile's view must cover the declared mutating capability's effect");
+        }
+
+        private static OperationId OpenRecording(ITckHarness harness, TckOptions options)
+        {
+            var observer = new CollectingRecordingObserver();
+            var profile = harness.RecordingProfile;
+            var recording = harness.Runtime.Recording.OpenRecording(
+                new RecordingOpenRequest(
+                    profile.Reference, profile.RecordView, profile.Scope, profile.RedactionPolicy),
+                observer);
+            DriveUntilIdle(harness, options);
+            Require(observer.Opened,
+                "the harness runtime must be recording-capable (ITckHarness contract); " +
+                "refused: " + observer.RefusalCode);
+            return recording;
+        }
+
+        private static void CloseRecording(
+            ITckHarness harness, OperationId recording, TckOptions options)
+        {
+            var observer = new CollectingRecordingObserver();
+            harness.Runtime.Recording.CloseRecording(recording, observer);
+            DriveUntilIdle(harness, options);
+            Require(observer.Closed, "the recording must close; failed: " + observer.RefusalCode);
+        }
+
+        private static ReplayAllowlist BuildAllowlist(ITckHarness harness, byte[] artifact)
+        {
+            var reading = ArtifactReader.Read(artifact, ReadLimits());
+            RecordingOpened? opened = null;
+            for (var index = 0; index < reading.Cuts.Count; index++)
+            {
+                opened ??= reading.Cuts[index] as RecordingOpened;
+            }
+
+            Require(opened != null, "the artifact must carry its E1");
+            var predicates = new PredicateAllowlistEntry[opened!.PredicateContracts.Count];
+            for (var index = 0; index < opened.PredicateContracts.Count; index++)
+            {
+                predicates[index] = new PredicateAllowlistEntry(
+                    opened.PredicateContracts[index],
+                    harness.DefinitionOf(opened.PredicateContracts[index]));
+            }
+
+            return new ReplayAllowlist(
+                opened.CompletionBindings,
+                opened.StateSourceContracts,
+                ValueArray<PredicateAllowlistEntry>.From(predicates),
+                harness.RecordingProfile);
+        }
+
+        private static ArtifactReadLimits ReadLimits() => new ArtifactReadLimits(
+            maxArtifactBytes: 8L * 1024 * 1024,
+            maxRecordCount: 4096,
+            maxRecordBytes: 1024 * 1024,
+            maxBlobBytes: 1024 * 1024,
+            maxStringLength: 64 * 1024);
+
+        private sealed class CollectingRecordingObserver : IRecordingObserver
+        {
+            internal bool Opened { get; private set; }
+
+            internal bool Closed { get; private set; }
+
+            internal string? RefusalCode { get; private set; }
+
+            public void OnOpened(OperationId recording) => Opened = true;
+
+            public void OnOpenRefused(OperationId recording, string reasonCode) =>
+                RefusalCode = reasonCode;
+
+            public void OnClosed(OperationId recording, RecordingCloseReason reason) =>
+                Closed = reason.IsCompleted;
+
+            public void OnFailed(OperationId recording, string reasonCode) =>
+                RefusalCode = reasonCode;
         }
 
         // ── Drivers and helpers ──────────────────────────────────────────────
@@ -375,8 +590,15 @@ namespace SignalRouter.V2.Tck
         private static CollectingSubmissionObserver Submit(
             ITckHarness harness, CapabilityContractRef capability, string requestId)
         {
+            return SubmitTo(harness.Runtime, harness, capability, requestId);
+        }
+
+        private static CollectingSubmissionObserver SubmitTo(
+            KernelRuntime runtime, ITckHarness harness, CapabilityContractRef capability,
+            string requestId)
+        {
             var observer = new CollectingSubmissionObserver();
-            harness.Runtime.Ingress.Submit(new IntentSubmission(
+            runtime.Ingress.Submit(new IntentSubmission(
                 new RequestId(requestId),
                 capability,
                 TargetReference.ForKey(harness.VisibleTargetKey),

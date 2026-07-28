@@ -335,7 +335,11 @@ namespace SignalRouter.V2.Replay
                 switch (cuts[index])
                 {
                     case AdmissionCut admission:
-                        if (admissions.ContainsKey(admission.RequestId))
+                        // Strict-comparison scope requires AuthorKeys
+                        // (recording-replay.md §5.3): a keyless recorded target
+                        // could never be re-addressed at replay.
+                        if (admissions.ContainsKey(admission.RequestId) ||
+                            !admission.ResolvedTarget.HasAuthorKey)
                         {
                             structuralViolation = true;
                             return ValueArray<ReplayEntry>.Empty;
