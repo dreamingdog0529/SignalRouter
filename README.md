@@ -18,7 +18,7 @@ English | [日本語](./README_ja.md)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/dreamingdog0529/SignalRouter/badge)](https://securityscorecards.dev/viewer/?uri=github.com/dreamingdog0529/SignalRouter)
 
 <p>
-  <a href="docs/design.md"><strong>Read the architecture »</strong></a>
+  <a href="docs/README.md"><strong>Read the architecture »</strong></a>
   <br /><br />
   <a href="https://github.com/dreamingdog0529/SignalRouter/issues/new?template=bug_report.yml">Report Bug</a>
   ·
@@ -72,18 +72,18 @@ AI agents over MCP** (an agent enumerates the operations available in the curren
 and drives them directly). It is aimed at teams building Unity apps and games who want
 their UI to be observable and controllable as data.
 
-> **Status:** The command model, immutable command catalog and codecs, structured result
-> model, and semantic registry are implemented on top of the .NET-first build and test
-> foundation. FIFO dispatch, stage execution and state probes, record/replay, Unity
-> UI, WebSocket, and MCP production features remain unimplemented. Their supported scope
-> and acceptance criteria are defined in the [architecture document](docs/design.md).
+> **Status:** The engine-agnostic core is implemented: the single-owner kernel with its
+> typed contracts, the observation/materialization layer with content-addressed
+> canonical state, durable recording (E1–E8 evidence), isolated-twin replay with typed
+> three-valued comparison, a seal evaluator, and a TCK the in-repo reference adapter
+> passes end to end. The protocol gateway (MCP surface) and the Unity adapter are the
+> next roadmap items. Guarantees live in [docs/spec/guarantees.md](docs/spec/guarantees.md).
 
 ### Built With
 
-- **[Unity 6](https://unity.com/)** (uGUI for the MVP) — the UI runtime being observed and driven
-- **Pure C#** (.NET Standard 2.1) — the core has no Unity dependency
-- **[VitalRouter](https://github.com/hadashiA/VitalRouter)** — the single in-process command bus
-- **[Model Context Protocol](https://modelcontextprotocol.io/)** (MCP) — agent-facing tool surface, bridged to the runtime over WebSocket
+- **Pure C#** (.NET Standard 2.1, C# 9) — the runtime takes zero package dependencies
+- **[Unity 6](https://unity.com/)** — the first target engine (adapter upcoming; the core never depends on it)
+- **[Model Context Protocol](https://modelcontextprotocol.io/)** (MCP) — the agent-facing surface (gateway upcoming)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -91,14 +91,15 @@ their UI to be observable and controllable as data.
 
 ## Features
 
-The core model is implemented; runtime execution and transport capabilities remain
-planned:
+The kernel, observation, recording, and replay layers are implemented; the protocol
+gateway and the Unity adapter are the remaining roadmap items:
 
-- **Semantic UI registry (core implemented)** — observe registered elements (`id` / `role` / `label` / value / state) and their catalog-validated operations through deterministic snapshots.
-- **Structured commands (core implemented)** — interactions modeled as C# 9-compatible immutable values (`click`, `set_value`) with strict, versioned JSON codecs.
-- **Record & replay** — every command passes through `IInteractionDispatcher`, so sessions replay deterministically with terminal-result confirmation (queue-accepted ≠ done).
-- **Deterministic fault model** — sequential execution separates `Rejected` (validation, zero side effects) from `Faulted` (failed at stage *k*, with *k−1* applied) and reproduces the exact interruption point.
-- **MCP agent control** — `get_ui_tree`, `wait_for`, and execution tools let agents drive the UI without pixels; exceptions are caught at the seam and never leak across the MCP boundary.
+- **Single-owner kernel** — one mutation lane, split-phase adapter protocol, exactly-once completion, and a typed failure matrix; every guarantee is a normative table in [docs/spec/](docs/spec/).
+- **Semantic observation** — projected views with completeness maps and content-addressed canonical state; a snapshot's `ContentId` is a portable, verify-before-use digest.
+- **Durable recording** — an append-only evidence artifact (E1–E8 cuts, delta-encoded checkpoints, a droppable diagnostics timeline) written through a crash-honest reader-classified format.
+- **Isolated replay** — a pre-scan trust boundary, an isolated twin environment, and typed exact comparison answering `Equal | Diverged | Incomparable(reason)`; a seal evaluator decides what may become a CI verification case.
+- **Adapter TCK** — a conformance kit any engine adapter must pass; the in-repo reference adapter passes it end to end.
+- **Normative performance** — quiescent pumps allocate zero bytes and work is proportional to admitted load, enforced by allocation gates in CI.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -113,7 +114,6 @@ foundation locally.
 
 ### Prerequisites
 
-- Unity 6000.5.4f1 installed in the standard Unity Hub location
 - .NET SDK 10.0.302
 - PowerShell 7 and [Task](https://taskfile.dev/)
 - [typos](https://github.com/crate-ci/typos) for `task check`
@@ -133,12 +133,13 @@ cd SignalRouter
 
 ## Usage
 
-`SignalRouter.Core` exposes `ClickCommand`, `SetValueCommand`, the immutable
-`InteractionCommandCatalog`, structured `InteractionResult` values, and the
-lifetime-scoped `InteractionRegistry`. `IInteractionDispatcher` and typed pipeline
-contracts define the future execution boundary, but no dispatcher or stage executor is
-implemented yet. See the [architecture document](docs/design.md) for the current
-guarantees and deferred runtime behavior.
+The runtime is consumed through the kernel and adapter SDK assemblies
+(`SignalRouter.Contracts`, `SignalRouter.Kernel`, `SignalRouter.AdapterSdk`, the codec
+leaves, `SignalRouter.Recording`, `SignalRouter.Replay`, and `SignalRouter.Tck`). An
+engine adapter implements the adapter SDK seams and proves itself against the TCK —
+`src/ReferenceAdapter` is the working example. There is no released package yet; see
+[docs/README.md](docs/README.md) for the architecture and
+[docs/spec/guarantees.md](docs/spec/guarantees.md) for the guarantee catalog.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -154,11 +155,10 @@ task test
 task check
 ```
 
-`SignalRouter.Core` and `SignalRouter.Protocol` build as C# 9 and `netstandard2.1`;
-warnings fail the build. The Unity development project enables `-langversion:preview` for
-C# 11 language-feature tests, while consumers of the shipped NuGet packages do not need
-preview enabled. See **[docs/development.md](docs/development.md)** for the exact toolchain
-and compatibility boundary.
+Every runtime assembly builds as C# 9 and `netstandard2.1` with zero package
+dependencies; warnings fail the build. See
+**[docs/development.md](docs/development.md)** for the exact toolchain and
+compatibility boundary.
 
 How to contribute: **[CONTRIBUTING.md](.github/CONTRIBUTING.md)**
 
@@ -217,7 +217,8 @@ Repository automation and community files are adapted from
 
 | Document | Purpose |
 |----------|---------|
-| [design.md](docs/design.md) | Architecture, guarantees, compatibility, and MVP acceptance criteria |
+| [docs/README.md](docs/README.md) | The design-document map: philosophy, architecture, and the spec set |
+| [guarantees.md](docs/spec/guarantees.md) | The normative guarantee catalog (evidence, outcomes, failure matrix) |
 | [development.md](docs/development.md) | Current development status and tooling |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | Develop, test, PRs, DCO, CI/CD, releases |
 | [SUPPORT.md](.github/SUPPORT.md) | How to get help |
@@ -244,7 +245,6 @@ MIT © 2026 dreamingdog0529
 
 ## Acknowledgments
 
-- [VitalRouter](https://github.com/hadashiA/VitalRouter) — in-process command routing
 - [Model Context Protocol](https://modelcontextprotocol.io/) — the agent-facing protocol
 - [oss-project-template](https://github.com/container-registry/oss-project-template) — repository automation and community-file foundation
 

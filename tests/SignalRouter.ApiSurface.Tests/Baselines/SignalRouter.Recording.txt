@@ -1,0 +1,41 @@
+# API surface of SignalRouter.Recording
+
+sealed class SignalRouter.Recording.DurableEvidenceCoordinator
+  implements SignalRouter.Kernel.IEvidenceCoordinator, SignalRouter.Kernel.IRecordingCoordinator
+  property AdmissionPolicy : SignalRouter.Kernel.RecordingAdmissionPolicy { public get; }
+  property CloseRequested : SignalRouter.Contracts.IncompleteReason? { public get; }
+  public ctor(SignalRouter.Codec.Recording.IArtifactStore store, SignalRouter.Recording.RecordingCoordinatorOptions options)
+  public method Bind(SignalRouter.Kernel.IRecordObservationServices boundServices) : System.Void
+  public method CommitAssertionEvidence(SignalRouter.Kernel.AssertionEvidence evidence) : SignalRouter.Kernel.EvidenceReadiness
+  public method CommitCloseEvidence(SignalRouter.Kernel.CloseEvidence evidence) : SignalRouter.Kernel.EvidenceReadiness
+  public method CommitExternalMutation(SignalRouter.Kernel.BarrierEvidence evidence) : SignalRouter.Kernel.BarrierAnswer
+  public method CommitTerminalEvidence(SignalRouter.Kernel.TerminalEvidence evidence) : SignalRouter.Kernel.EvidenceReadiness
+  public method CommitWaitArmed(SignalRouter.Kernel.WaitArmedEvidence evidence) : SignalRouter.Kernel.EvidenceReadiness
+  public method CommitWaitResolved(SignalRouter.Kernel.WaitResolvedEvidence evidence) : SignalRouter.Kernel.EvidenceReadiness
+  public method NotifyTeardown() : System.Void
+  public method OfferWaitPoll(SignalRouter.Kernel.WaitPollEvidence evidence) : System.Void
+  public method PrepareAdmissionEvidence(SignalRouter.Kernel.AdmissionEvidence evidence) : SignalRouter.Kernel.EvidenceReadiness
+  public method PrepareEffectPermit(SignalRouter.Kernel.PermitEvidence evidence) : SignalRouter.Kernel.EvidenceReadiness
+  public method PrepareOpenEvidence(SignalRouter.Kernel.OpenEvidence evidence) : SignalRouter.Kernel.EvidenceReadiness
+
+enum SignalRouter.Recording.ExternalMutationPolicy
+  : System.Int32
+  BarrierContinue = 0
+  Terminate = 1
+
+enum SignalRouter.Recording.RecordingCapacityPolicy
+  : System.Int32
+  CloseIncompleteOnSizeLimit = 0
+
+sealed class SignalRouter.Recording.RecordingCoordinatorOptions
+  property AllowNonDurableStore : System.Boolean { public get; }
+  property CapacityPolicy : SignalRouter.Recording.RecordingCapacityPolicy { public get; }
+  property ExternalMutation : SignalRouter.Recording.ExternalMutationPolicy { public get; }
+  property MaxArtifactBytes : System.Int64 { public get; }
+  property MaxBlobBytes : System.Int32 { public get; }
+  property MaxDeltaChainLength : System.Int32 { public get; }
+  property MaxEventCount : System.Int32 { public get; }
+  property Profile : SignalRouter.Contracts.ReplayComparisonProfile { public get; }
+  property TimelineByteBudget : System.Int64 { public get; }
+  public const field StoreMaxChainLength : System.Int32 = 32
+  public ctor(SignalRouter.Contracts.ReplayComparisonProfile profile, System.Int64 maxArtifactBytes = 67108864, System.Int32 maxEventCount = 65536, System.Int32 maxBlobBytes = 8388608, SignalRouter.Recording.RecordingCapacityPolicy capacityPolicy = 0, System.Boolean allowNonDurableStore = false, SignalRouter.Recording.ExternalMutationPolicy externalMutationPolicy = 0, System.Int32 maxDeltaChainLength = 8, System.Int64 timelineByteBudget = 0)

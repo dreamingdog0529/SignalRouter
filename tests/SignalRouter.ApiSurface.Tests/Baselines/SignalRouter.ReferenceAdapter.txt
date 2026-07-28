@@ -1,0 +1,108 @@
+# API surface of SignalRouter.ReferenceAdapter
+
+sealed class SignalRouter.ReferenceAdapter.FrameTickClock
+  implements SignalRouter.AdapterSdk.IMonotonicClock
+  property Now : System.Int64 { public get; }
+  public ctor()
+
+sealed class SignalRouter.ReferenceAdapter.ReferenceAdapterHost
+  property ArtifactStore : SignalRouter.Codec.Recording.MemoryArtifactStore? { public get; }
+  property Ingress : SignalRouter.ReferenceAdapter.ReferenceIngress { public get; }
+  property PumpHost : SignalRouter.ReferenceAdapter.ReferencePumpHost { public get; }
+  property Runtime : SignalRouter.Kernel.KernelRuntime { public get; }
+  public method TearDown() : System.Void
+  public static method Create(System.Func<SignalRouter.AdapterSdk.IEffectExecutor, SignalRouter.AdapterSdk.IEffectExecutor>? decorateExecutor = null, SignalRouter.Kernel.IEvidenceCoordinator? evidence = null) : SignalRouter.ReferenceAdapter.ReferenceAdapterHost
+
+sealed class SignalRouter.ReferenceAdapter.ReferenceEffectExecutor
+  implements SignalRouter.AdapterSdk.IEffectExecutor
+  public const field SlowEffectFrames : System.Int32 = 2
+  public ctor(SignalRouter.AdapterSdk.INodeRegistry registry, SignalRouter.Contracts.NodeRef target)
+  public method Attach(SignalRouter.AdapterSdk.IEffectCompletionSink completionSink) : System.Void
+  public method Detach() : System.Void
+  public method Execute(SignalRouter.AdapterSdk.EffectRequest request) : SignalRouter.AdapterSdk.EffectAdoption
+  public method RequestCancel(SignalRouter.AdapterSdk.EffectPermitToken permit) : System.Void
+
+sealed class SignalRouter.ReferenceAdapter.ReferenceIngress
+  implements SignalRouter.AdapterSdk.IIngressSource
+  public ctor()
+  public method Attach(SignalRouter.AdapterSdk.IIngressSink ingressSink) : System.Void
+  public method Detach() : System.Void
+  public method Publish(SignalRouter.Contracts.SourceDocument document) : SignalRouter.AdapterSdk.PublicationAnswer
+  public method SimulateExternalMutation() : System.Void
+  public method SimulateManagedClick(SignalRouter.Contracts.RequestId request, SignalRouter.AdapterSdk.ISubmissionObserver observer, SignalRouter.Contracts.Principal principal, SignalRouter.Contracts.Provenance provenance) : System.Void
+
+sealed class SignalRouter.ReferenceAdapter.ReferenceNodeSource
+  implements SignalRouter.AdapterSdk.INodeSource
+  property TargetNode : SignalRouter.Contracts.NodeRef { public get; }
+  public ctor()
+  public method Attach(SignalRouter.AdapterSdk.IBootstrapRegistry bootstrap, SignalRouter.AdapterSdk.INodeRegistry registry) : System.Void
+  public method Detach() : System.Void
+
+sealed class SignalRouter.ReferenceAdapter.ReferencePumpHost
+  implements SignalRouter.AdapterSdk.IPumpHost
+  property LastFrameHadWork : System.Boolean { public get; }
+  property LogicalNow : SignalRouter.AdapterSdk.LogicalTime { public get; }
+  public ctor(SignalRouter.ReferenceAdapter.ReferenceEffectExecutor executor, SignalRouter.ReferenceAdapter.FrameTickClock clock)
+  public method Attach(SignalRouter.AdapterSdk.IPumpable pumpable) : System.Void
+  public method Detach() : System.Void
+  public method DriveFrames(System.Int32 frames) : System.Int32
+
+sealed class SignalRouter.ReferenceAdapter.ReferenceReplayEnvironmentFactory
+  implements SignalRouter.Replay.IReplayEnvironmentFactory
+  public ctor()
+  public method Create(SignalRouter.Contracts.RecordingOpened opened, SignalRouter.Kernel.IEvidenceCoordinator evidence) : SignalRouter.Replay.IReplayEnvironment
+
+sealed class SignalRouter.ReferenceAdapter.ReferenceTckHarness
+  implements SignalRouter.Tck.ITckHarness
+  property AgentDomain : SignalRouter.Contracts.SecurityDomainId { public get; }
+  property AgentPrincipal : SignalRouter.Contracts.Principal { public get; }
+  property CountAtLeastOne : SignalRouter.Contracts.PredicateContractRef { public get; }
+  property CountAtLeastTwo : SignalRouter.Contracts.PredicateContractRef { public get; }
+  property Descriptor : SignalRouter.AdapterSdk.AdapterDescriptor { public get; }
+  property HumanPrincipal : SignalRouter.Contracts.Principal { public get; }
+  property LogicalNow : SignalRouter.AdapterSdk.LogicalTime { public get; }
+  property MutatingCapability : SignalRouter.Contracts.CapabilityContractRef { public get; }
+  property RecordingProfile : SignalRouter.Contracts.ReplayComparisonProfile { public get; }
+  property RedactionKey : System.Byte[] { public get; }
+  property ReplayEnvironments : SignalRouter.Replay.IReplayEnvironmentFactory { public get; }
+  property RevisionBoundSource : SignalRouter.Contracts.StateSourceKey { public get; }
+  property Runtime : SignalRouter.Kernel.KernelRuntime { public get; }
+  property SlowCapability : SignalRouter.Contracts.CapabilityContractRef { public get; }
+  property VisibleTargetKey : SignalRouter.Contracts.AuthorKey { public get; }
+  public ctor(SignalRouter.ReferenceAdapter.ReferenceAdapterHost host)
+  public method DefinitionOf(SignalRouter.Contracts.PredicateContractRef predicate) : SignalRouter.Contracts.PredicateDefinition
+  public method DriveFrames(System.Int32 frames) : System.Int32
+  public method PublishCount(System.Int64 count) : SignalRouter.AdapterSdk.PublicationAnswer
+  public method PublishUndeclaredField() : SignalRouter.AdapterSdk.PublicationAnswer
+  public method ReadArtifact(SignalRouter.Contracts.OperationId recording) : System.Byte[]
+  public method SimulateExternalMutation() : System.Void
+  public method SimulateManagedInput(SignalRouter.Contracts.RequestId request, SignalRouter.AdapterSdk.ISubmissionObserver observer, System.Boolean asHuman) : System.Void
+  public method TearDown() : System.Void
+
+sealed class SignalRouter.ReferenceAdapter.ReferenceTckHarnessFactory
+  implements SignalRouter.Tck.ITckHarnessFactory
+  public ctor(System.Func<SignalRouter.AdapterSdk.IEffectExecutor, SignalRouter.AdapterSdk.IEffectExecutor>? decorateExecutor = null)
+  public method Create() : SignalRouter.Tck.ITckHarness
+
+static class SignalRouter.ReferenceAdapter.ReferenceWorld
+  public const field ManagedInputClass : System.String = "synthetic-click"
+  public const field ObservedInputClass : System.String = "external-scene-mutation"
+  public static method CountPredicate(System.Int64 threshold) : SignalRouter.Contracts.PredicateDefinition
+  public static method RecordingProfile() : SignalRouter.Contracts.ReplayComparisonProfile
+  public static readonly field Agent : SignalRouter.Contracts.Principal
+  public static readonly field AgentDomain : SignalRouter.Contracts.SecurityDomainId
+  public static readonly field AppliedProfile : SignalRouter.Contracts.CompletionProfileRef
+  public static readonly field CountAtLeastOne : SignalRouter.Contracts.PredicateContractRef
+  public static readonly field CountAtLeastTwo : SignalRouter.Contracts.PredicateContractRef
+  public static readonly field CounterSource : SignalRouter.Contracts.StateSourceKey
+  public static readonly field FrameCommittedProfile : SignalRouter.Contracts.CompletionProfileRef
+  public static readonly field Human : SignalRouter.Contracts.Principal
+  public static readonly field HumanDomain : SignalRouter.Contracts.SecurityDomainId
+  public static readonly field RecordDomain : SignalRouter.Contracts.SecurityDomainId
+  public static readonly field RecordView : SignalRouter.Contracts.ViewContractRef
+  public static readonly field RedactionPolicy : SignalRouter.Contracts.RedactionPolicyId
+  public static readonly field SetLabel : SignalRouter.Contracts.CapabilityContractRef
+  public static readonly field SlowSetLabel : SignalRouter.Contracts.CapabilityContractRef
+  public static readonly field TargetKey : SignalRouter.Contracts.AuthorKey
+  static property Descriptor : SignalRouter.AdapterSdk.AdapterDescriptor { public get; }
+  static property RedactionKey : System.Byte[] { public get; }

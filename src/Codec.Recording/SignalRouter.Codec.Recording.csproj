@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>SignalRouter.Codec.Recording</AssemblyName>
+    <RootNamespace>SignalRouter.Codec.Recording</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- The recording-artifact codec leaf (ADR 0007/0016): RecordingEventSchema
+         v1 is a hand-rolled length-framed binary with per-record CRC32C commit
+         markers, so this leaf takes no serializer dependency at all. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Contracts/SignalRouter.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Shared-source payload primitives (ADR 0007/0016): the same files
+         Codec.CanonicalState compiles — internal types only. -->
+    <Compile Include="../Codec.Shared/*.cs" LinkBase="Shared" />
+  </ItemGroup>
+</Project>

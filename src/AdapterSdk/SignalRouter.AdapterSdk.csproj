@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>SignalRouter.AdapterSdk</AssemblyName>
+    <RootNamespace>SignalRouter.AdapterSdk</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- The versioned shape assembly of adapter-conformance.md §2: interfaces and
+         message/descriptor types over Contracts, zero behavior. BCL-only per
+         ADR 0007; packaging deferred until the distribution decision. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Contracts/SignalRouter.Contracts.csproj" />
+  </ItemGroup>
+</Project>

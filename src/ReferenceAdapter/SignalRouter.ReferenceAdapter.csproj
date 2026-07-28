@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>SignalRouter.ReferenceAdapter</AssemblyName>
+    <RootNamespace>SignalRouter.ReferenceAdapter</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- The in-process reference adapter: the executable model of
+         adapter-conformance.md against a synthetic two-phase frame loop, and the
+         TCK's known-good subject. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AdapterSdk/SignalRouter.AdapterSdk.csproj" />
+    <ProjectReference Include="../Contracts/SignalRouter.Contracts.csproj" />
+    <ProjectReference Include="../Kernel/SignalRouter.Kernel.csproj" />
+    <ProjectReference Include="../Tck/SignalRouter.Tck.csproj" />
+    <!-- The tier-2 record/replay wiring (item 5): the reference world is
+         recording-capable and builds its own replay twin. -->
+    <ProjectReference Include="../Codec.CanonicalState/SignalRouter.Codec.CanonicalState.csproj" />
+    <ProjectReference Include="../Codec.Recording/SignalRouter.Codec.Recording.csproj" />
+    <ProjectReference Include="../Recording/SignalRouter.Recording.csproj" />
+    <ProjectReference Include="../Replay/SignalRouter.Replay.csproj" />
+  </ItemGroup>
+</Project>

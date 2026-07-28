@@ -18,7 +18,7 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/dreamingdog0529/SignalRouter/badge)](https://securityscorecards.dev/viewer/?uri=github.com/dreamingdog0529/SignalRouter)
 
 <p>
-  <a href="docs/design.md"><strong>アーキテクチャを読む »</strong></a>
+  <a href="docs/README.md"><strong>アーキテクチャを読む »</strong></a>
   <br /><br />
   <a href="https://github.com/dreamingdog0529/SignalRouter/issues/new?template=bug_report.yml">バグ報告</a>
   ·
@@ -72,18 +72,18 @@ Unity ランタイム（コアは Pure C#）です。ピクセルやスクリー
 駆動する）です。UI をデータとして観測・操作したい Unity アプリ／ゲーム開発チームを対象と
 しています。
 
-> **ステータス:** .NET-first の build/test 基盤に加え、command model、
-> immutable command catalog と codec、structured result model、semantic registry を
-> 実装済みです。FIFO dispatch、stage 実行と state probe、record/replay、Unity UI、
-> WebSocket、MCP のプロダクション機能は未実装です。対応範囲と受け入れ基準は
-> [アーキテクチャ資料](docs/design.md) に定義しています。
+> **ステータス:** エンジン非依存のコアは実装済みです — 単一オーナー kernel と typed
+> contracts、completeness 付き観測層と content-addressed な canonical state、E1–E8
+> evidence による durable recording、隔離双子環境での replay と typed 三値比較、seal
+> evaluator、そしてリポジトリ内 reference adapter が end-to-end で合格する TCK。次の
+> ロードマップ項目は protocol gateway(MCP 面)と Unity adapter です。保証の正典は
+> [docs/spec/guarantees.md](docs/spec/guarantees.md) です。
 
 ### 使用技術
 
-- **[Unity 6](https://unity.com/)**（MVP は uGUI） — 観測・駆動対象の UI ランタイム
-- **Pure C#**（.NET Standard 2.1） — コアは Unity に非依存
-- **[VitalRouter](https://github.com/hadashiA/VitalRouter)** — 単一のプロセス内コマンドバス
-- **[Model Context Protocol](https://modelcontextprotocol.io/)**（MCP） — エージェント向けツール面。WebSocket でランタイムにブリッジ
+- **Pure C#**(.NET Standard 2.1、C# 9) — ランタイムはパッケージ依存ゼロ
+- **[Unity 6](https://unity.com/)** — 最初のターゲットエンジン(adapter は今後。コアは Unity に非依存)
+- **[Model Context Protocol](https://modelcontextprotocol.io/)**(MCP) — エージェント向け面(gateway は今後)
 
 <p align="right">(<a href="#readme-top">トップへ戻る</a>)</p>
 
@@ -91,13 +91,14 @@ Unity ランタイム（コアは Pure C#）です。ピクセルやスクリー
 
 ## 機能
 
-core model は実装済みで、runtime 実行と transport 機能は計画中です。
+kernel・観測・recording・replay の各層は実装済みで、protocol gateway と Unity adapter が残りのロードマップ項目です。
 
-- **セマンティック UI registry（core 実装済み）** — 登録済み要素（`id` / `role` / `label` / 値 / 状態）と catalog 検証済み操作を決定的な snapshot として観測。
-- **構造化コマンド（core 実装済み）** — 操作を C# 9 互換の immutable value（`click` / `set_value`）と厳密な versioned JSON codec でモデル化。
-- **記録 & リプレイ** — 全コマンドが必ず `IInteractionDispatcher` を通るため、terminal result 確認（キュー受理≠完了）付きで決定論的に再生。
-- **決定論的な例外モデル** — Sequential 実行で `Rejected`（検証落ち・副作用ゼロ）と `Faulted`（stage *k* で失敗・*k−1* まで適用）を分離し、中断点を正確に再現。
-- **MCP エージェント操作** — `get_ui_tree` / `wait_for` と実行系ツールでピクセルなしに UI を駆動。例外はシームで catch し、MCP 境界に漏らさない。
+- **単一オーナー kernel** — 単一 mutation lane、split-phase adapter protocol、exactly-once completion、typed failure matrix。全保証は [docs/spec/](docs/spec/) の規範表。
+- **セマンティック観測** — completeness map 付き projected view と content-addressed canonical state。snapshot の `ContentId` は portable な verify-before-use digest。
+- **Durable recording** — 追記専用 evidence artifact（E1–E8 cut、delta 符号化 checkpoint、droppable な diagnostics timeline）。crash-honest で reader が分類する形式。
+- **隔離 replay** — pre-scan の信頼境界、隔離双子環境、`Equal | Diverged | Incomparable(reason)` を答える typed 厳密比較。CI 検証ケース化の可否は seal evaluator が判定。
+- **Adapter TCK** — あらゆるエンジン adapter が合格すべき conformance kit。リポジトリ内 reference adapter が end-to-end で合格。
+- **規範化された性能** — 静止 pump は 0 バイト確保、仕事量は投入量に比例。CI の allocation gate が強制。
 
 <p align="right">(<a href="#readme-top">トップへ戻る</a>)</p>
 
@@ -112,7 +113,6 @@ core model は実装済みで、runtime 実行と transport 機能は計画中�
 
 ### 前提条件
 
-- 標準 Unity Hub path にインストールした Unity 6000.5.4f1
 - .NET SDK 10.0.302
 - PowerShell 7 と [Task](https://taskfile.dev/)
 - `task check` 用の [typos](https://github.com/crate-ci/typos)
@@ -132,11 +132,13 @@ cd SignalRouter
 
 ## 使い方
 
-`SignalRouter.Core` は `ClickCommand`、`SetValueCommand`、immutable
-`InteractionCommandCatalog`、structured `InteractionResult`、
-lifetime-scoped `InteractionRegistry` を公開します。`IInteractionDispatcher` と typed
-pipeline contract は将来の実行境界を定義しますが、dispatcher と stage executor は未実装です。
-現在の保証と後続 runtime の範囲は [アーキテクチャ資料](docs/design.md) を参照してください。
+ランタイムは kernel と adapter SDK のアセンブリ群
+(`SignalRouter.Contracts`、`SignalRouter.Kernel`、`SignalRouter.AdapterSdk`、codec
+leaf 群、`SignalRouter.Recording`、`SignalRouter.Replay`、`SignalRouter.Tck`)として
+利用します。エンジン adapter は adapter SDK のシームを実装し、TCK で適合を証明します —
+`src/ReferenceAdapter` が実例です。リリースパッケージはまだありません。アーキテクチャは
+[docs/README.md](docs/README.md)、保証の正典は
+[docs/spec/guarantees.md](docs/spec/guarantees.md) を参照してください。
 
 <p align="right">(<a href="#readme-top">トップへ戻る</a>)</p>
 
@@ -152,10 +154,9 @@ task test
 task check
 ```
 
-`SignalRouter.Core` と `SignalRouter.Protocol` は C# 9・`netstandard2.1` として compile し、
-warning も build failure にします。Unity 開発 project では C# 11 language feature test のため
-`-langversion:preview` を有効にしますが、配布される NuGet package の利用者に preview 設定は
-要求しません。正確な toolchain と互換性境界は **[docs/development.md](docs/development.md)** を参照してください。
+全ランタイムアセンブリは C# 9・`netstandard2.1`・パッケージ依存ゼロで compile し、
+warning も build failure にします。正確な toolchain と互換性境界は
+**[docs/development.md](docs/development.md)** を参照してください。
 
 コントリビュート手順: **[CONTRIBUTING.md](.github/CONTRIBUTING.md)**
 
@@ -192,7 +193,8 @@ warning も build failure にします。Unity 開発 project では C# 11 langu
 
 | 文書 | 内容 |
 |------|------|
-| [design.md](docs/design.md) | アーキテクチャ・保証・互換性・MVP 受け入れ基準 |
+| [docs/README.md](docs/README.md) | 設計文書の入口 — philosophy・architecture・spec 一式 |
+| [guarantees.md](docs/spec/guarantees.md) | 規範的な保証カタログ（evidence・outcome・failure matrix） |
 | [development.md](docs/development.md) | 現在の開発状況とツール |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | 開発・テスト・PR・DCO・CI/CD・リリース |
 | [SUPPORT.md](.github/SUPPORT.md) | サポートの受け方 |
@@ -219,7 +221,6 @@ MIT © 2026 dreamingdog0529
 
 ## 謝辞
 
-- [VitalRouter](https://github.com/hadashiA/VitalRouter) — プロセス内コマンドルーティング
 - [Model Context Protocol](https://modelcontextprotocol.io/) — エージェント向けプロトコル
 - [oss-project-template](https://github.com/container-registry/oss-project-template) — リポジトリ自動化とコミュニティ文書の基盤
 

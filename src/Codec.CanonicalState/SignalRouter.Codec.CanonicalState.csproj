@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>SignalRouter.Codec.CanonicalState</AssemblyName>
+    <RootNamespace>SignalRouter.Codec.CanonicalState</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- The canonical-state codec leaf (ADR 0007/0012): representation v1 is a
+         hand-rolled, length-framed binary grammar, so this leaf takes no serializer
+         dependency at all — the grammar is frozen in ADR 0012 and enforced by
+         golden-vector tests. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Contracts/SignalRouter.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Shared-source payload primitives (ADR 0007 permits single-source sharing
+         of primitive invariants; ADR 0016): each codec leaf compiles the same
+         files — internal types only, so no public type exists twice. -->
+    <Compile Include="../Codec.Shared/*.cs" LinkBase="Shared" />
+  </ItemGroup>
+</Project>
