@@ -23,6 +23,15 @@ namespace SignalRouter.V2.Kernel
             ValueArray<PredicateContractRef> predicates,
             Principal principal,
             IAssertionObserver observer)
+            : this(predicates, principal, observer, diagnosticOnly: false)
+        {
+        }
+
+        public AssertionBatch(
+            ValueArray<PredicateContractRef> predicates,
+            Principal principal,
+            IAssertionObserver observer,
+            bool diagnosticOnly)
         {
             if (predicates == null)
             {
@@ -37,6 +46,7 @@ namespace SignalRouter.V2.Kernel
             Predicates = predicates;
             Principal = principal ?? throw new ArgumentNullException(nameof(principal));
             Observer = observer ?? throw new ArgumentNullException(nameof(observer));
+            DiagnosticOnly = diagnosticOnly;
         }
 
         public ValueArray<PredicateContractRef> Predicates { get; }
@@ -44,6 +54,13 @@ namespace SignalRouter.V2.Kernel
         public Principal Principal { get; }
 
         public IAssertionObserver Observer { get; }
+
+        /// <summary>
+        /// A diagnostic batch answers the live caller only and produces no E8
+        /// while a recording is active; it can never be a required assertion
+        /// (verification.md §3.3).
+        /// </summary>
+        public bool DiagnosticOnly { get; }
     }
 
     /// <summary>The kernel's control operations (cancel, waits, assertions, gating, lifecycle).</summary>

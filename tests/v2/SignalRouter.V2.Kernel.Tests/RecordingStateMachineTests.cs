@@ -24,11 +24,32 @@ public sealed class RecordingStateMachineTests
 
         internal EvidenceReadiness CloseAnswer { get; set; } = EvidenceReadiness.Ready;
 
+        internal EvidenceReadiness BarrierReadiness { get; set; } = EvidenceReadiness.Ready;
+
+        internal IncompleteReason? BarrierCloseRequest { get; set; }
+
+        internal EvidenceReadiness WaitArmedAnswer { get; set; } = EvidenceReadiness.Ready;
+
+        internal EvidenceReadiness WaitResolvedAnswer { get; set; } = EvidenceReadiness.Ready;
+
+        internal EvidenceReadiness AssertionAnswer { get; set; } = EvidenceReadiness.Ready;
+
         internal List<OpenEvidence> Opens { get; } = new();
 
         internal List<CloseEvidence> Closes { get; } = new();
 
         internal List<TerminalEvidence> Terminals { get; } = new();
+
+        internal List<BarrierEvidence> Barriers { get; } = new();
+
+        internal List<WaitArmedEvidence> ArmedWaits { get; } = new();
+
+        internal List<WaitResolvedEvidence> ResolvedWaits { get; } = new();
+
+        internal List<AssertionEvidence> Assertions { get; } = new();
+
+        /// <summary>The order Ready answers were given in — the artifact's would-be stream order.</summary>
+        internal List<string> CommitOrder { get; } = new();
 
         internal bool TornDown { get; private set; }
 
@@ -75,8 +96,11 @@ public sealed class RecordingStateMachineTests
             AddressableAtTeardown = Bound!.CanAddress;
         }
 
-        public EvidenceReadiness PrepareAdmissionEvidence(AdmissionEvidence evidence) =>
-            EvidenceReadiness.Ready;
+        public EvidenceReadiness PrepareAdmissionEvidence(AdmissionEvidence evidence)
+        {
+            CommitOrder.Add("E2");
+            return EvidenceReadiness.Ready;
+        }
 
         public EvidenceReadiness PrepareEffectPermit(PermitEvidence evidence) =>
             EvidenceReadiness.Ready;
@@ -84,7 +108,54 @@ public sealed class RecordingStateMachineTests
         public EvidenceReadiness CommitTerminalEvidence(TerminalEvidence evidence)
         {
             Terminals.Add(evidence);
+            CommitOrder.Add("E4");
             return EvidenceReadiness.Ready;
+        }
+
+        public BarrierAnswer CommitExternalMutation(BarrierEvidence evidence)
+        {
+            if (BarrierReadiness == EvidenceReadiness.Ready)
+            {
+                Barriers.Add(evidence);
+                CommitOrder.Add("E5");
+            }
+
+            return BarrierCloseRequest.HasValue
+                ? BarrierAnswer.RequestClose(BarrierReadiness, BarrierCloseRequest.Value)
+                : BarrierAnswer.Continue(BarrierReadiness);
+        }
+
+        public EvidenceReadiness CommitWaitArmed(WaitArmedEvidence evidence)
+        {
+            if (WaitArmedAnswer == EvidenceReadiness.Ready)
+            {
+                ArmedWaits.Add(evidence);
+                CommitOrder.Add("E6a");
+            }
+
+            return WaitArmedAnswer;
+        }
+
+        public EvidenceReadiness CommitWaitResolved(WaitResolvedEvidence evidence)
+        {
+            if (WaitResolvedAnswer == EvidenceReadiness.Ready)
+            {
+                ResolvedWaits.Add(evidence);
+                CommitOrder.Add("E6b");
+            }
+
+            return WaitResolvedAnswer;
+        }
+
+        public EvidenceReadiness CommitAssertionEvidence(AssertionEvidence evidence)
+        {
+            if (AssertionAnswer == EvidenceReadiness.Ready)
+            {
+                Assertions.Add(evidence);
+                CommitOrder.Add("E8");
+            }
+
+            return AssertionAnswer;
         }
     }
 

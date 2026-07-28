@@ -1079,6 +1079,10 @@ sealed class SignalRouter.V2.Contracts.PredicateArmed
   property Scope : SignalRouter.V2.Contracts.ViewContractRef { public get; }
   public ctor(SignalRouter.V2.Contracts.EvidenceSequence sequence, SignalRouter.V2.Contracts.OperationId operationId, SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.ArgumentDigest operands, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.ViewContractRef scope, System.String observationScope, SignalRouter.V2.Contracts.Causality causality, SignalRouter.V2.Contracts.ViewSequence armedSequence)
 
+static class SignalRouter.V2.Contracts.PredicateCanonicalizer
+  public static method DigestOf(SignalRouter.V2.Contracts.PredicateDefinition definition) : SignalRouter.V2.Contracts.ArgumentDigest
+  public static method FingerprintOf(SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.ArgumentDigest operands) : SignalRouter.V2.Contracts.SemanticFingerprint
+
 sealed class SignalRouter.V2.Contracts.PredicateCatalog
   property Fields : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.FieldSchema> { public get; }
   public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.FieldSchema> fields)

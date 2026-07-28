@@ -101,6 +101,199 @@ namespace SignalRouter.V2.Kernel
     }
 
     /// <summary>
+    /// The E5 material (guarantees.md §5.5): one coalesced pump run of external
+    /// mutations. The interval endpoints are coordinator-assigned at append —
+    /// the kernel supplies detection facts only.
+    /// </summary>
+    public sealed class BarrierEvidence
+    {
+        public BarrierEvidence(
+            SourceRevision revisionAtDetection,
+            string sourceHint,
+            ValueArray<RequestId> contaminatedRequests)
+        {
+            RevisionAtDetection = revisionAtDetection;
+            SourceHint = ContractGrammar.ValidateIdentifier(sourceHint, nameof(sourceHint));
+            ContaminatedRequests = contaminatedRequests;
+        }
+
+        /// <summary>The SourceRevision after the latest coalesced mutation.</summary>
+        public SourceRevision RevisionAtDetection { get; }
+
+        /// <summary>The first coalesced mutation's source hint.</summary>
+        public string SourceHint { get; }
+
+        /// <summary>The interactions whose effect window overlapped the coalesced mutations.</summary>
+        public ValueArray<RequestId> ContaminatedRequests { get; }
+    }
+
+    /// <summary>
+    /// The E5 answer (ADR 0015): disposition and readiness compose independently.
+    /// The disposition comes from the open policy and is valid immediately —
+    /// under the terminate policy the close fence starts regardless of the cut's
+    /// durability progress; the readiness leg covers only the barrier cut's append.
+    /// </summary>
+    public readonly struct BarrierAnswer
+    {
+        private BarrierAnswer(EvidenceReadiness readiness, IncompleteReason? requestedClose)
+        {
+            Readiness = readiness;
+            RequestedClose = requestedClose;
+        }
+
+        public EvidenceReadiness Readiness { get; }
+
+        /// <summary>Non-null asks the kernel to drive the ordinary close fence with this reason.</summary>
+        public IncompleteReason? RequestedClose { get; }
+
+        public static BarrierAnswer Continue(EvidenceReadiness readiness) =>
+            new BarrierAnswer(readiness, null);
+
+        public static BarrierAnswer RequestClose(EvidenceReadiness readiness, IncompleteReason reason)
+        {
+            if (reason.IsDefault)
+            {
+                throw new ArgumentException("A close request requires a reason.", nameof(reason));
+            }
+
+            return new BarrierAnswer(readiness, reason);
+        }
+    }
+
+    /// <summary>
+    /// The E6a material (guarantees.md §5.6). No operand values are recorded:
+    /// waits arm registered contracts only, and E1 pins the definition — the
+    /// digest identifies it (ADR 0015). The view contract and observation scope
+    /// come from the coordinator's own open state.
+    /// </summary>
+    public sealed class WaitArmedEvidence
+    {
+        public WaitArmedEvidence(
+            OperationId operation,
+            PredicateContractRef predicate,
+            ArgumentDigest operands,
+            SemanticFingerprint fingerprint,
+            Causality causality,
+            ViewSequence armedSequence)
+        {
+            if (operation.IsDefault)
+            {
+                throw new ArgumentException("E6 requires a non-default operation.", nameof(operation));
+            }
+
+            if (predicate.IsDefault)
+            {
+                throw new ArgumentException(
+                    "E6 requires a non-default predicate reference.", nameof(predicate));
+            }
+
+            Operation = operation;
+            Predicate = predicate;
+            Operands = operands;
+            Fingerprint = fingerprint;
+            Causality = causality ?? throw new ArgumentNullException(nameof(causality));
+            ArmedSequence = armedSequence;
+        }
+
+        public OperationId Operation { get; }
+
+        public PredicateContractRef Predicate { get; }
+
+        public ArgumentDigest Operands { get; }
+
+        public SemanticFingerprint Fingerprint { get; }
+
+        public Causality Causality { get; }
+
+        public ViewSequence ArmedSequence { get; }
+    }
+
+    /// <summary>
+    /// The E6b material (guarantees.md §5.6): the resolution with its witness
+    /// (for Satisfied) or final observation — the record-view materialization at
+    /// the resolution, already leased to the recording; the coordinator writes
+    /// the blob, appends the cut, and releases the cut-level lease.
+    /// </summary>
+    public sealed class WaitResolvedEvidence
+    {
+        public WaitResolvedEvidence(
+            OperationId operation,
+            PredicateResolution resolution,
+            RecordMaterialization observation,
+            ViewSequence resolvedSequence)
+        {
+            if (operation.IsDefault)
+            {
+                throw new ArgumentException("E6 requires a non-default operation.", nameof(operation));
+            }
+
+            Operation = operation;
+            Resolution = resolution;
+            Observation = observation ?? throw new ArgumentNullException(nameof(observation));
+            ResolvedSequence = resolvedSequence;
+        }
+
+        public OperationId Operation { get; }
+
+        public PredicateResolution Resolution { get; }
+
+        public RecordMaterialization Observation { get; }
+
+        public ViewSequence ResolvedSequence { get; }
+    }
+
+    /// <summary>
+    /// The E8 material (guarantees.md §5.10): one standalone assertion evaluated
+    /// against the record-domain projection (verification.md §3.3), with the
+    /// evaluated materialization already leased to the recording.
+    /// </summary>
+    public sealed class AssertionEvidence
+    {
+        public AssertionEvidence(
+            PredicateContractRef predicate,
+            ArgumentDigest operands,
+            SecurityDomainId domain,
+            int stateSourceTableVersion,
+            RecordMaterialization snapshot,
+            ValueArray<ClauseEvaluation> clauses,
+            PredicateEvaluationOutcome outcome)
+        {
+            if (predicate.IsDefault)
+            {
+                throw new ArgumentException(
+                    "E8 requires a non-default predicate reference.", nameof(predicate));
+            }
+
+            if (domain.IsDefault)
+            {
+                throw new ArgumentException("E8 requires a non-default domain.", nameof(domain));
+            }
+
+            Predicate = predicate;
+            Operands = operands;
+            Domain = domain;
+            StateSourceTableVersion = stateSourceTableVersion;
+            Snapshot = snapshot ?? throw new ArgumentNullException(nameof(snapshot));
+            Clauses = clauses;
+            Outcome = outcome;
+        }
+
+        public PredicateContractRef Predicate { get; }
+
+        public ArgumentDigest Operands { get; }
+
+        public SecurityDomainId Domain { get; }
+
+        public int StateSourceTableVersion { get; }
+
+        public RecordMaterialization Snapshot { get; }
+
+        public ValueArray<ClauseEvaluation> Clauses { get; }
+
+        public PredicateEvaluationOutcome Outcome { get; }
+    }
+
+    /// <summary>
     /// The recording lifecycle seam (ADR 0015), extending the unchanged
     /// E2/E3/E4 gate. One object owns the durability obligations; fence and
     /// membership truth stays in the kernel state machine — the coordinator
@@ -123,6 +316,23 @@ namespace SignalRouter.V2.Kernel
 
         /// <summary>E7. Pending is retried; Fault answers the close operation Failed (reader: Interrupted).</summary>
         EvidenceReadiness CommitCloseEvidence(CloseEvidence evidence);
+
+        /// <summary>
+        /// E5. The kernel re-presents the (possibly grown) coalesced barrier at
+        /// later turns while the readiness leg answers Pending; the coordinator
+        /// appends exactly one cut per presented barrier when ready. A Fault
+        /// raises <see cref="CloseRequested"/> coordinator-side.
+        /// </summary>
+        BarrierAnswer CommitExternalMutation(BarrierEvidence evidence);
+
+        /// <summary>E6a. Pending parks the evidence kernel-side; Fault raises CloseRequested coordinator-side.</summary>
+        EvidenceReadiness CommitWaitArmed(WaitArmedEvidence evidence);
+
+        /// <summary>E6b. Same park-and-retry discipline; the witness lease releases when the cut is durable.</summary>
+        EvidenceReadiness CommitWaitResolved(WaitResolvedEvidence evidence);
+
+        /// <summary>E8. Same park-and-retry discipline; the snapshot lease releases with the final answer.</summary>
+        EvidenceReadiness CommitAssertionEvidence(AssertionEvidence evidence);
 
         /// <summary>
         /// Teardown notification, delivered before the kernel clears its stores
