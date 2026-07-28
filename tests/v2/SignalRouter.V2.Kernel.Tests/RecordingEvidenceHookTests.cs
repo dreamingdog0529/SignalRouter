@@ -480,7 +480,192 @@ public sealed class RecordingEvidenceHookTests
             Is.EqualTo(PredicateEvaluationOutcome.Satisfied));
     }
 
+    // ── Stream-order discipline (reader rule R1; guarantees.md §5.5) ─────────
+
+    [Test]
+    public void AResolutionNeverOutrunsAPendingArm()
+    {
+        var (fixture, coordinator) = Build();
+        Open(fixture);
+
+        coordinator.WaitArmedAnswer = EvidenceReadiness.Pending;
+        var waitObserver = new RecordingWaitObserver();
+        fixture.Runtime.Control.ArmWait(
+            KernelFixture.LabelExists, KernelFixture.Agent,
+            timeoutAtLogicalTime: long.MaxValue, waitObserver);
+        fixture.Pump();
+
+        // The wait satisfies while its E6a is still in flight: the resolution
+        // queues behind it instead of committing first.
+        fixture.Runtime.Registry.UpdateAttributes(
+            fixture.SaveNode,
+            ValueArray<NodeAttribute>.From(new[]
+            {
+                new NodeAttribute("label", FieldValue.Of("Saved"), Sensitivity.Standard),
+            }),
+            observer: null);
+        fixture.Pump();
+        fixture.Pump();
+        Assert.That(
+            waitObserver.Resolutions[0].Resolution, Is.EqualTo(PredicateResolution.Satisfied));
+        Assert.That(coordinator.ResolvedWaits, Is.Empty, "held behind the parked arm");
+
+        coordinator.WaitArmedAnswer = EvidenceReadiness.Ready;
+        fixture.PumpUntilIdle();
+        Assert.That(coordinator.CommitOrder, Is.EqualTo(new[] { "E6a", "E6b" }));
+    }
+
+    [Test]
+    public void AFaultedQueuedArmSuppressesItsResolutionCut()
+    {
+        var (fixture, coordinator) = Build();
+        Open(fixture);
+
+        coordinator.WaitArmedAnswer = EvidenceReadiness.Pending;
+        var waitObserver = new RecordingWaitObserver();
+        fixture.Runtime.Control.ArmWait(
+            KernelFixture.LabelExists, KernelFixture.Agent,
+            timeoutAtLogicalTime: long.MaxValue, waitObserver);
+        fixture.Pump();
+
+        coordinator.WaitArmedAnswer = EvidenceReadiness.Fault;
+        fixture.Pump();
+        fixture.Pump();
+
+        fixture.Runtime.Registry.UpdateAttributes(
+            fixture.SaveNode,
+            ValueArray<NodeAttribute>.From(new[]
+            {
+                new NodeAttribute("label", FieldValue.Of("Saved"), Sensitivity.Standard),
+            }),
+            observer: null);
+        fixture.PumpUntilIdle();
+
+        Assert.That(
+            waitObserver.Resolutions[0].Resolution, Is.EqualTo(PredicateResolution.Satisfied));
+        Assert.That(coordinator.ArmedWaits, Is.Empty);
+        Assert.That(
+            coordinator.ResolvedWaits, Is.Empty,
+            "an arm that never reached the artifact must not leave an unpaired E6b (R1)");
+    }
+
+    [Test]
+    public void EvidenceProducedBehindAPendingBarrierStaysBehindIt()
+    {
+        var (fixture, coordinator) = Build();
+        Open(fixture);
+
+        coordinator.BarrierReadiness = EvidenceReadiness.Pending;
+        fixture.Runtime.Ingress.ReportObservedExternal(
+            new ObservedExternalReport("external-effect", null, null));
+        fixture.Pump();
+
+        // The arm happens after the mutation: its cut queues behind the still
+        // in-flight barrier — committing it first would falsely place the arm
+        // on the clean side of the interval (guarantees.md §5.5).
+        var waitObserver = new RecordingWaitObserver();
+        fixture.Runtime.Control.ArmWait(
+            KernelFixture.LabelExists, KernelFixture.Agent,
+            timeoutAtLogicalTime: long.MaxValue, waitObserver);
+        fixture.Pump();
+        fixture.Pump();
+        Assert.That(coordinator.ArmedWaits, Is.Empty, "held behind the pending barrier");
+
+        coordinator.BarrierReadiness = EvidenceReadiness.Ready;
+        fixture.PumpUntilIdle();
+        Assert.That(coordinator.CommitOrder, Is.EqualTo(new[] { "E5", "E6a" }));
+    }
+
+    [Test]
+    public void AnAdmissionWaitsBehindAPendingBarrier()
+    {
+        var (fixture, coordinator) = Build();
+        Open(fixture);
+
+        coordinator.BarrierReadiness = EvidenceReadiness.Pending;
+        fixture.Runtime.Ingress.ReportObservedExternal(
+            new ObservedExternalReport("external-effect", null, null));
+        fixture.Pump();
+
+        // The submission's E2 would place a post-mutation admission on the
+        // clean side of the interval: the mutation lane holds until the
+        // barrier is durable.
+        fixture.Submit("r-1");
+        fixture.Pump();
+        fixture.Pump();
+        Assert.That(coordinator.CommitOrder, Is.Empty, "held behind the pending barrier");
+
+        coordinator.BarrierReadiness = EvidenceReadiness.Ready;
+        fixture.PumpUntilIdle();
+        Assert.That(coordinator.CommitOrder.Count, Is.GreaterThanOrEqualTo(2));
+        Assert.That(coordinator.CommitOrder[0], Is.EqualTo("E5"));
+        Assert.That(coordinator.CommitOrder[1], Is.EqualTo("E2"));
+
+        fixture.Executor.CompleteLast(EffectResolution.Succeeded(
+            new CompletionEvidence(KernelFixture.Applied, CompletionEvidenceKind.Applied, default)));
+        fixture.PumpUntilIdle();
+    }
+
+    [Test]
+    public void ASatisfiedWaitTheRecordViewCannotReproduceDegradesTheRecording()
+    {
+        var (fixture, coordinator) = Build();
+        var observer = new RecordingLifecycleObserver();
+        fixture.Runtime.Recording.OpenRecording(Request(), observer);
+        fixture.PumpUntilIdle();
+        Assert.That(observer.Answers, Is.EqualTo(new[] { "Opened" }));
+
+        // The predicate satisfies against the agent view but references a
+        // record-hidden node: the E6b witness cannot reproduce Satisfied, so
+        // the artifact degrades instead of recording an unreplayable pair.
+        var waitObserver = new RecordingWaitObserver();
+        fixture.Runtime.Control.ArmWait(
+            AgentOnlyLabelExists, KernelFixture.Agent,
+            timeoutAtLogicalTime: long.MaxValue, waitObserver);
+        fixture.PumpUntilIdle();
+
+        Assert.That(
+            waitObserver.Resolutions[0].Resolution, Is.EqualTo(PredicateResolution.Satisfied));
+        Assert.That(coordinator.ArmedWaits, Has.Count.EqualTo(1));
+        Assert.That(
+            coordinator.ResolvedWaits, Has.Count.EqualTo(1),
+            "the pair still records — R1 stays intact; honesty comes from the close reason");
+        Assert.That(observer.Answers, Is.EqualTo(new[] { "Opened", "Closed" }));
+        Assert.That(observer.ClosedReason!.Value.IsCompleted, Is.False);
+        Assert.That(observer.ClosedReason.Value.Reason.Value, Is.EqualTo("RecordExposure"));
+    }
+
     // ── Parked commits and the fence ─────────────────────────────────────────
+
+    [Test]
+    public void TheCloseFenceWaitsForItsOwnCancellationEvidence()
+    {
+        var (fixture, coordinator) = Build();
+        var observer = new RecordingLifecycleObserver();
+        var recording = fixture.Runtime.Recording.OpenRecording(Request(), observer);
+        fixture.PumpUntilIdle();
+
+        var waitObserver = new RecordingWaitObserver();
+        fixture.Runtime.Control.ArmWait(
+            KernelFixture.LabelExists, KernelFixture.Agent,
+            timeoutAtLogicalTime: long.MaxValue, waitObserver);
+        fixture.PumpUntilIdle();
+
+        coordinator.WaitResolvedAnswer = EvidenceReadiness.Pending;
+        fixture.Runtime.Recording.CloseRecording(recording, observer);
+        fixture.Pump();
+        fixture.Pump();
+        Assert.That(
+            waitObserver.Resolutions[0].Resolution, Is.EqualTo(PredicateResolution.Cancelled));
+        Assert.That(
+            observer.Answers, Is.EqualTo(new[] { "Opened" }),
+            "E7 must not commit over the cancellation's parked E6b (reader rule R1)");
+
+        coordinator.WaitResolvedAnswer = EvidenceReadiness.Ready;
+        fixture.PumpUntilIdle();
+        Assert.That(observer.Answers, Is.EqualTo(new[] { "Opened", "Closed" }));
+        Assert.That(coordinator.ResolvedWaits, Has.Count.EqualTo(1));
+    }
 
     [Test]
     public void APendingE8ParksAndTheCloseFenceWaitsForIt()

@@ -48,6 +48,9 @@ public sealed class RecordingStateMachineTests
 
         internal List<AssertionEvidence> Assertions { get; } = new();
 
+        /// <summary>The order Ready answers were given in — the artifact's would-be stream order.</summary>
+        internal List<string> CommitOrder { get; } = new();
+
         internal bool TornDown { get; private set; }
 
         internal bool AddressableAtTeardown { get; private set; }
@@ -93,8 +96,11 @@ public sealed class RecordingStateMachineTests
             AddressableAtTeardown = Bound!.CanAddress;
         }
 
-        public EvidenceReadiness PrepareAdmissionEvidence(AdmissionEvidence evidence) =>
-            EvidenceReadiness.Ready;
+        public EvidenceReadiness PrepareAdmissionEvidence(AdmissionEvidence evidence)
+        {
+            CommitOrder.Add("E2");
+            return EvidenceReadiness.Ready;
+        }
 
         public EvidenceReadiness PrepareEffectPermit(PermitEvidence evidence) =>
             EvidenceReadiness.Ready;
@@ -102,6 +108,7 @@ public sealed class RecordingStateMachineTests
         public EvidenceReadiness CommitTerminalEvidence(TerminalEvidence evidence)
         {
             Terminals.Add(evidence);
+            CommitOrder.Add("E4");
             return EvidenceReadiness.Ready;
         }
 
@@ -110,6 +117,7 @@ public sealed class RecordingStateMachineTests
             if (BarrierReadiness == EvidenceReadiness.Ready)
             {
                 Barriers.Add(evidence);
+                CommitOrder.Add("E5");
             }
 
             return BarrierCloseRequest.HasValue
@@ -122,6 +130,7 @@ public sealed class RecordingStateMachineTests
             if (WaitArmedAnswer == EvidenceReadiness.Ready)
             {
                 ArmedWaits.Add(evidence);
+                CommitOrder.Add("E6a");
             }
 
             return WaitArmedAnswer;
@@ -132,6 +141,7 @@ public sealed class RecordingStateMachineTests
             if (WaitResolvedAnswer == EvidenceReadiness.Ready)
             {
                 ResolvedWaits.Add(evidence);
+                CommitOrder.Add("E6b");
             }
 
             return WaitResolvedAnswer;
@@ -142,6 +152,7 @@ public sealed class RecordingStateMachineTests
             if (AssertionAnswer == EvidenceReadiness.Ready)
             {
                 Assertions.Add(evidence);
+                CommitOrder.Add("E8");
             }
 
             return AssertionAnswer;
