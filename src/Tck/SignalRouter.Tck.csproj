@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>SignalRouter.Tck</AssemblyName>
+    <RootNamespace>SignalRouter.Tck</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- The versioned, black-box TCK core (adapter-conformance.md §7.2):
+         deliberately free of any test-framework dependency so the same suite runs
+         under plain .NET CI and inside engine test runners (e.g. Unity) whose
+         bundled NUnit version this repo does not control. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AdapterSdk/SignalRouter.AdapterSdk.csproj" />
+    <ProjectReference Include="../Contracts/SignalRouter.Contracts.csproj" />
+    <ProjectReference Include="../Kernel/SignalRouter.Kernel.csproj" />
+    <!-- The tier-2 recording/replay obligations (item 5): the suite records on
+         the harness runtime, pre-scans, and replays into the adapter's twin. -->
+    <ProjectReference Include="../Comparison/SignalRouter.Comparison.csproj" />
+    <ProjectReference Include="../Replay/SignalRouter.Replay.csproj" />
+    <ProjectReference Include="../Codec.CanonicalState/SignalRouter.Codec.CanonicalState.csproj" />
+    <ProjectReference Include="../Codec.Recording/SignalRouter.Codec.Recording.csproj" />
+  </ItemGroup>
+</Project>

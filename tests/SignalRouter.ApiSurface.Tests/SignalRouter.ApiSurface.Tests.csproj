@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="NUnit3TestAdapter">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      Every v2 production assembly is under snapshot: an unreviewed public-surface
+      change anywhere in src must show up as a baseline diff in this project.
+    -->
+    <ProjectReference Include="../../src/AdapterSdk/SignalRouter.AdapterSdk.csproj" />
+    <ProjectReference Include="../../src/Codec.CanonicalState/SignalRouter.Codec.CanonicalState.csproj" />
+    <ProjectReference Include="../../src/Codec.Recording/SignalRouter.Codec.Recording.csproj" />
+    <ProjectReference Include="../../src/Comparison/SignalRouter.Comparison.csproj" />
+    <ProjectReference Include="../../src/Recording/SignalRouter.Recording.csproj" />
+    <ProjectReference Include="../../src/Replay/SignalRouter.Replay.csproj" />
+    <ProjectReference Include="../../src/Contracts/SignalRouter.Contracts.csproj" />
+    <ProjectReference Include="../../src/Kernel/SignalRouter.Kernel.csproj" />
+    <ProjectReference Include="../../src/ReferenceAdapter/SignalRouter.ReferenceAdapter.csproj" />
+    <ProjectReference Include="../../src/Tck/SignalRouter.Tck.csproj" />
+  </ItemGroup>
+</Project>

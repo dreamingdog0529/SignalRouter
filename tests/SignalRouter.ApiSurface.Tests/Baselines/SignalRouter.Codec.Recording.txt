@@ -1,0 +1,109 @@
+# API surface of SignalRouter.Codec.Recording
+
+sealed class SignalRouter.Codec.Recording.ArtifactReadLimits
+  property MaxArtifactBytes : System.Int64 { public get; }
+  property MaxBlobBytes : System.Int32 { public get; }
+  property MaxRecordBytes : System.Int32 { public get; }
+  property MaxRecordCount : System.Int32 { public get; }
+  property MaxStringLength : System.Int32 { public get; }
+  property MaxTotalBlobBytes : System.Int64 { public get; }
+  public ctor(System.Int64 maxArtifactBytes, System.Int32 maxRecordCount, System.Int32 maxRecordBytes, System.Int32 maxBlobBytes, System.Int32 maxStringLength, System.Int64 maxTotalBlobBytes = 0)
+
+sealed class SignalRouter.Codec.Recording.ArtifactReadResult
+  property ArtifactId : System.String { public get; }
+  property Cuts : SignalRouter.Contracts.ValueArray<SignalRouter.Contracts.EvidenceCut> { public get; }
+  property DeltaBlobCount : System.Int32 { public get; }
+  property Facts : SignalRouter.Contracts.ArtifactFacts { public get; }
+  property Incarnation : SignalRouter.Contracts.RuntimeIncarnationId { public get; }
+  property IntegrityDetail : System.String? { public get; }
+  property IntegrityFailure : System.Boolean { public get; }
+  property MajorVersion : System.Int32 { public get; }
+  property MinorVersion : System.Int32 { public get; }
+  property Profile : SignalRouter.Contracts.ReplayComparisonProfile? { public get; }
+  property Timeline : SignalRouter.Contracts.ValueArray<SignalRouter.Codec.Recording.TimelineRecord> { public get; }
+  property TruncatedTail : System.Boolean { public get; }
+  public method TryGetBlob(SignalRouter.Contracts.ContentId id, out System.Byte[] canonicalPayload) : System.Boolean
+
+static class SignalRouter.Codec.Recording.ArtifactReader
+  public static method Read(System.Byte[] data, SignalRouter.Codec.Recording.ArtifactReadLimits limits) : SignalRouter.Codec.Recording.ArtifactReadResult
+
+sealed class SignalRouter.Codec.Recording.ArtifactWriter
+  implements System.IDisposable
+  property WrittenBytes : System.Int64 { public get; }
+  public ctor(SignalRouter.Codec.Recording.IArtifactStorage storage)
+  public method AppendBlob(SignalRouter.Contracts.ContentId id, System.ReadOnlySpan<System.Byte> canonicalPayload) : SignalRouter.Codec.Recording.WriteAnswer
+  public method AppendBlob(SignalRouter.Contracts.ContentId id, System.ReadOnlySpan<System.Byte> canonicalPayload, System.Int64 totalByteBudget) : SignalRouter.Codec.Recording.WriteAnswer
+  public method AppendBlobOrDelta(SignalRouter.Contracts.ContentId id, System.ReadOnlySpan<System.Byte> canonicalPayload, SignalRouter.Contracts.ContentId baseId, System.ReadOnlySpan<System.Byte> basePayload, System.Int64 totalByteBudget, out System.Boolean wroteDelta) : SignalRouter.Codec.Recording.WriteAnswer
+  public method AppendCut(SignalRouter.Contracts.EvidenceCut cut) : SignalRouter.Codec.Recording.WriteAnswer
+  public method AppendCut(SignalRouter.Contracts.EvidenceCut cut, System.Int64 totalByteBudget) : SignalRouter.Codec.Recording.WriteAnswer
+  public method AppendProfile(SignalRouter.Contracts.ReplayComparisonProfile profile) : SignalRouter.Codec.Recording.WriteAnswer
+  public method AppendTimeline(SignalRouter.Codec.Recording.TimelineRecord entry, System.Int64 totalByteBudget) : SignalRouter.Codec.Recording.WriteAnswer
+  public method ContainsBlob(SignalRouter.Contracts.ContentId id) : System.Boolean
+  public method Dispose() : System.Void
+  public method WriteHeader(System.String artifactId, SignalRouter.Contracts.RuntimeIncarnationId incarnation) : SignalRouter.Codec.Recording.WriteAnswer
+
+sealed class SignalRouter.Codec.Recording.FileArtifactStore
+  implements SignalRouter.Codec.Recording.IArtifactStore
+  public ctor(System.String root)
+  public method Create(System.String artifactId) : SignalRouter.Codec.Recording.IArtifactStorage
+  public method ReadAll(System.String artifactId, System.Int64 maxBytes) : System.Byte[]
+
+interface SignalRouter.Codec.Recording.IArtifactStorage
+  implements System.IDisposable
+  property IsDurable : System.Boolean { public get; }
+  property WrittenBytes : System.Int64 { public get; }
+  public method Append(System.ReadOnlySpan<System.Byte> framedRecord) : SignalRouter.Codec.Recording.WriteAnswer
+
+interface SignalRouter.Codec.Recording.IArtifactStore
+  public method Create(System.String artifactId) : SignalRouter.Codec.Recording.IArtifactStorage
+  public method ReadAll(System.String artifactId, System.Int64 maxBytes) : System.Byte[]
+
+sealed class SignalRouter.Codec.Recording.MemoryArtifactStore
+  implements SignalRouter.Codec.Recording.IArtifactStore
+  property ScriptedAnswers : System.Collections.Generic.Queue<SignalRouter.Codec.Recording.WriteAnswer> { public get; }
+  public ctor()
+  public method Create(System.String artifactId) : SignalRouter.Codec.Recording.IArtifactStorage
+  public method ReadAll(System.String artifactId, System.Int64 maxBytes) : System.Byte[]
+  public method Truncate(System.String artifactId, System.Int32 length) : System.Void
+
+enum SignalRouter.Codec.Recording.RecordKind
+  : System.Byte
+  Blob = 2
+  ComparisonProfile = 4
+  DeltaBlob = 5
+  EvidenceCut = 1
+  Timeline = 3
+
+sealed class SignalRouter.Codec.Recording.RecordingFormatException
+  : System.Exception
+  implements System.Runtime.Serialization.ISerializable
+  property Code : System.String { public get; }
+  property Position : System.Int32 { public get; }
+  public ctor(System.String code, System.Int32 position, System.String message)
+
+static class SignalRouter.Codec.Recording.RecordingSchema
+  public const field CommitByte : System.Byte = 199
+  public const field MajorVersion : System.Int32 = 1
+  public const field MaxDeltaChainDepth : System.Int32 = 32
+  public const field MinorVersion : System.Int32 = 1
+  static property Magic : System.ReadOnlySpan<System.Byte> { public get; }
+
+sealed class SignalRouter.Codec.Recording.TimelineRecord
+  property DroppedCount : System.Int64 { public get; }
+  property Kind : System.String { public get; }
+  property Operation : SignalRouter.Contracts.OperationId { public get; }
+  property Predicate : SignalRouter.Contracts.PredicateContractRef { public get; }
+  property Revision : SignalRouter.Contracts.SourceRevision { public get; }
+  public static method Gap(System.Int64 droppedCount) : SignalRouter.Codec.Recording.TimelineRecord
+  public static method WaitPoll(SignalRouter.Contracts.OperationId operation, SignalRouter.Contracts.PredicateContractRef predicate, SignalRouter.Contracts.SourceRevision revision) : SignalRouter.Codec.Recording.TimelineRecord
+
+static class SignalRouter.Codec.Recording.TimelineRecordKinds
+  public const field Gap : System.String = "TimelineGap"
+  public const field WaitPoll : System.String = "WaitPoll"
+
+enum SignalRouter.Codec.Recording.WriteAnswer
+  : System.Int32
+  Committed = 0
+  Fault = 2
+  InFlight = 1
+  OverBudget = 3

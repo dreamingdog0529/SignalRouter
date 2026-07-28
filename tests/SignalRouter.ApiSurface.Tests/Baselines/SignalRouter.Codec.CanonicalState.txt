@@ -1,0 +1,17 @@
+# API surface of SignalRouter.Codec.CanonicalState
+
+sealed class SignalRouter.Codec.CanonicalState.CanonicalStateCodec
+  implements SignalRouter.Contracts.ICanonicalStateCodec
+  public const field AlgorithmId : System.String = "sha256"
+  public const field RepresentationVersion : System.Int32 = 1
+  public ctor()
+  public method Decode(System.Byte[] canonicalPayload, SignalRouter.Contracts.RuntimeIncarnationId incarnation, SignalRouter.Contracts.SourceRevision revision) : SignalRouter.Contracts.ObservationMaterialization
+  public method Encode(SignalRouter.Contracts.ObservationMaterialization materialization) : SignalRouter.Contracts.CanonicalStateResult
+  public static method Verify(SignalRouter.Contracts.ContentId id, System.Byte[] canonicalPayload) : System.Boolean
+
+sealed class SignalRouter.Codec.CanonicalState.CanonicalStateFormatException
+  : System.Exception
+  implements System.Runtime.Serialization.ISerializable
+  property Code : System.String { public get; }
+  property Offset : System.Int32 { public get; }
+  public ctor(System.String code, System.Int32 offset, System.String message)

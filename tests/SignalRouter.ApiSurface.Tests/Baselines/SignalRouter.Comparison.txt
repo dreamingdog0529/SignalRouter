@@ -1,0 +1,33 @@
+# API surface of SignalRouter.Comparison
+
+sealed class SignalRouter.Comparison.ComparisonResult
+  property Diff : SignalRouter.Contracts.SemanticDiff? { public get; }
+  property Outcome : SignalRouter.Contracts.ReplayComparisonOutcome { public get; }
+  public static method Diverged(SignalRouter.Contracts.SemanticDiff diff) : SignalRouter.Comparison.ComparisonResult
+  public static method Incomparable(SignalRouter.Contracts.IncomparableReason reason) : SignalRouter.Comparison.ComparisonResult
+  static property Equal : SignalRouter.Comparison.ComparisonResult { public get; }
+
+sealed class SignalRouter.Comparison.ComparisonVocabulary
+  public ctor()
+  public method RegisterMigration(SignalRouter.Contracts.ReplayComparisonProfileRef recordedVersion, SignalRouter.Comparison.IProfileMigration migration) : System.Void
+  public method RegisterNormalizer(System.String code, SignalRouter.Comparison.IValueNormalizer normalizer) : System.Void
+  public method TryGetMigration(SignalRouter.Contracts.ReplayComparisonProfileRef recordedVersion, out SignalRouter.Comparison.IProfileMigration migration) : System.Boolean
+  public method TryGetNormalizer(System.String code, out SignalRouter.Comparison.IValueNormalizer normalizer) : System.Boolean
+
+interface SignalRouter.Comparison.IProfileMigration
+  public method Project(SignalRouter.Contracts.ReplayComparisonProfile recorded) : SignalRouter.Contracts.ReplayComparisonProfile
+
+interface SignalRouter.Comparison.IValueNormalizer
+  public method Normalize(SignalRouter.Contracts.FieldValue value) : SignalRouter.Contracts.FieldValue
+
+sealed class SignalRouter.Comparison.ProfileResolution
+  property Effective : SignalRouter.Contracts.ReplayComparisonProfile? { public get; }
+  property IncomparableReason : SignalRouter.Contracts.IncomparableReason? { public get; }
+  property IsResolved : System.Boolean { public get; }
+
+static class SignalRouter.Comparison.ProfileResolver
+  public static method Resolve(SignalRouter.Contracts.ReplayComparisonProfile recorded, SignalRouter.Contracts.ReplayComparisonProfile supported, SignalRouter.Comparison.ComparisonVocabulary vocabulary) : SignalRouter.Comparison.ProfileResolution
+
+sealed class SignalRouter.Comparison.SemanticComparator
+  public ctor(SignalRouter.Comparison.ComparisonVocabulary vocabulary)
+  public method CompareState(SignalRouter.Contracts.ObservationMaterialization recorded, SignalRouter.Contracts.ObservationMaterialization actual, SignalRouter.Contracts.ReplayComparisonProfile profile) : SignalRouter.Comparison.ComparisonResult

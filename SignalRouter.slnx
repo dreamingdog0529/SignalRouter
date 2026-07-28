@@ -1,40 +1,30 @@
 <Solution>
-  <Folder Name="/bench/v2/">
-    <Project Path="bench/v2/SignalRouter.V2.Benchmarks/SignalRouter.V2.Benchmarks.csproj" />
+  <Folder Name="/bench/">
+    <Project Path="bench/SignalRouter.Benchmarks/SignalRouter.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/SignalRouter.Core/SignalRouter.Core.csproj" />
-    <Project Path="src/SignalRouter.McpHost/SignalRouter.McpHost.csproj" />
-    <Project Path="src/SignalRouter.Protocol/SignalRouter.Protocol.csproj" />
-  </Folder>
-  <Folder Name="/src/v2/">
-    <Project Path="src/v2/AdapterSdk/SignalRouter.V2.AdapterSdk.csproj" />
-    <Project Path="src/v2/Codec.CanonicalState/SignalRouter.V2.Codec.CanonicalState.csproj" />
-    <Project Path="src/v2/Codec.Recording/SignalRouter.V2.Codec.Recording.csproj" />
-    <Project Path="src/v2/Comparison/SignalRouter.V2.Comparison.csproj" />
-    <Project Path="src/v2/Contracts/SignalRouter.V2.Contracts.csproj" />
-    <Project Path="src/v2/Kernel/SignalRouter.V2.Kernel.csproj" />
-    <Project Path="src/v2/Recording/SignalRouter.V2.Recording.csproj" />
-    <Project Path="src/v2/Replay/SignalRouter.V2.Replay.csproj" />
-    <Project Path="src/v2/ReferenceAdapter/SignalRouter.V2.ReferenceAdapter.csproj" />
-    <Project Path="src/v2/Tck/SignalRouter.V2.Tck.csproj" />
+    <Project Path="src/AdapterSdk/SignalRouter.AdapterSdk.csproj" />
+    <Project Path="src/Codec.CanonicalState/SignalRouter.Codec.CanonicalState.csproj" />
+    <Project Path="src/Codec.Recording/SignalRouter.Codec.Recording.csproj" />
+    <Project Path="src/Comparison/SignalRouter.Comparison.csproj" />
+    <Project Path="src/Contracts/SignalRouter.Contracts.csproj" />
+    <Project Path="src/Kernel/SignalRouter.Kernel.csproj" />
+    <Project Path="src/Recording/SignalRouter.Recording.csproj" />
+    <Project Path="src/Replay/SignalRouter.Replay.csproj" />
+    <Project Path="src/ReferenceAdapter/SignalRouter.ReferenceAdapter.csproj" />
+    <Project Path="src/Tck/SignalRouter.Tck.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/SignalRouter.Core.Tests/SignalRouter.Core.Tests.csproj" />
-    <Project Path="tests/SignalRouter.McpHost.Tests/SignalRouter.McpHost.Tests.csproj" />
-    <Project Path="tests/SignalRouter.Protocol.Tests/SignalRouter.Protocol.Tests.csproj" />
-  </Folder>
-  <Folder Name="/tests/v2/">
-    <Project Path="tests/v2/SignalRouter.V2.AdapterSdk.Tests/SignalRouter.V2.AdapterSdk.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.Codec.Recording.Tests/SignalRouter.V2.Codec.Recording.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.Comparison.Tests/SignalRouter.V2.Comparison.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.Recording.Tests/SignalRouter.V2.Recording.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.Replay.Tests/SignalRouter.V2.Replay.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.ApiSurface.Tests/SignalRouter.V2.ApiSurface.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.Codec.CanonicalState.Tests/SignalRouter.V2.Codec.CanonicalState.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.Contracts.Tests/SignalRouter.V2.Contracts.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.Kernel.Tests/SignalRouter.V2.Kernel.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.Performance.Tests/SignalRouter.V2.Performance.Tests.csproj" />
-    <Project Path="tests/v2/SignalRouter.V2.ReferenceAdapter.Tests/SignalRouter.V2.ReferenceAdapter.Tests.csproj" />
+    <Project Path="tests/SignalRouter.AdapterSdk.Tests/SignalRouter.AdapterSdk.Tests.csproj" />
+    <Project Path="tests/SignalRouter.ApiSurface.Tests/SignalRouter.ApiSurface.Tests.csproj" />
+    <Project Path="tests/SignalRouter.Codec.CanonicalState.Tests/SignalRouter.Codec.CanonicalState.Tests.csproj" />
+    <Project Path="tests/SignalRouter.Codec.Recording.Tests/SignalRouter.Codec.Recording.Tests.csproj" />
+    <Project Path="tests/SignalRouter.Comparison.Tests/SignalRouter.Comparison.Tests.csproj" />
+    <Project Path="tests/SignalRouter.Contracts.Tests/SignalRouter.Contracts.Tests.csproj" />
+    <Project Path="tests/SignalRouter.Kernel.Tests/SignalRouter.Kernel.Tests.csproj" />
+    <Project Path="tests/SignalRouter.Performance.Tests/SignalRouter.Performance.Tests.csproj" />
+    <Project Path="tests/SignalRouter.Recording.Tests/SignalRouter.Recording.Tests.csproj" />
+    <Project Path="tests/SignalRouter.ReferenceAdapter.Tests/SignalRouter.ReferenceAdapter.Tests.csproj" />
+    <Project Path="tests/SignalRouter.Replay.Tests/SignalRouter.Replay.Tests.csproj" />
   </Folder>
 </Solution>

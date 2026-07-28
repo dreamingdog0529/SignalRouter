@@ -1,0 +1,64 @@
+# API surface of SignalRouter.Tck
+
+interface SignalRouter.Tck.ITckHarness
+  property AgentDomain : SignalRouter.Contracts.SecurityDomainId { public get; }
+  property AgentPrincipal : SignalRouter.Contracts.Principal { public get; }
+  property CountAtLeastOne : SignalRouter.Contracts.PredicateContractRef { public get; }
+  property CountAtLeastTwo : SignalRouter.Contracts.PredicateContractRef { public get; }
+  property Descriptor : SignalRouter.AdapterSdk.AdapterDescriptor { public get; }
+  property HumanPrincipal : SignalRouter.Contracts.Principal { public get; }
+  property LogicalNow : SignalRouter.AdapterSdk.LogicalTime { public get; }
+  property MutatingCapability : SignalRouter.Contracts.CapabilityContractRef { public get; }
+  property RecordingProfile : SignalRouter.Contracts.ReplayComparisonProfile { public get; }
+  property RedactionKey : System.Byte[] { public get; }
+  property ReplayEnvironments : SignalRouter.Replay.IReplayEnvironmentFactory { public get; }
+  property RevisionBoundSource : SignalRouter.Contracts.StateSourceKey { public get; }
+  property Runtime : SignalRouter.Kernel.KernelRuntime { public get; }
+  property SlowCapability : SignalRouter.Contracts.CapabilityContractRef { public get; }
+  property VisibleTargetKey : SignalRouter.Contracts.AuthorKey { public get; }
+  public method DefinitionOf(SignalRouter.Contracts.PredicateContractRef predicate) : SignalRouter.Contracts.PredicateDefinition
+  public method DriveFrames(System.Int32 frames) : System.Int32
+  public method PublishCount(System.Int64 count) : SignalRouter.AdapterSdk.PublicationAnswer
+  public method PublishUndeclaredField() : SignalRouter.AdapterSdk.PublicationAnswer
+  public method ReadArtifact(SignalRouter.Contracts.OperationId recording) : System.Byte[]
+  public method SimulateExternalMutation() : System.Void
+  public method SimulateManagedInput(SignalRouter.Contracts.RequestId request, SignalRouter.AdapterSdk.ISubmissionObserver observer, System.Boolean asHuman) : System.Void
+  public method TearDown() : System.Void
+
+interface SignalRouter.Tck.ITckHarnessFactory
+  public method Create() : SignalRouter.Tck.ITckHarness
+
+enum SignalRouter.Tck.TckAggregate
+  : System.Int32
+  Failed = 1
+  Incomplete = 2
+  Passed = 0
+
+sealed class SignalRouter.Tck.TckCheckResult
+  property CheckId : System.String { public get; }
+  property Detail : System.String? { public get; }
+  property Obligation : System.String { public get; }
+  property Required : System.Boolean { public get; }
+  property Status : SignalRouter.Tck.TckCheckStatus { public get; }
+  public ctor(System.String checkId, System.String obligation, System.Boolean required, SignalRouter.Tck.TckCheckStatus status, System.String? detail)
+  public override method ToString() : System.String
+
+enum SignalRouter.Tck.TckCheckStatus
+  : System.Int32
+  Failed = 1
+  Passed = 0
+  Skipped = 2
+
+sealed class SignalRouter.Tck.TckOptions
+  property QuiescenceFrameBound : System.Int32 { public get; }
+  public ctor(System.Int32 quiescenceFrameBound = 64)
+
+sealed class SignalRouter.Tck.TckReport
+  property Aggregate : SignalRouter.Tck.TckAggregate { public get; }
+  property Checks : SignalRouter.Contracts.ValueArray<SignalRouter.Tck.TckCheckResult> { public get; }
+  property Version : System.String { public get; }
+  public ctor(System.String version, SignalRouter.Contracts.ValueArray<SignalRouter.Tck.TckCheckResult> checks)
+
+static class SignalRouter.Tck.TckSuite
+  public const field Version : System.String = "tck-core-1.0"
+  public static method Run(SignalRouter.Tck.ITckHarnessFactory factory, SignalRouter.Tck.TckOptions? options = null) : SignalRouter.Tck.TckReport
