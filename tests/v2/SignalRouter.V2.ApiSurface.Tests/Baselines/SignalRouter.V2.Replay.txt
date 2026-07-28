@@ -1,0 +1,100 @@
+# API surface of SignalRouter.V2.Replay
+
+enum SignalRouter.V2.Replay.ArtifactProvenance
+  : System.Int32
+  Trusted = 1
+  Untrusted = 0
+
+interface SignalRouter.V2.Replay.IReplayEnvironment
+  implements System.IDisposable
+  property Runtime : SignalRouter.V2.Kernel.KernelRuntime { public get; }
+
+interface SignalRouter.V2.Replay.IReplayEnvironmentFactory
+  public method Create(SignalRouter.V2.Contracts.RecordingOpened opened) : SignalRouter.V2.Replay.IReplayEnvironment
+
+interface SignalRouter.V2.Replay.ISecretReferenceResolver
+  public method CanResolve(SignalRouter.V2.Contracts.SecretReference reference) : System.Boolean
+  public method TryResolve(SignalRouter.V2.Contracts.SecretReference reference, out SignalRouter.V2.Contracts.FieldValue value) : System.Boolean
+
+sealed class SignalRouter.V2.Replay.PlannedStop
+  property Incomparability : SignalRouter.V2.Contracts.IncomparableReason? { public get; }
+  property Kind : SignalRouter.V2.Replay.ReplayStopKind { public get; }
+  property Position : SignalRouter.V2.Contracts.EvidenceSequence { public get; }
+  public ctor(SignalRouter.V2.Contracts.EvidenceSequence position, SignalRouter.V2.Replay.ReplayStopKind kind, SignalRouter.V2.Contracts.IncomparableReason? incomparability)
+
+sealed class SignalRouter.V2.Replay.PreScanResult
+  property Incomparability : SignalRouter.V2.Contracts.IncomparableReason? { public get; }
+  property Plan : SignalRouter.V2.Replay.ReplayPlan? { public get; }
+  property Refusal : SignalRouter.V2.Replay.ReplayRefusal? { public get; }
+  public static method Incomparable(SignalRouter.V2.Contracts.IncomparableReason reason) : SignalRouter.V2.Replay.PreScanResult
+  public static method Planned(SignalRouter.V2.Replay.ReplayPlan plan) : SignalRouter.V2.Replay.PreScanResult
+  public static method Refused(SignalRouter.V2.Replay.ReplayRefusal refusal) : SignalRouter.V2.Replay.PreScanResult
+
+sealed class SignalRouter.V2.Replay.PredicateAllowlistEntry
+  property Definition : SignalRouter.V2.Contracts.PredicateDefinition { public get; }
+  property Reference : SignalRouter.V2.Contracts.PredicateContractRef { public get; }
+  public ctor(SignalRouter.V2.Contracts.PredicateContractRef reference, SignalRouter.V2.Contracts.PredicateDefinition definition)
+
+sealed class SignalRouter.V2.Replay.ReplayAllowlist
+  property Capabilities : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CompletionBinding> { public get; }
+  property Predicates : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Replay.PredicateAllowlistEntry> { public get; }
+  property StateSources : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.StateSourceBinding> { public get; }
+  property SupportedProfile : SignalRouter.V2.Contracts.ReplayComparisonProfile { public get; }
+  public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CompletionBinding> capabilities, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.StateSourceBinding> stateSources, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Replay.PredicateAllowlistEntry> predicates, SignalRouter.V2.Contracts.ReplayComparisonProfile supportedProfile)
+
+sealed class SignalRouter.V2.Replay.ReplayEntry
+  property Admission : SignalRouter.V2.Contracts.AdmissionCut { public get; }
+  property Kind : SignalRouter.V2.Replay.ReplayEntryKind { public get; }
+  property Permit : SignalRouter.V2.Contracts.EffectPermit? { public get; }
+  property Request : SignalRouter.V2.Contracts.RequestId { public get; }
+  property Terminal : SignalRouter.V2.Contracts.TerminalCut? { public get; }
+  public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Replay.ReplayEntryKind kind, SignalRouter.V2.Contracts.AdmissionCut admission, SignalRouter.V2.Contracts.EffectPermit? permit, SignalRouter.V2.Contracts.TerminalCut? terminal)
+
+enum SignalRouter.V2.Replay.ReplayEntryKind
+  : System.Int32
+  AdmittedOnly = 5
+  Completed = 0
+  OutcomeUnknown = 4
+  PreCancelled = 2
+  PreEffectFault = 3
+  Rejected = 1
+
+sealed class SignalRouter.V2.Replay.ReplayPlan
+  property Classification : SignalRouter.V2.Contracts.ArtifactClassification { public get; }
+  property Entries : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Replay.ReplayEntry> { public get; }
+  property Opened : SignalRouter.V2.Contracts.RecordingOpened { public get; }
+  property Profile : SignalRouter.V2.Contracts.ReplayComparisonProfile { public get; }
+  property Reading : SignalRouter.V2.Codec.Recording.ArtifactReadResult { public get; }
+  property Stop : SignalRouter.V2.Replay.PlannedStop? { public get; }
+  public ctor(SignalRouter.V2.Contracts.RecordingOpened opened, SignalRouter.V2.Contracts.ReplayComparisonProfile profile, SignalRouter.V2.Contracts.ArtifactClassification classification, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Replay.ReplayEntry> entries, SignalRouter.V2.Replay.PlannedStop? stop, SignalRouter.V2.Codec.Recording.ArtifactReadResult reading)
+
+static class SignalRouter.V2.Replay.ReplayPreScan
+  public static method Scan(System.Byte[] artifact, SignalRouter.V2.Codec.Recording.ArtifactReadLimits limits, SignalRouter.V2.Replay.ReplayAllowlist allowlist, SignalRouter.V2.Comparison.ComparisonVocabulary vocabulary, SignalRouter.V2.Replay.ISecretReferenceResolver? secretResolver, SignalRouter.V2.Replay.ReplayTrustOptions trust) : SignalRouter.V2.Replay.PreScanResult
+
+sealed class SignalRouter.V2.Replay.ReplayRefusal
+  property Code : System.String { public get; }
+  public ctor(System.String code)
+
+static class SignalRouter.V2.Replay.ReplayRefusalCodes
+  public const field ArtifactIntegrity : System.String = "ArtifactIntegrity"
+  public const field ContractAllowlist : System.String = "ContractAllowlist"
+  public const field OpenFailed : System.String = "OpenFailed"
+  public const field PredicateDigestMismatch : System.String = "PredicateDigestMismatch"
+  public const field ResourceLimit : System.String = "ResourceLimit"
+  public const field UntrustedProvenance : System.String = "UntrustedProvenance"
+
+enum SignalRouter.V2.Replay.ReplayStopKind
+  : System.Int32
+  CancellationTiming = 3
+  Contamination = 0
+  OutcomeUnknown = 4
+  PreEffectFault = 5
+  PredicateFault = 2
+  RecordedUnevaluable = 6
+  SecretUnresolvable = 7
+  WaitTiming = 1
+
+sealed class SignalRouter.V2.Replay.ReplayTrustOptions
+  property AcceptUntrustedArtifacts : System.Boolean { public get; }
+  property Provenance : SignalRouter.V2.Replay.ArtifactProvenance { public get; }
+  public ctor(SignalRouter.V2.Replay.ArtifactProvenance provenance, System.Boolean acceptUntrustedArtifacts = false)
