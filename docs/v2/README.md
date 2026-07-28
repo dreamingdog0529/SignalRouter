@@ -61,6 +61,8 @@ ADRs from 0001.
 12. [adr/0012-canonical-state-representation-and-digest-policy.md](adr/0012-canonical-state-representation-and-digest-policy.md)
 13. [adr/0013-performance-normativity-and-allocation-policy.md](adr/0013-performance-normativity-and-allocation-policy.md)
 14. [adr/0014-two-layer-identifier-representation.md](adr/0014-two-layer-identifier-representation.md)
+15. [adr/0015-recording-replay-module-topology-and-evidence-seam.md](adr/0015-recording-replay-module-topology-and-evidence-seam.md)
+16. [adr/0016-recording-event-schema.md](adr/0016-recording-event-schema.md)
 
 ## Provenance
 
