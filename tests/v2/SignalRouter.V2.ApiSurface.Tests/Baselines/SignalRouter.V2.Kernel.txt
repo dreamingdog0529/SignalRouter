@@ -76,6 +76,7 @@ interface SignalRouter.V2.Kernel.IKernelQueries
 
 interface SignalRouter.V2.Kernel.IRecordObservationServices
   property CanAddress : System.Boolean { public get; }
+  property RecordViewIsRevisionPure : System.Boolean { public get; }
   public method ReleaseLease(SignalRouter.V2.Contracts.ContentId id, SignalRouter.V2.Contracts.OperationId recording) : System.Void
   public method ReleaseRecording(SignalRouter.V2.Contracts.OperationId recording) : System.Void
   public method SnapshotCatalog() : SignalRouter.V2.Kernel.RecordingCatalog
@@ -98,6 +99,7 @@ interface SignalRouter.V2.Kernel.IRecordingCoordinator
   public method CommitWaitArmed(SignalRouter.V2.Kernel.WaitArmedEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   public method CommitWaitResolved(SignalRouter.V2.Kernel.WaitResolvedEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   public method NotifyTeardown() : System.Void
+  public method OfferWaitPoll(SignalRouter.V2.Kernel.WaitPollEvidence evidence) : System.Void
   public method PrepareOpenEvidence(SignalRouter.V2.Kernel.OpenEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
 
 interface SignalRouter.V2.Kernel.IRecordingObserver
@@ -280,6 +282,12 @@ sealed class SignalRouter.V2.Kernel.WaitArmedEvidence
   property Operation : SignalRouter.V2.Contracts.OperationId { public get; }
   property Predicate : SignalRouter.V2.Contracts.PredicateContractRef { public get; }
   public ctor(SignalRouter.V2.Contracts.OperationId operation, SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.ArgumentDigest operands, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.Causality causality, SignalRouter.V2.Contracts.ViewSequence armedSequence)
+
+sealed class SignalRouter.V2.Kernel.WaitPollEvidence
+  property Operation : SignalRouter.V2.Contracts.OperationId { public get; }
+  property Predicate : SignalRouter.V2.Contracts.PredicateContractRef { public get; }
+  property Revision : SignalRouter.V2.Contracts.SourceRevision { public get; }
+  public ctor(SignalRouter.V2.Contracts.OperationId operation, SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.SourceRevision revision)
 
 sealed class SignalRouter.V2.Kernel.WaitResolvedEvidence
   property Observation : SignalRouter.V2.Kernel.RecordMaterialization { public get; }

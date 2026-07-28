@@ -21,7 +21,9 @@ namespace SignalRouter.V2.Codec.Recording
             Dictionary<ContentId, byte[]> blobs,
             bool truncatedTail,
             bool integrityFailure,
-            string? integrityDetail)
+            string? integrityDetail,
+            ValueArray<TimelineRecord> timeline,
+            int deltaBlobCount)
         {
             MajorVersion = majorVersion;
             MinorVersion = minorVersion;
@@ -33,6 +35,8 @@ namespace SignalRouter.V2.Codec.Recording
             TruncatedTail = truncatedTail;
             IntegrityFailure = integrityFailure;
             IntegrityDetail = integrityDetail;
+            Timeline = timeline;
+            DeltaBlobCount = deltaBlobCount;
 
             var baseSnapshotDurable = false;
             for (var i = 0; i < cuts.Count; i++)
@@ -70,6 +74,15 @@ namespace SignalRouter.V2.Codec.Recording
 
         /// <summary>The reader-authoritative facts for <c>EvidenceSemantics</c>.</summary>
         public ArtifactFacts Facts { get; }
+
+        /// <summary>
+        /// The decoded TimelineTrack lane (1.1): droppable diagnostics, excluded
+        /// from closure and classification — strict replay never depends on it.
+        /// </summary>
+        public ValueArray<TimelineRecord> Timeline { get; }
+
+        /// <summary>How many blobs arrived delta-encoded (diagnostics; content is uniform).</summary>
+        public int DeltaBlobCount { get; }
 
         public bool TryGetBlob(ContentId id, out byte[] canonicalPayload)
         {
@@ -158,6 +171,9 @@ namespace SignalRouter.V2.Codec.Recording
 
             var cuts = new List<EvidenceCut>();
             var blobs = new Dictionary<ContentId, byte[]>();
+            var chainDepths = new Dictionary<ContentId, int>();
+            var timeline = new List<TimelineRecord>();
+            var deltaBlobCount = 0;
             ReplayComparisonProfile? profile = null;
             var truncated = false;
             var integrityFailure = false;
@@ -256,6 +272,78 @@ namespace SignalRouter.V2.Codec.Recording
                             else
                             {
                                 blobs[id] = bytes;
+                                chainDepths[id] = 0;
+                            }
+
+                            break;
+                        }
+
+                        case (byte)RecordKind.DeltaBlob:
+                        {
+                            // A delta blob reconstructs eagerly against a base the
+                            // artifact already carries (blob-before-reference is
+                            // byte order), then verifies exactly like a full blob
+                            // — verify-before-use, never writer trust (1.1).
+                            var reader = new PayloadReader(payload, limits.MaxStringLength);
+                            var id = RecordingPayloadCodec.ReadContentId(reader);
+                            var baseId = RecordingPayloadCodec.ReadContentId(reader);
+                            // Result/prefix/suffix are reconstruction lengths, not
+                            // stream-resident bytes — only the insert run is read
+                            // from the payload and count-checked against it.
+                            var resultLength = reader.ReadVaruint();
+                            if (resultLength > limits.MaxBlobBytes)
+                            {
+                                throw new RecordingFormatException(
+                                    "OverBudget", payloadStart, "A delta blob exceeds the blob budget.");
+                            }
+
+                            var prefix = reader.ReadVaruint();
+                            var suffix = reader.ReadVaruint();
+                            var insert = reader.ReadCount(1);
+                            var insertBytes = new byte[insert];
+                            for (var i = 0; i < insert; i++)
+                            {
+                                insertBytes[i] = reader.ReadByte();
+                            }
+
+                            reader.ExpectEnd();
+                            if (!blobs.TryGetValue(baseId, out var baseBytes))
+                            {
+                                Degrade("Record " + recordCount
+                                    + " delta-references a blob the artifact does not carry before it.");
+                                break;
+                            }
+
+                            if (prefix + insert + suffix != resultLength ||
+                                prefix + suffix > baseBytes.Length)
+                            {
+                                Degrade("Record " + recordCount + " carries an inconsistent delta.");
+                                break;
+                            }
+
+                            var depth = chainDepths[baseId] + 1;
+                            if (depth > RecordingSchema.MaxDeltaChainDepth)
+                            {
+                                Degrade("Record " + recordCount
+                                    + " exceeds the delta chain depth bound.");
+                                break;
+                            }
+
+                            var bytes = new byte[resultLength];
+                            Array.Copy(baseBytes, 0, bytes, 0, prefix);
+                            Array.Copy(insertBytes, 0, bytes, prefix, insert);
+                            Array.Copy(
+                                baseBytes, baseBytes.Length - suffix,
+                                bytes, prefix + insert, suffix);
+                            if (!VerifyBlob(id, bytes))
+                            {
+                                Degrade("A delta blob does not verify against its ContentId.");
+                            }
+                            else
+                            {
+                                blobs[id] = bytes;
+                                chainDepths[id] = depth;
+                                deltaBlobCount++;
                             }
 
                             break;
@@ -276,8 +364,20 @@ namespace SignalRouter.V2.Codec.Recording
                         }
 
                         case (byte)RecordKind.Timeline:
-                            // Reserved lane: accepted, excluded from closure (ADR 0016).
+                        {
+                            // Droppable diagnostics: decoded when the kind is
+                            // known, skipped when not, excluded from closure and
+                            // classification either way (ADR 0016).
+                            var reader = new PayloadReader(payload, limits.MaxStringLength);
+                            var entry = RecordingPayloadCodec.ReadTimeline(reader);
+                            if (entry != null)
+                            {
+                                reader.ExpectEnd();
+                                timeline.Add(entry);
+                            }
+
                             break;
+                        }
 
                         default:
                             // A record kind from a newer minor: additive, skipped.
@@ -321,7 +421,8 @@ namespace SignalRouter.V2.Codec.Recording
             return new ArtifactReadResult(
                 major, minor, artifactId, incarnation, profile,
                 ValueArray<EvidenceCut>.From(cuts.ToArray()), blobs,
-                truncated, integrityFailure, integrityDetail);
+                truncated, integrityFailure, integrityDetail,
+                ValueArray<TimelineRecord>.From(timeline.ToArray()), deltaBlobCount);
         }
 
         private static bool TryReadRecord(

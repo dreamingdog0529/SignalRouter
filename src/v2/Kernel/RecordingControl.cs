@@ -161,6 +161,40 @@ namespace SignalRouter.V2.Kernel
     }
 
     /// <summary>
+    /// A TimelineTrack observation (recording-replay.md §3): an armed wait was
+    /// re-evaluated and stayed unsatisfied. Droppable diagnostics — never
+    /// evidence, never an obligation.
+    /// </summary>
+    public sealed class WaitPollEvidence
+    {
+        public WaitPollEvidence(
+            OperationId operation, PredicateContractRef predicate, SourceRevision revision)
+        {
+            if (operation.IsDefault)
+            {
+                throw new ArgumentException(
+                    "A wait poll requires a non-default operation.", nameof(operation));
+            }
+
+            if (predicate.IsDefault)
+            {
+                throw new ArgumentException(
+                    "A wait poll requires a non-default predicate reference.", nameof(predicate));
+            }
+
+            Operation = operation;
+            Predicate = predicate;
+            Revision = revision;
+        }
+
+        public OperationId Operation { get; }
+
+        public PredicateContractRef Predicate { get; }
+
+        public SourceRevision Revision { get; }
+    }
+
+    /// <summary>
     /// The E6a material (guarantees.md §5.6). No operand values are recorded:
     /// waits arm registered contracts only, and E1 pins the definition — the
     /// digest identifies it (ADR 0015). The view contract and observation scope
@@ -354,6 +388,14 @@ namespace SignalRouter.V2.Kernel
 
         /// <summary>The admission policy the kernel enforces before E2 while recording.</summary>
         RecordingAdmissionPolicy AdmissionPolicy { get; }
+
+        /// <summary>
+        /// TimelineTrack (recording-replay.md §3): offered while Active for an
+        /// armed, recorded wait that re-evaluated unsatisfied. Droppable — the
+        /// coordinator may coalesce, sample, cap, or ignore it freely; there is
+        /// no readiness protocol and no obligation queue involvement.
+        /// </summary>
+        void OfferWaitPoll(WaitPollEvidence evidence);
     }
 
     /// <summary>Answers of the split-phase recording control operations. Failed is never an artifact state.</summary>

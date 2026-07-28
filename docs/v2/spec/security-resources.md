@@ -140,7 +140,7 @@ are named here and receive their defaults when the owning module lands.
 | `Kernel.MaxContinuationsPerParent` | 32 | |
 | `StateStore.MaxBlobBytes` | 1 MiB | a larger canonical materialization refuses with a structured answer ([observation-state.md](observation-state.md) §5.1) |
 | `StateStore.MaxTotalBytes` | 64 MiB | pin-aware GC: unpinned blobs evict oldest-insertion-first; pinned blobs are never evicted |
-| `StateStore.MaxChainLength` | 32 | reserved value — consumed when delta production lands with the recording module; recordings honor `min(profile, store)` |
+| `StateStore.MaxChainLength` | 32 | the delta-chain ceiling between full checkpoints; recordings honor `min(declared, store)` and readers refuse deeper chains as structural |
 | `Timeline.RetentionEntries` | 128 | diagnostic checkpoint ring; eviction releases the entry's pin |
 | `Timeline.RetentionBytes` | 8 MiB | second bound on the same ring; **diagnostic retention never fails evidence** — timeline pins release oldest-first before an evidence `Put` is refused for budget |
 | `ObservationViews.MaxFieldBytes` | 4096 UTF-16 code units | per-field ceiling; oversized values surface as completeness, never truncate silently |

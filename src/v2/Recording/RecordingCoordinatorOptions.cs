@@ -28,6 +28,9 @@ namespace SignalRouter.V2.Recording
     /// </summary>
     public sealed class RecordingCoordinatorOptions
     {
+        /// <summary>StateStore.MaxChainLength (security-resources.md §5): the store's chain ceiling.</summary>
+        public const int StoreMaxChainLength = 32;
+
         public RecordingCoordinatorOptions(
             ReplayComparisonProfile profile,
             long maxArtifactBytes = 64L * 1024 * 1024,
@@ -35,7 +38,9 @@ namespace SignalRouter.V2.Recording
             int maxBlobBytes = 8 * 1024 * 1024,
             RecordingCapacityPolicy capacityPolicy = RecordingCapacityPolicy.CloseIncompleteOnSizeLimit,
             bool allowNonDurableStore = false,
-            ExternalMutationPolicy externalMutationPolicy = ExternalMutationPolicy.BarrierContinue)
+            ExternalMutationPolicy externalMutationPolicy = ExternalMutationPolicy.BarrierContinue,
+            int maxDeltaChainLength = 8,
+            long timelineByteBudget = 0)
         {
             Profile = profile ?? throw new ArgumentNullException(nameof(profile));
             if (maxArtifactBytes < 1 || maxEventCount < 2 || maxBlobBytes < 1)
@@ -44,12 +49,27 @@ namespace SignalRouter.V2.Recording
                     nameof(maxArtifactBytes), "Recording bounds must be positive (and allow E1+E7).");
             }
 
+            if (maxDeltaChainLength < 0 || maxDeltaChainLength > StoreMaxChainLength)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maxDeltaChainLength),
+                    "The delta chain bound is 0 (no deltas) through StateStore.MaxChainLength.");
+            }
+
+            if (timelineByteBudget < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(timelineByteBudget), "The timeline budget is 0 (lane off) or positive.");
+            }
+
             MaxArtifactBytes = maxArtifactBytes;
             MaxEventCount = maxEventCount;
             MaxBlobBytes = maxBlobBytes;
             CapacityPolicy = capacityPolicy;
             AllowNonDurableStore = allowNonDurableStore;
             ExternalMutation = externalMutationPolicy;
+            MaxDeltaChainLength = maxDeltaChainLength;
+            TimelineByteBudget = timelineByteBudget;
         }
 
         /// <summary>The declarative document embedded in the artifact (record kind 0x04, ADR 0016).</summary>
@@ -74,5 +94,21 @@ namespace SignalRouter.V2.Recording
         /// at open unless explicitly allowed (ADR 0015/0016).
         /// </summary>
         public bool AllowNonDurableStore { get; }
+
+        /// <summary>
+        /// The declared bound on delta chains between full checkpoints
+        /// (recording-replay.md §4); recordings honor min(this,
+        /// StateStore.MaxChainLength). Zero writes full blobs only. Chain
+        /// length is storage encoding, never comparison semantics — it lives
+        /// here, not in the comparison-profile document.
+        /// </summary>
+        public int MaxDeltaChainLength { get; }
+
+        /// <summary>
+        /// TimelineTrack byte-rate cap (recording-replay.md §3): total framed
+        /// timeline bytes per artifact. Zero disables the lane. Overflow drops
+        /// events; loss is marked with a gap record at close.
+        /// </summary>
+        public long TimelineByteBudget { get; }
     }
 }

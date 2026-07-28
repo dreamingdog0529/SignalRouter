@@ -124,6 +124,138 @@ namespace SignalRouter.V2.Codec.Recording
             }
         }
 
+        /// <summary>
+        /// Appends a blob, delta-encoded against <paramref name="baseId"/> when
+        /// the delta record is strictly smaller than the full blob record —
+        /// otherwise falls back to a full blob (1.1, ADR 0016). The base must
+        /// already be in this artifact (blob-before-reference is byte order);
+        /// chain-depth policy is the caller's.
+        /// </summary>
+        public WriteAnswer AppendBlobOrDelta(
+            ContentId id,
+            ReadOnlySpan<byte> canonicalPayload,
+            ContentId baseId,
+            ReadOnlySpan<byte> basePayload,
+            long totalByteBudget,
+            out bool wroteDelta)
+        {
+            wroteDelta = false;
+            if (id.IsDefault)
+            {
+                throw new ArgumentException("A blob requires a non-default ContentId.", nameof(id));
+            }
+
+            if (!writtenBlobs.Contains(baseId))
+            {
+                throw new InvalidOperationException(
+                    "The delta base must already be in this artifact.");
+            }
+
+            if (writtenBlobs.Contains(id))
+            {
+                return WriteAnswer.Committed;
+            }
+
+            var prefix = CommonPrefix(basePayload, canonicalPayload);
+            var suffix = CommonSuffix(basePayload, canonicalPayload, prefix);
+            var insert = canonicalPayload.Length - prefix - suffix;
+
+            var delta = PayloadWriter.Rent();
+            try
+            {
+                RecordingPayloadCodec.WriteContentId(ref delta, id);
+                var idEncodedSize = delta.WrittenSpan.Length;
+                RecordingPayloadCodec.WriteContentId(ref delta, baseId);
+                delta.WriteVaruint(canonicalPayload.Length);
+                delta.WriteVaruint(prefix);
+                delta.WriteVaruint(suffix);
+                delta.WriteVaruint(insert);
+                for (var i = 0; i < insert; i++)
+                {
+                    delta.WriteRaw(canonicalPayload[prefix + i]);
+                }
+
+                var fullPayloadSize =
+                    idEncodedSize + VaruintSize(canonicalPayload.Length) + canonicalPayload.Length;
+                if (delta.WrittenSpan.Length < fullPayloadSize)
+                {
+                    var answer = AppendRecord(RecordKind.DeltaBlob, delta.WrittenSpan, totalByteBudget);
+                    if (answer == WriteAnswer.Committed)
+                    {
+                        writtenBlobs.Add(id);
+                        wroteDelta = true;
+                    }
+
+                    return answer;
+                }
+            }
+            finally
+            {
+                delta.Dispose();
+            }
+
+            return AppendBlob(id, canonicalPayload, totalByteBudget);
+        }
+
+        /// <summary>Appends one TimelineTrack record (1.1) — droppable diagnostics, never evidence.</summary>
+        public WriteAnswer AppendTimeline(TimelineRecord entry, long totalByteBudget)
+        {
+            if (entry == null)
+            {
+                throw new ArgumentNullException(nameof(entry));
+            }
+
+            var writer = PayloadWriter.Rent();
+            try
+            {
+                RecordingPayloadCodec.WriteTimeline(ref writer, entry);
+                return AppendRecord(RecordKind.Timeline, writer.WrittenSpan, totalByteBudget);
+            }
+            finally
+            {
+                writer.Dispose();
+            }
+        }
+
+        private static int CommonPrefix(ReadOnlySpan<byte> baseBytes, ReadOnlySpan<byte> result)
+        {
+            var bound = Math.Min(baseBytes.Length, result.Length);
+            var length = 0;
+            while (length < bound && baseBytes[length] == result[length])
+            {
+                length++;
+            }
+
+            return length;
+        }
+
+        private static int CommonSuffix(
+            ReadOnlySpan<byte> baseBytes, ReadOnlySpan<byte> result, int prefix)
+        {
+            var bound = Math.Min(baseBytes.Length, result.Length) - prefix;
+            var length = 0;
+            while (length < bound &&
+                baseBytes[baseBytes.Length - 1 - length] == result[result.Length - 1 - length])
+            {
+                length++;
+            }
+
+            return length;
+        }
+
+        private static int VaruintSize(int value)
+        {
+            var size = 1;
+            var remaining = (uint)value;
+            while (remaining >= 0x80)
+            {
+                remaining >>= 7;
+                size++;
+            }
+
+            return size;
+        }
+
         public WriteAnswer AppendCut(EvidenceCut cut) => AppendCut(cut, long.MaxValue);
 
         /// <summary>

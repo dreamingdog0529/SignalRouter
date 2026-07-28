@@ -6,21 +6,23 @@ using SignalRouter.V2.Contracts;
 namespace SignalRouter.V2.Codec.Recording.Tests;
 
 /// <summary>
-/// The frozen byte-level regression vector of RecordingEventSchema@1.0
+/// The frozen byte-level regression vector of RecordingEventSchema@1.1
 /// (ADR 0016 golden discipline): a minimal artifact — header plus one E5 cut —
 /// whose exact bytes are pinned. Any framing, grammar, or CRC change moves
 /// these bytes and must be a reviewed schema revision, never an accident.
+/// The 1.0 → 1.1 revision changed exactly one byte here: the header minor
+/// varuint (00 → 01, the delta/timeline PR).
 /// The primitive encodings are additionally pinned at their boundary values
 /// against the ADR 0012 worksheet (shared-source parity).
 /// </summary>
 public sealed class GoldenArtifactTests
 {
-    // Worksheet: 53525245 "SRRE" · 01 major · 00 minor · 06+"golden" ·
+    // Worksheet: 53525245 "SRRE" · 01 major · 01 minor · 06+"golden" ·
     // 05+"inc-1" · 01 cut-record · 3D length(61) · 17+"ExternalMutationBarrier"
     // · 8B sequence(0) · 8B lastClean(0) · 8B firstObserved(0) · 8B revision(1)
     // · 03+"ext" · 00 count · F4EF5FCC crc32c · C7 commit.
     private const string ExpectedHex =
-        "53525245010006676F6C64656E05696E632D31013D1745787465726E616C4D75746174696F6E" +
+        "53525245010106676F6C64656E05696E632D31013D1745787465726E616C4D75746174696F6E" +
         "4261727269657200000000000000000000000000000000000000000000000000000000000000" +
         "010365787400F4EF5FCCC7";
 

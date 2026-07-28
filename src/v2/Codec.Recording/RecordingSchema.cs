@@ -8,10 +8,16 @@ namespace SignalRouter.V2.Codec.Recording
         EvidenceCut = 0x01,
         Blob = 0x02,
 
-        /// <summary>Reserved for the TimelineTrack lane; 1.0 writers never emit it.</summary>
+        /// <summary>The TimelineTrack lane (1.1): droppable diagnostics, excluded from closure.</summary>
         Timeline = 0x03,
 
         ComparisonProfile = 0x04,
+
+        /// <summary>
+        /// A delta-encoded blob (1.1): base ContentId plus a patch reconstructing
+        /// the result payload, verified against the result ContentId like any blob.
+        /// </summary>
+        DeltaBlob = 0x05,
     }
 
     /// <summary>RecordingEventSchema identity and framing constants (ADR 0016).</summary>
@@ -19,7 +25,14 @@ namespace SignalRouter.V2.Codec.Recording
     {
         public const int MajorVersion = 1;
 
-        public const int MinorVersion = 0;
+        public const int MinorVersion = 1;
+
+        /// <summary>
+        /// The structural bound on delta chains between checkpoints
+        /// (StateStore.MaxChainLength, security-resources.md §5): writers honor
+        /// min(declared, this); a reader refuses a deeper chain as structural.
+        /// </summary>
+        public const int MaxDeltaChainDepth = 32;
 
         /// <summary>The file magic "SRRE".</summary>
         public static ReadOnlySpan<byte> Magic => new byte[] { 0x53, 0x52, 0x52, 0x45 };

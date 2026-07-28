@@ -11,6 +11,7 @@ sealed class SignalRouter.V2.Codec.Recording.ArtifactReadLimits
 sealed class SignalRouter.V2.Codec.Recording.ArtifactReadResult
   property ArtifactId : System.String { public get; }
   property Cuts : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.EvidenceCut> { public get; }
+  property DeltaBlobCount : System.Int32 { public get; }
   property Facts : SignalRouter.V2.Contracts.ArtifactFacts { public get; }
   property Incarnation : SignalRouter.V2.Contracts.RuntimeIncarnationId { public get; }
   property IntegrityDetail : System.String? { public get; }
@@ -18,6 +19,7 @@ sealed class SignalRouter.V2.Codec.Recording.ArtifactReadResult
   property MajorVersion : System.Int32 { public get; }
   property MinorVersion : System.Int32 { public get; }
   property Profile : SignalRouter.V2.Contracts.ReplayComparisonProfile? { public get; }
+  property Timeline : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Codec.Recording.TimelineRecord> { public get; }
   property TruncatedTail : System.Boolean { public get; }
   public method TryGetBlob(SignalRouter.V2.Contracts.ContentId id, out System.Byte[] canonicalPayload) : System.Boolean
 
@@ -30,9 +32,11 @@ sealed class SignalRouter.V2.Codec.Recording.ArtifactWriter
   public ctor(SignalRouter.V2.Codec.Recording.IArtifactStorage storage)
   public method AppendBlob(SignalRouter.V2.Contracts.ContentId id, System.ReadOnlySpan<System.Byte> canonicalPayload) : SignalRouter.V2.Codec.Recording.WriteAnswer
   public method AppendBlob(SignalRouter.V2.Contracts.ContentId id, System.ReadOnlySpan<System.Byte> canonicalPayload, System.Int64 totalByteBudget) : SignalRouter.V2.Codec.Recording.WriteAnswer
+  public method AppendBlobOrDelta(SignalRouter.V2.Contracts.ContentId id, System.ReadOnlySpan<System.Byte> canonicalPayload, SignalRouter.V2.Contracts.ContentId baseId, System.ReadOnlySpan<System.Byte> basePayload, System.Int64 totalByteBudget, out System.Boolean wroteDelta) : SignalRouter.V2.Codec.Recording.WriteAnswer
   public method AppendCut(SignalRouter.V2.Contracts.EvidenceCut cut) : SignalRouter.V2.Codec.Recording.WriteAnswer
   public method AppendCut(SignalRouter.V2.Contracts.EvidenceCut cut, System.Int64 totalByteBudget) : SignalRouter.V2.Codec.Recording.WriteAnswer
   public method AppendProfile(SignalRouter.V2.Contracts.ReplayComparisonProfile profile) : SignalRouter.V2.Codec.Recording.WriteAnswer
+  public method AppendTimeline(SignalRouter.V2.Codec.Recording.TimelineRecord entry, System.Int64 totalByteBudget) : SignalRouter.V2.Codec.Recording.WriteAnswer
   public method ContainsBlob(SignalRouter.V2.Contracts.ContentId id) : System.Boolean
   public method Dispose() : System.Void
   public method WriteHeader(System.String artifactId, SignalRouter.V2.Contracts.RuntimeIncarnationId incarnation) : SignalRouter.V2.Codec.Recording.WriteAnswer
@@ -65,6 +69,7 @@ enum SignalRouter.V2.Codec.Recording.RecordKind
   : System.Byte
   Blob = 2
   ComparisonProfile = 4
+  DeltaBlob = 5
   EvidenceCut = 1
   Timeline = 3
 
@@ -78,8 +83,22 @@ sealed class SignalRouter.V2.Codec.Recording.RecordingFormatException
 static class SignalRouter.V2.Codec.Recording.RecordingSchema
   public const field CommitByte : System.Byte = 199
   public const field MajorVersion : System.Int32 = 1
-  public const field MinorVersion : System.Int32 = 0
+  public const field MaxDeltaChainDepth : System.Int32 = 32
+  public const field MinorVersion : System.Int32 = 1
   static property Magic : System.ReadOnlySpan<System.Byte> { public get; }
+
+sealed class SignalRouter.V2.Codec.Recording.TimelineRecord
+  property DroppedCount : System.Int64 { public get; }
+  property Kind : System.String { public get; }
+  property Operation : SignalRouter.V2.Contracts.OperationId { public get; }
+  property Predicate : SignalRouter.V2.Contracts.PredicateContractRef { public get; }
+  property Revision : SignalRouter.V2.Contracts.SourceRevision { public get; }
+  public static method Gap(System.Int64 droppedCount) : SignalRouter.V2.Codec.Recording.TimelineRecord
+  public static method WaitPoll(SignalRouter.V2.Contracts.OperationId operation, SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.SourceRevision revision) : SignalRouter.V2.Codec.Recording.TimelineRecord
+
+static class SignalRouter.V2.Codec.Recording.TimelineRecordKinds
+  public const field Gap : System.String = "TimelineGap"
+  public const field WaitPoll : System.String = "WaitPoll"
 
 enum SignalRouter.V2.Codec.Recording.WriteAnswer
   : System.Int32
