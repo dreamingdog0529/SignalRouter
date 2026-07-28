@@ -306,10 +306,10 @@ public sealed class RecordingEndToEndTests
         world.Submit("r-1");
         world.PumpUntilIdle();
 
-        // The E4 appends are the next two records (after blob): script the cut
-        // append to fault. Blob first, then cut — fault the second append.
-        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed); // after-view blob
-        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Fault);     // E4 cut
+        // The after view materializes under the recording's registered view, so
+        // an unchanged state dedupes against the E3 before blob — the next
+        // append is the E4 cut itself: script it to fault.
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Fault); // E4 cut
         world.Executor.CompleteLast();
         world.PumpUntilIdle();
 

@@ -10,7 +10,7 @@ interface SignalRouter.V2.Replay.IReplayEnvironment
   property Runtime : SignalRouter.V2.Kernel.KernelRuntime { public get; }
 
 interface SignalRouter.V2.Replay.IReplayEnvironmentFactory
-  public method Create(SignalRouter.V2.Contracts.RecordingOpened opened) : SignalRouter.V2.Replay.IReplayEnvironment
+  public method Create(SignalRouter.V2.Contracts.RecordingOpened opened, SignalRouter.V2.Kernel.IEvidenceCoordinator evidence) : SignalRouter.V2.Replay.IReplayEnvironment
 
 interface SignalRouter.V2.Replay.ISecretReferenceResolver
   public method CanResolve(SignalRouter.V2.Contracts.SecretReference reference) : System.Boolean
@@ -42,6 +42,10 @@ sealed class SignalRouter.V2.Replay.ReplayAllowlist
   property SupportedProfile : SignalRouter.V2.Contracts.ReplayComparisonProfile { public get; }
   public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CompletionBinding> capabilities, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.StateSourceBinding> stateSources, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Replay.PredicateAllowlistEntry> predicates, SignalRouter.V2.Contracts.ReplayComparisonProfile supportedProfile)
 
+sealed class SignalRouter.V2.Replay.ReplayDriver
+  public ctor(SignalRouter.V2.Codec.CanonicalState.CanonicalStateCodec codec, SignalRouter.V2.Comparison.ComparisonVocabulary vocabulary)
+  public method Execute(SignalRouter.V2.Replay.ReplayPlan plan, SignalRouter.V2.Replay.ReplayAllowlist allowlist, SignalRouter.V2.Replay.IReplayEnvironmentFactory factory, SignalRouter.V2.Replay.ISecretReferenceResolver? secretResolver, SignalRouter.V2.Replay.ReplayMode mode) : SignalRouter.V2.Replay.ReplayReport
+
 sealed class SignalRouter.V2.Replay.ReplayEntry
   property Admission : SignalRouter.V2.Contracts.AdmissionCut { public get; }
   property Kind : SignalRouter.V2.Replay.ReplayEntryKind { public get; }
@@ -58,6 +62,11 @@ enum SignalRouter.V2.Replay.ReplayEntryKind
   PreCancelled = 2
   PreEffectFault = 3
   Rejected = 1
+
+enum SignalRouter.V2.Replay.ReplayMode
+  : System.Int32
+  ExactArtifact = 1
+  StrictSemantic = 0
 
 sealed class SignalRouter.V2.Replay.ReplayPlan
   property Classification : SignalRouter.V2.Contracts.ArtifactClassification { public get; }
@@ -82,6 +91,13 @@ static class SignalRouter.V2.Replay.ReplayRefusalCodes
   public const field PredicateDigestMismatch : System.String = "PredicateDigestMismatch"
   public const field ResourceLimit : System.String = "ResourceLimit"
   public const field UntrustedProvenance : System.String = "UntrustedProvenance"
+
+sealed class SignalRouter.V2.Replay.ReplayReport
+  property DetailCode : System.String? { public get; }
+  property Diff : SignalRouter.V2.Contracts.SemanticDiff? { public get; }
+  property Outcome : SignalRouter.V2.Contracts.ReplayComparisonOutcome { public get; }
+  property StopKind : SignalRouter.V2.Replay.ReplayStopKind? { public get; }
+  property StoppedAt : SignalRouter.V2.Contracts.EvidenceSequence? { public get; }
 
 enum SignalRouter.V2.Replay.ReplayStopKind
   : System.Int32

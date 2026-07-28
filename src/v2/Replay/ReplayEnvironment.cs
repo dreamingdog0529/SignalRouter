@@ -20,11 +20,14 @@ namespace SignalRouter.V2.Replay
     /// The application-supplied twin builder (recording-replay.md §6; ADR 0015):
     /// builds an isolated runtime whose bootstrap registrations reproduce the
     /// artifact's E1-pinned world. The factory is the adapter's obligation — the
-    /// replay layer never fabricates an environment.
+    /// replay layer never fabricates an environment. The runtime MUST be
+    /// constructed with the supplied evidence coordinator: it is the driver's
+    /// observation seam — the same E2/E3/E4 material the recording captured is
+    /// what replay compares against.
     /// </summary>
     public interface IReplayEnvironmentFactory
     {
-        IReplayEnvironment Create(RecordingOpened opened);
+        IReplayEnvironment Create(RecordingOpened opened, IEvidenceCoordinator evidence);
     }
 
     /// <summary>

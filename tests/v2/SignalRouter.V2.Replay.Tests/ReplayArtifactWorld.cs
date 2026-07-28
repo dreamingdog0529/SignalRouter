@@ -94,6 +94,51 @@ internal sealed class ReplayArtifactWorld
         }
     }
 
+    /// <summary>
+    /// The deterministic replayable effect: publish the configured inventory
+    /// count (request-caused — attributable, no barrier) and complete. The same
+    /// executor drives the recording world and the replay twin, so effect
+    /// ordering reproduces by construction.
+    /// </summary>
+    internal sealed class AutoCompletingExecutor : IEffectExecutor
+    {
+        private IEffectCompletionSink? sink;
+
+        internal KernelRuntime? Runtime { get; set; }
+
+        internal long? PublishCountOnEffect { get; set; }
+
+        public void Attach(IEffectCompletionSink completionSink) => sink = completionSink;
+
+        public void Detach() => sink = null;
+
+        public EffectAdoption Execute(EffectRequest request)
+        {
+            if (PublishCountOnEffect.HasValue)
+            {
+                var answer = Runtime!.Ingress.PublishSourceDocument(new SourcePublication(
+                    new StateSourceKey("inventory"),
+                    new SourceDocument(ValueArray<NamedField>.From(new[]
+                    {
+                        new NamedField("count", FieldValue.Of(PublishCountOnEffect.Value)),
+                    })),
+                    EventCausation.OfRequest(request.Permit.Request)));
+                Assert.That(answer, Is.EqualTo(PublicationAnswer.Accepted));
+            }
+
+            sink!.ReportCompletion(new EffectCompletion(
+                request.Permit,
+                EffectResolution.Succeeded(new CompletionEvidence(
+                    Applied, CompletionEvidenceKind.Applied, default)),
+                continuations: null));
+            return EffectAdoption.Adopted;
+        }
+
+        public void RequestCancel(EffectPermitToken permit)
+        {
+        }
+    }
+
     private sealed class LifecycleObserver : IRecordingObserver
     {
         internal List<string> Answers { get; } = new();
@@ -140,7 +185,8 @@ internal sealed class ReplayArtifactWorld
 
     internal ReplayArtifactWorld(
         bool sensitiveArgument = false,
-        ExternalMutationPolicy externalMutationPolicy = ExternalMutationPolicy.BarrierContinue)
+        ExternalMutationPolicy externalMutationPolicy = ExternalMutationPolicy.BarrierContinue,
+        long? autoPublishCount = null)
     {
         var coordinator = new DurableEvidenceCoordinator(
             Store,
@@ -148,6 +194,26 @@ internal sealed class ReplayArtifactWorld
                 Profile(),
                 allowNonDurableStore: true,
                 externalMutationPolicy: externalMutationPolicy));
+        Runtime = BuildRuntime(coordinator, sensitiveArgument, "incarnation-1");
+        if (autoPublishCount.HasValue)
+        {
+            var auto = new AutoCompletingExecutor
+            {
+                Runtime = Runtime,
+                PublishCountOnEffect = autoPublishCount,
+            };
+            Runtime.Start(auto);
+        }
+        else
+        {
+            Runtime.Start(executor);
+        }
+    }
+
+    /// <summary>One bootstrap for the recording world and the replay twin: bootstrap equivalence by construction.</summary>
+    internal static KernelRuntime BuildRuntime(
+        IEvidenceCoordinator? coordinator, bool sensitiveArgument, string incarnation)
+    {
         var options = new KernelOptions(
             new ManualClock(),
             new byte[] { 9, 9, 9, 9 },
@@ -157,8 +223,8 @@ internal sealed class ReplayArtifactWorld
             }),
             RecordDomain,
             canonicalStateCodec: new CanonicalStateCodec());
-        Runtime = new KernelRuntime(new RuntimeIncarnationId("incarnation-1"), options, coordinator);
-        Runtime.Bootstrap.RegisterCapabilityContract(new CapabilityContractDescriptor(
+        var runtime = new KernelRuntime(new RuntimeIncarnationId(incarnation), options, coordinator);
+        runtime.Bootstrap.RegisterCapabilityContract(new CapabilityContractDescriptor(
             Invoke,
             sensitiveArgument
                 ? new ArgumentSchema(ValueArray<ArgumentField>.From(new[]
@@ -169,10 +235,10 @@ internal sealed class ReplayArtifactWorld
             precondition: null,
             Applied,
             postcondition: null));
-        Runtime.Bootstrap.RegisterViewContract(new ViewContractDescriptor(
+        runtime.Bootstrap.RegisterViewContract(new ViewContractDescriptor(
             RecordView, ViewFamily.Record, "root",
             maxNodes: 256, maxFieldBytes: 4096, includeKeylessNodes: false));
-        Runtime.Bootstrap.RegisterNode(new NodeRegistration(
+        runtime.Bootstrap.RegisterNode(new NodeRegistration(
             new AuthorKey("save"),
             NodeRole.Button,
             parent: null,
@@ -188,7 +254,7 @@ internal sealed class ReplayArtifactWorld
             {
                 AgentDomain, RecordDomain,
             }))));
-        Runtime.Bootstrap.RegisterStateSource(new StateSourceRegistration(
+        runtime.Bootstrap.RegisterStateSource(new StateSourceRegistration(
             new StateSourceKey("inventory"),
             new StateSourceContractDescriptor(
                 new StateSourceContractRef(
@@ -201,8 +267,8 @@ internal sealed class ReplayArtifactWorld
                 recordVisible: true,
                 maxDocumentBytes: 4096),
             StateSourceClass.RevisionBound));
-        Runtime.Bootstrap.RegisterPredicateContract(CountIsFive, CountIsFiveDefinition());
-        Runtime.Start(executor);
+        runtime.Bootstrap.RegisterPredicateContract(CountIsFive, CountIsFiveDefinition());
+        return runtime;
     }
 
     internal void Open()
@@ -220,6 +286,25 @@ internal sealed class ReplayArtifactWorld
         Runtime.Recording.CloseRecording(recording, observer);
         PumpUntilIdle();
         Assert.That(observer.Answers, Does.Contain("Closed"));
+    }
+
+    internal void SubmitAuto(string request)
+    {
+        // The auto-completing executor publishes and completes inside the pump.
+        Runtime.Ingress.Submit(new IntentSubmission(
+            new RequestId(request),
+            Invoke,
+            TargetReference.ForKey(new AuthorKey("save")),
+            InvocationPayload.Empty,
+            new IdentityEnvelope(Agent, IngressPath.Mcp, Provenance.Automation, Causality.Root()),
+            observer: null));
+        PumpUntilIdle();
+    }
+
+    internal void ArmWait()
+    {
+        Runtime.Control.ArmWait(CountIsFive, Agent, long.MaxValue, new WaitObserver());
+        PumpUntilIdle();
     }
 
     internal void SubmitAndComplete(string request, InvocationPayload? payload = null)
