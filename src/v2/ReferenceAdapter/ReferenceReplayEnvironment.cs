@@ -1,4 +1,5 @@
 using System;
+using SignalRouter.V2.AdapterSdk;
 using SignalRouter.V2.Contracts;
 using SignalRouter.V2.Kernel;
 using SignalRouter.V2.Replay;
@@ -46,9 +47,21 @@ namespace SignalRouter.V2.ReferenceAdapter
             {
                 // The finest grain a frame-phased world honestly supports is one
                 // whole frame — effects apply at the frame hooks, never between
-                // pump turns.
+                // pump turns. The idle contract holds: a frame that observed no
+                // remaining work answers false so the driver's grace window can
+                // count down instead of spinning to its step cap.
                 host.PumpHost.DriveFrames(1);
-                return true;
+                return host.PumpHost.LastFrameHadWork;
+            }
+
+            public void AdvanceAdmissionOnly()
+            {
+                // A bare single-turn pump: admission is kernel work — no frame
+                // hooks run, so no effect can start. The monotonic clock does
+                // not move (non-decreasing is the only kernel requirement) and
+                // the logical clock re-presents the host's current reading.
+                host.Runtime.Pump(new PumpBudget(
+                    1, long.MaxValue, host.PumpHost.LogicalNow, FramePhase.Update));
             }
 
             public void Dispose() => host.TearDown();

@@ -29,8 +29,24 @@ public sealed class SealEvaluatorTests
             ReplayArtifactWorld.Profile());
     }
 
+    /// <summary>The manifest's evidence references: the E8 positions in the artifact.</summary>
+    private static ValueArray<EvidenceSequence> E8Sequences(byte[] artifact)
+    {
+        var reading = ArtifactReader.Read(artifact, ReplayArtifactWorld.Limits);
+        var sequences = new System.Collections.Generic.List<EvidenceSequence>();
+        foreach (var cut in reading.Cuts)
+        {
+            if (cut is AssertionEvaluated)
+            {
+                sequences.Add(cut.Sequence);
+            }
+        }
+
+        return ValueArray<EvidenceSequence>.From(sequences);
+    }
+
     private static SealEvaluation Evaluate(
-        byte[] artifact, ValueArray<PredicateContractRef>? required = null)
+        byte[] artifact, ValueArray<EvidenceSequence>? required = null)
     {
         return SealEvaluator.Evaluate(
             artifact,
@@ -38,7 +54,7 @@ public sealed class SealEvaluatorTests
             AllowlistFor(artifact),
             new ComparisonVocabulary(),
             new ReplayTrustOptions(ArtifactProvenance.Trusted),
-            required ?? ValueArray<PredicateContractRef>.Empty);
+            required ?? ValueArray<EvidenceSequence>.Empty);
     }
 
     [Test]
@@ -50,9 +66,8 @@ public sealed class SealEvaluatorTests
         world.EvaluateAssertion(); // count == 5 → Satisfied E8
         world.Close();
 
-        var evaluation = Evaluate(
-            world.Artifact(),
-            ValueArray<PredicateContractRef>.From(new[] { ReplayArtifactWorld.CountIsFive }));
+        var artifact = world.Artifact();
+        var evaluation = Evaluate(artifact, E8Sequences(artifact));
         Assert.That(evaluation.IsSealable, Is.True, evaluation.FailedCondition);
     }
 
@@ -97,13 +112,56 @@ public sealed class SealEvaluatorTests
         world.SubmitAuto("r-pub");
         world.Close(); // no E8 at all
 
+        // The manifest references an evidence position that names no
+        // AssertionEvaluated cut in this artifact.
         var evaluation = Evaluate(
             world.Artifact(),
-            ValueArray<PredicateContractRef>.From(new[] { ReplayArtifactWorld.CountIsFive }));
+            ValueArray<EvidenceSequence>.From(new[] { new EvidenceSequence(9999) }));
         Assert.That(evaluation.IsSealable, Is.False);
         Assert.That(
             evaluation.FailedCondition,
             Is.EqualTo(SealConditions.RequiredAssertionNotSatisfied));
+    }
+
+    [Test]
+    public void ARequiredAssertionThatEvaluatedFalseFailsTheAssertionCondition()
+    {
+        var world = new ReplayArtifactWorld(autoPublishCount: 3);
+        world.Open();
+        world.SubmitAuto("r-pub"); // count becomes 3
+        world.EvaluateAssertion(); // count == 5 → False E8
+        world.Close();
+
+        var artifact = world.Artifact();
+        var evaluation = Evaluate(artifact, E8Sequences(artifact));
+        Assert.That(evaluation.IsSealable, Is.False);
+        Assert.That(
+            evaluation.FailedCondition,
+            Is.EqualTo(SealConditions.RequiredAssertionNotSatisfied),
+            "a required assertion must have evaluated Satisfied (§5.2)");
+    }
+
+    [Test]
+    public void ANonRequiredFalseAssertionDoesNotBlockTheSeal()
+    {
+        // The manifest selects required assertions by evidence reference: a
+        // False evaluation the manifest never named is diagnostic context,
+        // not a seal condition.
+        var world = new ReplayArtifactWorld(autoPublishCount: 5);
+        world.Open();
+        world.SubmitAuto("r-pub"); // count becomes 5
+        world.EvaluateAssertion(); // count == 5 → Satisfied E8
+        world.SubmitAuto("r-pub-2"); // count becomes 10
+        world.EvaluateAssertion(); // count == 5 → False E8, not required
+        world.Close();
+
+        var artifact = world.Artifact();
+        var e8s = E8Sequences(artifact);
+        Assert.That(e8s.Count, Is.EqualTo(2));
+
+        var evaluation = Evaluate(
+            artifact, ValueArray<EvidenceSequence>.From(new[] { e8s[0] }));
+        Assert.That(evaluation.IsSealable, Is.True, evaluation.FailedCondition);
     }
 
     [Test]
@@ -140,7 +198,7 @@ public sealed class SealEvaluatorTests
         var evaluation = SealEvaluator.Evaluate(
             artifact, ReplayArtifactWorld.Limits, drifted, new ComparisonVocabulary(),
             new ReplayTrustOptions(ArtifactProvenance.Trusted),
-            ValueArray<PredicateContractRef>.Empty);
+            ValueArray<EvidenceSequence>.Empty);
         Assert.That(evaluation.FailedCondition, Is.EqualTo(SealConditions.ContractPreflight));
     }
 
@@ -154,7 +212,7 @@ public sealed class SealEvaluatorTests
             world.Artifact(), ReplayArtifactWorld.Limits, AllowlistFor(world.Artifact()),
             new ComparisonVocabulary(),
             new ReplayTrustOptions(ArtifactProvenance.Untrusted),
-            ValueArray<PredicateContractRef>.Empty);
+            ValueArray<EvidenceSequence>.Empty);
         Assert.That(evaluation.FailedCondition, Is.EqualTo(SealConditions.ArtifactRefused));
     }
 

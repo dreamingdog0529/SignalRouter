@@ -9,6 +9,7 @@ interface SignalRouter.V2.Replay.IReplayEnvironment
   implements System.IDisposable
   property Runtime : SignalRouter.V2.Kernel.KernelRuntime { public get; }
   public method Advance() : System.Boolean
+  public method AdvanceAdmissionOnly() : System.Void
 
 interface SignalRouter.V2.Replay.IReplayEnvironmentFactory
   public method Create(SignalRouter.V2.Contracts.RecordingOpened opened, SignalRouter.V2.Kernel.IEvidenceCoordinator evidence) : SignalRouter.V2.Replay.IReplayEnvironment
@@ -128,4 +129,4 @@ sealed class SignalRouter.V2.Replay.SealEvaluation
   property IsSealable : System.Boolean { public get; }
 
 static class SignalRouter.V2.Replay.SealEvaluator
-  public static method Evaluate(System.Byte[] artifact, SignalRouter.V2.Codec.Recording.ArtifactReadLimits limits, SignalRouter.V2.Replay.ReplayAllowlist allowlist, SignalRouter.V2.Comparison.ComparisonVocabulary vocabulary, SignalRouter.V2.Replay.ReplayTrustOptions trust, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> requiredAssertions) : SignalRouter.V2.Replay.SealEvaluation
+  public static method Evaluate(System.Byte[] artifact, SignalRouter.V2.Codec.Recording.ArtifactReadLimits limits, SignalRouter.V2.Replay.ReplayAllowlist allowlist, SignalRouter.V2.Comparison.ComparisonVocabulary vocabulary, SignalRouter.V2.Replay.ReplayTrustOptions trust, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.EvidenceSequence> requiredAssertions) : SignalRouter.V2.Replay.SealEvaluation

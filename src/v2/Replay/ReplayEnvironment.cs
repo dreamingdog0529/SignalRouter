@@ -26,6 +26,16 @@ namespace SignalRouter.V2.Replay
         /// completions before declaring a stall).
         /// </summary>
         bool Advance();
+
+        /// <summary>
+        /// Advances admission-lane work ONLY — one bare pump turn with no
+        /// engine frame hooks, so queued submissions admit while no effect can
+        /// start. Every world supports this: admission is kernel work, not
+        /// frame work. The driver uses it to hold the pre-effect boundary — the
+        /// synthetic pre-cancel choreography (guarantees.md §5.7) and the
+        /// admission wait when recorded cuts sit between E2 and the effect.
+        /// </summary>
+        void AdvanceAdmissionOnly();
     }
 
     /// <summary>

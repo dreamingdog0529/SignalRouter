@@ -211,12 +211,10 @@ namespace SignalRouter.V2.Replay
                 if (entry.Kind == ReplayEntryKind.PreCancelled)
                 {
                     // The synthetic pre-cancelled token (guarantees.md §5.7):
-                    // one minimal step admits, then the cancel lands while the
-                    // interaction still waits. A frame-grained environment
-                    // cannot honor this timing — its whole-frame step runs the
-                    // effect, and the terminal comparison reports the honest
-                    // divergence.
-                    environment.Advance();
+                    // an admission-only step admits deterministically — no
+                    // frame runs, no effect can start — then the cancel lands
+                    // while the interaction still waits.
+                    environment.AdvanceAdmissionOnly();
                     runtime.Control.RequestCancel(admission.RequestId);
                 }
 
@@ -238,7 +236,11 @@ namespace SignalRouter.V2.Replay
                     return null;
                 }
 
-                PumpUntil(() =>
+                // Admission-only stepping: recorded cuts can sit between this
+                // E2 and the entry's effect (an assertion evaluated while the
+                // effect was pending); a coarse step here would run the effect
+                // before the driver compares those positions.
+                PumpUntilAdmitted(() =>
                     probe.Answered ||
                     (capture.TryGet(admission.RequestId, out var captured) &&
                         captured.Admission != null));
@@ -660,6 +662,29 @@ namespace SignalRouter.V2.Replay
 
             private bool HasTerminal(RequestId request) =>
                 capture.TryGet(MapId(request), out var captured) && captured.Terminal != null;
+
+            private void PumpUntilAdmitted(Func<bool> condition)
+            {
+                // Admission is synchronous kernel work: a bounded number of
+                // bare turns either admits or the stream was structurally
+                // beyond what admission can answer.
+                const int MaxAdmissionSteps = 256;
+                for (var step = 0; step < MaxAdmissionSteps; step++)
+                {
+                    if (condition())
+                    {
+                        return;
+                    }
+
+                    environment.AdvanceAdmissionOnly();
+                }
+
+                if (!condition())
+                {
+                    throw new InvalidOperationException(
+                        "The twin stalled: the admission never completed.");
+                }
+            }
 
             private void PumpUntil(Func<bool> condition)
             {

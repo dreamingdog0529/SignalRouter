@@ -348,7 +348,7 @@ namespace SignalRouter.V2.Tck
                 "a clean recording must plan no strict-replay stop");
 
             // Replay into the adapter's twin; the live world must stay untouched.
-            var traceBefore = TraceKinds(harness).Count;
+            var traceBefore = TraceKinds(harness);
             var report = new ReplayDriver(
                 new Codec.CanonicalState.CanonicalStateCodec(), new ComparisonVocabulary())
                 .Execute(
@@ -357,7 +357,17 @@ namespace SignalRouter.V2.Tck
             Require(report.Outcome.Equals(ReplayComparisonOutcome.Equal),
                 "the twin must replay the recording all-Equal (recording-replay.md §6); " +
                 "answered " + report.Outcome + " detail=" + report.DetailCode);
-            Require(TraceKinds(harness).Count == traceBefore,
+
+            // Content and order, not a count: a same-length substitution is
+            // still shared state.
+            var traceAfter = TraceKinds(harness);
+            var untouched = traceAfter.Count == traceBefore.Count;
+            for (var index = 0; untouched && index < traceAfter.Count; index++)
+            {
+                untouched = string.Equals(traceAfter[index], traceBefore[index], StringComparison.Ordinal);
+            }
+
+            Require(untouched,
                 "replay isolation: the twin shares no state with the live runtime — " +
                 "the live trace must not move (recording-replay.md §6)");
         }
@@ -377,19 +387,63 @@ namespace SignalRouter.V2.Tck
             Require(opened != null, "the closed recording must carry its E1");
 
             // Two independent environments: the fixture contract reproduces the
-            // recorded base exactly, creation after creation (verification.md §5.3).
-            for (var round = 0; round < 2; round++)
+            // recorded base exactly, creation after creation (verification.md
+            // §5.3). The base is the world the adapter's declared fixture
+            // produces — this check pins the fixture's determinism against the
+            // recorded E1, not the factory's ability to reproduce an arbitrary
+            // mutated state (a recording taken over a diverged base simply
+            // fails its base comparison at replay). The first twin is genuinely
+            // dirtied before disposal, so a factory that hands back a live
+            // world instead of resetting cannot pass the second round.
+            using (var first = harness.ReplayEnvironments.Create(
+                opened!, NoOpEvidenceCoordinator.Instance))
             {
-                using var environment = harness.ReplayEnvironments.Create(
-                    opened!, NoOpEvidenceCoordinator.Instance);
-                Require(environment.Runtime.RecordObservation.TryMaterializeView(
-                        harness.RecordingProfile.RecordView, harness.RecordingProfile.Scope,
-                        null, out var baseView, out _),
-                    "the twin's record view must materialize");
-                Require(baseView!.Snapshot.ContentId.Equals(opened!.BaseSnapshot),
-                    "the fixture must reproduce the recorded base ContentId, reset after " +
-                    "reset (verification.md §5.3); round " + round);
+                RequireRecordedBase(harness, first, opened!, "the first twin");
+                DirtyTwin(harness, first, opened!);
             }
+
+            using (var second = harness.ReplayEnvironments.Create(
+                opened!, NoOpEvidenceCoordinator.Instance))
+            {
+                RequireRecordedBase(
+                    harness, second, opened!, "a fresh twin created after a dirtied one");
+            }
+        }
+
+        private static void RequireRecordedBase(
+            ITckHarness harness, IReplayEnvironment environment, RecordingOpened opened,
+            string whichTwin)
+        {
+            Require(environment.Runtime.RecordObservation.TryMaterializeView(
+                    harness.RecordingProfile.RecordView, harness.RecordingProfile.Scope,
+                    null, out var baseView, out _),
+                "the twin's record view must materialize");
+            Require(baseView!.Snapshot.ContentId.Equals(opened.BaseSnapshot),
+                "the fixture must reproduce the recorded base ContentId, reset after " +
+                "reset (verification.md §5.3); " + whichTwin);
+        }
+
+        private static void DirtyTwin(
+            ITckHarness harness, IReplayEnvironment environment, RecordingOpened opened)
+        {
+            SubmitTo(environment.Runtime, harness, harness.MutatingCapability, "tck-fixture-dirty");
+            for (var i = 0; i < DeclaredMaxFrames(harness, harness.MutatingCapability) + 2; i++)
+            {
+                environment.Advance();
+            }
+
+            Require(environment.Runtime.Queries
+                    .Query(new RequestId("tck-fixture-dirty"), harness.AgentPrincipal)
+                    .Equals(QueryAnswer.Terminal(InteractionOutcome.Succeeded)),
+                "the mutating capability must complete inside the twin");
+            Require(environment.Runtime.RecordObservation.TryMaterializeView(
+                    harness.RecordingProfile.RecordView, harness.RecordingProfile.Scope,
+                    null, out var dirtied, out _),
+                "the dirtied twin's record view must materialize");
+            Require(!dirtied!.Snapshot.ContentId.Equals(opened.BaseSnapshot),
+                "the mutating capability must move the twin off the recorded base — " +
+                "otherwise reset cannot be distinguished from reuse; the recording " +
+                "profile's view must cover the declared mutating capability's effect");
         }
 
         private static OperationId OpenRecording(ITckHarness harness, TckOptions options)
@@ -536,8 +590,15 @@ namespace SignalRouter.V2.Tck
         private static CollectingSubmissionObserver Submit(
             ITckHarness harness, CapabilityContractRef capability, string requestId)
         {
+            return SubmitTo(harness.Runtime, harness, capability, requestId);
+        }
+
+        private static CollectingSubmissionObserver SubmitTo(
+            KernelRuntime runtime, ITckHarness harness, CapabilityContractRef capability,
+            string requestId)
+        {
             var observer = new CollectingSubmissionObserver();
-            harness.Runtime.Ingress.Submit(new IntentSubmission(
+            runtime.Ingress.Submit(new IntentSubmission(
                 new RequestId(requestId),
                 capability,
                 TargetReference.ForKey(harness.VisibleTargetKey),

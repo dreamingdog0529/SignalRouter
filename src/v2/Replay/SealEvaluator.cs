@@ -24,19 +24,29 @@ namespace SignalRouter.V2.Replay
             new SealEvaluation(ContractGrammar.ValidateCode(condition, nameof(condition)));
     }
 
-    /// <summary>The verification.md §5.2 condition codes a failed seal reports.</summary>
+    /// <summary>
+    /// The verification.md §5.2 condition codes a failed seal reports — one per
+    /// condition, first failing condition in §5.2 order. Trust-of-origin and
+    /// resource-budget refusals sit outside the five conditions (the artifact
+    /// never became evaluable input) and report <see cref="ArtifactRefused"/>.
+    /// </summary>
     public static class SealConditions
     {
-        /// <summary>Condition 1: the artifact is not Completed with reader-verified closure.</summary>
+        /// <summary>
+        /// Conditions 1–2: not Completed with reader-verified closure — the
+        /// classification, an integrity/closure failure, or a missing artifact.
+        /// v2.0 artifacts are self-contained by construction, so condition 2
+        /// reduces to the reader's blob-closure verification folded in here.
+        /// </summary>
         public const string NotCompleted = "NotCompleted";
 
-        /// <summary>Conditions 1–2: the trust boundary refused the artifact outright.</summary>
+        /// <summary>Outside the five conditions: provenance or resource budget refused the input.</summary>
         public const string ArtifactRefused = "ArtifactRefused";
 
         /// <summary>Condition 3: strict replay would stop at or answer Incomparable for some cut.</summary>
         public const string StrictIneligible = "StrictIneligible";
 
-        /// <summary>Condition 4: a required assertion is missing or did not evaluate Satisfied.</summary>
+        /// <summary>Condition 4: a required assertion is missing, or any of its evaluations was not Satisfied.</summary>
         public const string RequiredAssertionNotSatisfied = "RequiredAssertionNotSatisfied";
 
         /// <summary>Condition 5: a contract pinned in E1 is unavailable at a compatible version.</summary>
@@ -60,7 +70,7 @@ namespace SignalRouter.V2.Replay
             ReplayAllowlist allowlist,
             ComparisonVocabulary vocabulary,
             ReplayTrustOptions trust,
-            ValueArray<PredicateContractRef> requiredAssertions)
+            ValueArray<EvidenceSequence> requiredAssertions)
         {
             if (artifact == null)
             {
@@ -75,13 +85,21 @@ namespace SignalRouter.V2.Replay
                 artifact, limits, allowlist, vocabulary, SecretsResolveLater.Instance, trust);
             if (scan.Refusal != null)
             {
-                // Condition 5 has its own name; every other refusal is the
-                // trust boundary rejecting the artifact as input.
-                return SealEvaluation.Failed(
-                    scan.Refusal.Code == ReplayRefusalCodes.ContractAllowlist ||
-                    scan.Refusal.Code == ReplayRefusalCodes.PredicateDigestMismatch
-                        ? SealConditions.ContractPreflight
-                        : SealConditions.ArtifactRefused);
+                // Map each refusal onto its §5.2 condition: integrity/closure
+                // failures and a missing artifact are conditions 1–2; contract
+                // failures are condition 5; only trust-of-origin and resource
+                // budgets fall outside the five.
+                switch (scan.Refusal.Code)
+                {
+                    case ReplayRefusalCodes.ContractAllowlist:
+                    case ReplayRefusalCodes.PredicateDigestMismatch:
+                        return SealEvaluation.Failed(SealConditions.ContractPreflight);
+                    case ReplayRefusalCodes.ArtifactIntegrity:
+                    case ReplayRefusalCodes.OpenFailed:
+                        return SealEvaluation.Failed(SealConditions.NotCompleted);
+                    default:
+                        return SealEvaluation.Failed(SealConditions.ArtifactRefused);
+                }
             }
 
             if (scan.Incomparability != null)
@@ -104,9 +122,12 @@ namespace SignalRouter.V2.Replay
                 return SealEvaluation.Failed(SealConditions.StrictIneligible);
             }
 
+            // The manifest names its required assertions by evidence reference
+            // (verification.md §5.1): only the selected E8 cuts are judged —
+            // a non-required assertion may legitimately have answered False.
             for (var index = 0; index < requiredAssertions.Count; index++)
             {
-                if (!HasSatisfiedAssertion(plan, requiredAssertions[index]))
+                if (!IsSatisfiedAssertionAt(plan, requiredAssertions[index]))
                 {
                     return SealEvaluation.Failed(SealConditions.RequiredAssertionNotSatisfied);
                 }
@@ -135,15 +156,14 @@ namespace SignalRouter.V2.Replay
             }
         }
 
-        private static bool HasSatisfiedAssertion(ReplayPlan plan, PredicateContractRef required)
+        private static bool IsSatisfiedAssertionAt(ReplayPlan plan, EvidenceSequence required)
         {
             for (var index = 0; index < plan.Reading.Cuts.Count; index++)
             {
-                if (plan.Reading.Cuts[index] is AssertionEvaluated assertion &&
-                    assertion.Predicate.Equals(required) &&
-                    assertion.Outcome.Kind == PredicateEvaluationKind.Satisfied)
+                if (plan.Reading.Cuts[index].Sequence.Equals(required))
                 {
-                    return true;
+                    return plan.Reading.Cuts[index] is AssertionEvaluated assertion &&
+                        assertion.Outcome.Kind == PredicateEvaluationKind.Satisfied;
                 }
             }
 

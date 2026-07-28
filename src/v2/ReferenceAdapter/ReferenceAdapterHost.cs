@@ -48,9 +48,11 @@ namespace SignalRouter.V2.ReferenceAdapter
         /// Builds and starts a fresh world. <paramref name="decorateExecutor"/>
         /// exists for TCK self-verification only: bad harnesses wrap the conformant
         /// executor to prove each check can fail. Production hosts pass null.
-        /// The world is recording-capable by default (a durable coordinator over
-        /// an in-memory sink); a replay twin injects the driver's capture
-        /// coordinator through <paramref name="evidence"/> instead.
+        /// The world is recording-capable by default — a durable coordinator over
+        /// an IN-MEMORY sink (the TCK proves recording capability, not durable
+        /// storage), at the standing cost of the admission-evidence projection
+        /// even while nothing records; a replay twin injects the driver's
+        /// capture coordinator through <paramref name="evidence"/> instead.
         /// </summary>
         public static ReferenceAdapterHost Create(
             Func<IEffectExecutor, IEffectExecutor>? decorateExecutor = null,

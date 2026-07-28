@@ -36,6 +36,12 @@ public sealed class ReplayDriverTests
                 1, long.MaxValue, new LogicalTime(logicalNow++), FramePhase.Update)).WorkRemaining;
         }
 
+        public void AdvanceAdmissionOnly()
+        {
+            // For a pump-grained world the admission step IS one turn.
+            Advance();
+        }
+
         public void Dispose()
         {
         }
