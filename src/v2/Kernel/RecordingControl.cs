@@ -132,10 +132,13 @@ namespace SignalRouter.V2.Kernel
         void NotifyTeardown();
 
         /// <summary>
-        /// Polled once per pump. Non-null asks the kernel to drive the ordinary
-        /// close fence with this reason (SizeLimit, SinkFault, ExternalMutation
-        /// under the terminate policy). The kernel owns the fence; the
-        /// coordinator never writes E7 on its own initiative.
+        /// Polled at turn granularity while Active (and while ClosingDraining,
+        /// where it downgrades an orderly close's reason to Incomplete, once).
+        /// Non-null asks the kernel to drive the ordinary close fence with this
+        /// reason (SizeLimit, SinkFault, ExternalMutation under the terminate
+        /// policy). The kernel owns the fence; the coordinator never writes E7
+        /// on its own initiative, and it clears the request when its recording
+        /// ends — a standing value would close the next recording.
         /// </summary>
         IncompleteReason? CloseRequested { get; }
 

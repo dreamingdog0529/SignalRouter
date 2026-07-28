@@ -236,18 +236,6 @@ namespace SignalRouter.V2.Kernel
                     }
 
                     ResolveTimedOutWaits();
-
-                    // The coordinator's only degradation channel: a requested
-                    // close (SizeLimit, SinkFault, terminate-policy E5) drives
-                    // the ordinary close fence (ADR 0015).
-                    if (recordingPhase == RecordingPhase.Active)
-                    {
-                        var requested = recordingCoordinator!.CloseRequested;
-                        if (requested.HasValue)
-                        {
-                            BeginRecordingClose(RecordingCloseReason.Incomplete(requested.Value));
-                        }
-                    }
                 }
 
                 var turns = 0;
@@ -325,10 +313,18 @@ namespace SignalRouter.V2.Kernel
                 return false;
             }
 
-            if (mailbox.TryDequeuePublication(out var publication))
+            // Source publications are mutations too: they stay frozen through the
+            // fences — most critically through the Committing phases, where a
+            // revision advance after the base/final snapshot was fixed but before
+            // E1/E7 became durable would invalidate the linearization cut.
+            if (recordingPhase == RecordingPhase.NotRecording ||
+                recordingPhase == RecordingPhase.Active)
             {
-                AdoptPublication(publication);
-                return true;
+                if (mailbox.TryDequeuePublication(out var publication))
+                {
+                    AdoptPublication(publication);
+                    return true;
+                }
             }
 
             if (stalledAdmissions.Count > 0)
@@ -417,6 +413,8 @@ namespace SignalRouter.V2.Kernel
                     deferredSnapshots.Count > 0 ||
                     (recordingPhase != RecordingPhase.NotRecording &&
                         recordingPhase != RecordingPhase.Active) ||
+                    (recordingPhase == RecordingPhase.Active &&
+                        recordingCoordinator!.CloseRequested.HasValue) ||
                     (!awaitingCompletion && (admitted.Count > 0 || active != null))));
             return new PumpReport(
                 turns,
@@ -472,10 +470,13 @@ namespace SignalRouter.V2.Kernel
             // recording requires AuthorKey-resolvable targets, refused before E2
             // — the coordinator cannot mint this rejection through the evidence
             // answer.
-            if (recordingPhase == RecordingPhase.Active &&
+            if ((recordingPhase == RecordingPhase.Active ||
+                    recordingPhase == RecordingPhase.ClosingDraining) &&
                 recordingCoordinator!.AdmissionPolicy == RecordingAdmissionPolicy.RefuseUnkeyedTargets &&
                 record.Registration.AuthorKey == null)
             {
+                // ClosingDraining included: a fence member's continuation admits
+                // during the close and is an artifact member too.
                 Reject(submission, new RejectionReason("UnkeyedTarget"));
                 return true;
             }
@@ -1454,6 +1455,12 @@ namespace SignalRouter.V2.Kernel
                 case ArmWaitMessage arm:
                     arm.Observer.OnResolved(arm.Operation, PredicateResolution.Faulted);
                     break;
+                case OpenRecordingMessage openRecording:
+                    openRecording.Observer.OnOpenRefused(openRecording.Operation, "TornDown");
+                    break;
+                case CloseRecordingMessage closeRecording:
+                    closeRecording.Observer.OnFailed(closeRecording.Operation, "TornDown");
+                    break;
                 case AssertionMessage assertion:
                 {
                     var results = new List<PredicateEvaluationResult>();
@@ -1897,6 +1904,21 @@ namespace SignalRouter.V2.Kernel
         {
             switch (recordingPhase)
             {
+                case RecordingPhase.Active:
+                {
+                    // The coordinator's only degradation channel (ADR 0015):
+                    // polled at turn granularity so a request raised inside an
+                    // evidence callback (an E4 sink fault) is seen this pump.
+                    var requested = recordingCoordinator!.CloseRequested;
+                    if (requested.HasValue)
+                    {
+                        BeginRecordingClose(RecordingCloseReason.Incomplete(requested.Value));
+                        return true;
+                    }
+
+                    return false;
+                }
+
                 case RecordingPhase.OpeningDraining:
                     if (!RecordingFenceQuiescent())
                     {
@@ -1915,6 +1937,16 @@ namespace SignalRouter.V2.Kernel
                     return TryCommitOpenEvidence();
 
                 case RecordingPhase.ClosingDraining:
+                {
+                    // A degradation raised by a member draining under an orderly
+                    // close makes the close honest: the reason downgrades from
+                    // Completed once, never back.
+                    var degraded = recordingCoordinator!.CloseRequested;
+                    if (degraded.HasValue && pendingCloseReason.IsCompleted)
+                    {
+                        pendingCloseReason = RecordingCloseReason.Incomplete(degraded.Value);
+                    }
+
                     if (!RecordingFenceQuiescent())
                     {
                         return false;
@@ -1938,6 +1970,7 @@ namespace SignalRouter.V2.Kernel
 
                     recordingPhase = RecordingPhase.ClosingCommitting;
                     return TryCommitCloseEvidence() || true;
+                }
 
                 case RecordingPhase.ClosingCommitting:
                     return TryCommitCloseEvidence();
@@ -3019,7 +3052,20 @@ namespace SignalRouter.V2.Kernel
                 }
 
                 Array.Sort(completions, static (left, right) =>
-                    string.CompareOrdinal(left.Capability.Id.Value, right.Capability.Id.Value));
+                {
+                    var byId = string.CompareOrdinal(
+                        left.Capability.Id.Value, right.Capability.Id.Value);
+                    if (byId != 0)
+                    {
+                        return byId;
+                    }
+
+                    var byMajor = left.Capability.Version.Major.CompareTo(
+                        right.Capability.Version.Major);
+                    return byMajor != 0
+                        ? byMajor
+                        : left.Capability.Version.Minor.CompareTo(right.Capability.Version.Minor);
+                });
 
                 var predicates = new PredicateContractRef[runtime.predicateContracts.Count];
                 index = 0;
@@ -3029,7 +3075,18 @@ namespace SignalRouter.V2.Kernel
                 }
 
                 Array.Sort(predicates, static (left, right) =>
-                    string.CompareOrdinal(left.Id.Value, right.Id.Value));
+                {
+                    var byId = string.CompareOrdinal(left.Id.Value, right.Id.Value);
+                    if (byId != 0)
+                    {
+                        return byId;
+                    }
+
+                    var byMajor = left.Version.Major.CompareTo(right.Version.Major);
+                    return byMajor != 0
+                        ? byMajor
+                        : left.Version.Minor.CompareTo(right.Version.Minor);
+                });
 
                 return new RecordingCatalog(
                     ValueArray<CompletionBinding>.From(completions),
