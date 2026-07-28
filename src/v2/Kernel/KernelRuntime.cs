@@ -1325,6 +1325,32 @@ namespace SignalRouter.V2.Kernel
             options.MaxObservationFieldBytes,
             includeKeylessNodes: false);
 
+        /// <summary>
+        /// The view an after-basis materializes under: while a recording is
+        /// active, the recording's registered record view — the artifact has one
+        /// comparison surface, and an E4 after view in a different contract
+        /// could never compare under the pinned profile (recording-replay.md
+        /// §5.2). Outside a recording the kernel-raw record view serves the
+        /// afterRequestId assertion basis.
+        /// </summary>
+        private ViewContractDescriptor AfterBasisDescriptor()
+        {
+            if (recordingPhase != RecordingPhase.Active &&
+                recordingPhase != RecordingPhase.ClosingDraining)
+            {
+                return KernelRecordDescriptor();
+            }
+
+            // Registered and Record-family by the open validation; narrow to the
+            // recording's scope exactly as the observation facade does.
+            var registered = viewContracts[recordingRequest!.RecordView];
+            return string.Equals(recordingRequest.Scope, registered.Scope, StringComparison.Ordinal)
+                ? registered
+                : new ViewContractDescriptor(
+                    registered.Contract, registered.Family, recordingRequest.Scope,
+                    registered.MaxNodes, registered.MaxFieldBytes, registered.IncludeKeylessNodes);
+        }
+
         private void CaptureAfterBasis(Interaction interaction)
         {
             if (options.CanonicalStateCodec == null || afterBases.ContainsKey(interaction.Request))
@@ -1336,7 +1362,7 @@ namespace SignalRouter.V2.Kernel
             try
             {
                 materialization = MaterializeRecord(
-                    KernelRecordDescriptor(), MaterializationCeiling(), out _);
+                    AfterBasisDescriptor(), MaterializationCeiling(), out _);
             }
             catch (Exception)
             {

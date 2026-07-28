@@ -19,7 +19,8 @@ public sealed class ReplayPreScanTests
     {
         public bool CanResolve(SecretReference reference) => true;
 
-        public bool TryResolve(SecretReference reference, out FieldValue value)
+        public bool TryResolve(
+            SecretReference reference, ArgumentDigest expectedDigest, out FieldValue value)
         {
             value = FieldValue.Of("resolved");
             return true;

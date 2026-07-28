@@ -850,6 +850,7 @@ static class SignalRouter.V2.Contracts.InvocationCanonicalizer
   public static method Canonicalize(SignalRouter.V2.Contracts.CapabilityContractRef contract, SignalRouter.V2.Contracts.ResolvedTarget target, SignalRouter.V2.Contracts.InvocationPayload payload, SignalRouter.V2.Contracts.ArgumentSchema schema, System.Byte[] redactionKey) : SignalRouter.V2.Contracts.CanonicalInvocation
   public static method DigestOf(SignalRouter.V2.Contracts.RecordedArguments recorded) : SignalRouter.V2.Contracts.ArgumentDigest
   public static method Project(SignalRouter.V2.Contracts.CapabilityContractRef contract, SignalRouter.V2.Contracts.InvocationPayload payload, SignalRouter.V2.Contracts.ArgumentSchema schema, System.Byte[] redactionKey) : SignalRouter.V2.Contracts.RecordedArguments
+  public static method SensitiveValueDigest(System.Byte[] redactionKey, SignalRouter.V2.Contracts.FieldValue value) : SignalRouter.V2.Contracts.ArgumentDigest
 
 sealed class SignalRouter.V2.Contracts.InvocationPayload
   property Fields : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.NamedField> { public get; }
