@@ -21,6 +21,7 @@ public sealed class ApiSurfaceSnapshotTests
         "SignalRouter.V2.AdapterSdk",
         "SignalRouter.V2.Codec.CanonicalState",
         "SignalRouter.V2.Codec.Recording",
+        "SignalRouter.V2.Recording",
         "SignalRouter.V2.Contracts",
         "SignalRouter.V2.Kernel",
         "SignalRouter.V2.ReferenceAdapter",
