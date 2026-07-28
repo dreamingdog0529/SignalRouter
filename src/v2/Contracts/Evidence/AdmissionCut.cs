@@ -17,6 +17,7 @@ namespace SignalRouter.V2.Contracts
             LogicalOrder logicalOrder,
             SemanticFingerprint fingerprint,
             CapabilityInvocation invocation,
+            RecordedArguments arguments,
             ResolvedTarget resolvedTarget,
             IdentityEnvelope envelope)
             : base(sequence)
@@ -40,6 +41,7 @@ namespace SignalRouter.V2.Contracts
             LogicalOrder = logicalOrder;
             Fingerprint = fingerprint;
             Invocation = invocation ?? throw new ArgumentNullException(nameof(invocation));
+            Arguments = arguments ?? throw new ArgumentNullException(nameof(arguments));
             ResolvedTarget = resolvedTarget;
             Envelope = envelope ?? throw new ArgumentNullException(nameof(envelope));
         }
@@ -53,6 +55,13 @@ namespace SignalRouter.V2.Contracts
         public SemanticFingerprint Fingerprint { get; }
 
         public CapabilityInvocation Invocation { get; }
+
+        /// <summary>
+        /// The portable replay input: the admitted arguments in recorded form
+        /// (typed values; sensitive values as secret references). Re-digesting
+        /// this form yields <see cref="CapabilityInvocation.Arguments"/> (ADR 0015).
+        /// </summary>
+        public RecordedArguments Arguments { get; }
 
         public ResolvedTarget ResolvedTarget { get; }
 

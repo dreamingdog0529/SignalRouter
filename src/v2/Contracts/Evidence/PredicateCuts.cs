@@ -16,10 +16,12 @@ namespace SignalRouter.V2.Contracts
             ArgumentDigest operands,
             SemanticFingerprint fingerprint,
             ViewContractRef scope,
+            string observationScope,
             Causality causality,
             ViewSequence armedSequence)
             : base(sequence)
         {
+            ContractGrammar.ValidateIdentifier(observationScope, nameof(observationScope));
             if (operationId.IsDefault)
             {
                 throw new ArgumentException("E6 requires a non-default OperationId.", nameof(operationId));
@@ -50,6 +52,7 @@ namespace SignalRouter.V2.Contracts
             Operands = operands;
             Fingerprint = fingerprint;
             Scope = scope;
+            ObservationScope = observationScope;
             Causality = causality ?? throw new ArgumentNullException(nameof(causality));
             ArmedSequence = armedSequence;
         }
@@ -65,6 +68,13 @@ namespace SignalRouter.V2.Contracts
         public SemanticFingerprint Fingerprint { get; }
 
         public ViewContractRef Scope { get; }
+
+        /// <summary>
+        /// The observation scope the wait evaluates over — with <see cref="Scope"/>
+        /// this identifies the materialization replay re-evaluates against
+        /// (guarantees.md §5.6; E8 already carries its scope).
+        /// </summary>
+        public string ObservationScope { get; }
 
         public Causality Causality { get; }
 

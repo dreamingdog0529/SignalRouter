@@ -48,6 +48,12 @@ internal static class TestData
     internal static CapabilityInvocation Invocation(string seed) =>
         new(Capability, TargetReference.ForKey(new AuthorKey($"target-{seed}")), Arguments(seed));
 
+    internal static RecordedArguments Recorded(string seed) =>
+        new(ValueArray<RecordedArgument>.From(new[]
+        {
+            RecordedArgument.OfValue("label", FieldValue.Of(seed)),
+        }));
+
     internal static CompletionEvidence Completion() =>
         new(CompletionProfile, CompletionEvidenceKind.Applied, default);
 

@@ -51,6 +51,7 @@ internal sealed class EvidenceFixture
             logicalOrder,
             TestData.Fingerprint(request),
             TestData.Invocation(request),
+            TestData.Recorded(request),
             TestData.KeyedTarget($"key-{request}"),
             TestData.Envelope(causality)));
         return this;
@@ -120,6 +121,7 @@ internal sealed class EvidenceFixture
             TestData.Arguments(operation),
             TestData.Fingerprint(operation),
             TestData.RecordView,
+            "root",
             Causality.Root(),
             new ViewSequence(1)));
         return this;
