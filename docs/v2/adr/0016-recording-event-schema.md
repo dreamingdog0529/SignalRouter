@@ -36,8 +36,18 @@ transcoding layer.
 
   `crc32c` covers `kind ‖ payloadLength ‖ payload` (CRC32C in software —
   netstandard2.1 has no BCL CRC and the codec leaf takes no packages; the
-  marker's job is torn-write detection, not tamper resistance, which belongs
-  to `ContentId` verification and reader-recomputed closure).
+  marker's job is torn-write detection only).
+
+- **The format is tamper-evident, not authenticated — stated plainly.**
+  Checksums, `ContentId` verification, and recomputed closure catch
+  corruption and internal inconsistency; they do not stop an author who
+  rewrites a cut payload and recomputes every check, because nothing is
+  keyed. That is exactly why the replay trust boundary's provenance policy
+  defaults to artifacts produced by the local installation and makes every
+  override an explicit, logged operator decision
+  ([recording-replay.md](../spec/recording-replay.md) §7). Keyed
+  authentication (a signature record over the stream) is future work and is
+  additive — a reserved record kind, a schema minor.
 
 - **Commit rule.** A record exists iff it is fully framed and
   checksum-valid and carries the commit byte. The first torn or invalid
@@ -53,16 +63,19 @@ transcoding layer.
   becomes byte order. The writer deduplicates by written `ContentId` (blob
   reuse writes no second copy). Blob payloads are the canonical bytes of
   [adr 0012](0012-canonical-state-representation-and-digest-policy.md),
-  embedded verbatim; artifacts are self-contained in v2.0 (the
-  external-`StateStore` dependency close is representable in the header but
-  unsupported).
+  embedded verbatim. Artifacts are **self-contained only** in this schema:
+  the external-`StateStore` dependency close has no representation, and
+  supporting it is a schema revision, not a latent header bit. The profile
+  record and the base-snapshot blob both precede E1; their mutual order is
+  unconstrained.
 
 - **The comparison profile is a record, not a cut.** Record kind 0x04 embeds
   the declarative `ReplayComparisonProfile` document and its digest once,
-  before E1; E1 continues to pin only the `ReplayComparisonProfileRef`. A
-  reader judges the artifact against the embedded document (registry drift
-  cannot reinterpret an old artifact) and cross-checks the target runtime's
-  catalog at pre-scan.
+  before E1; E1 continues to pin only the `ReplayComparisonProfileRef`, and
+  the reader verifies that the E1 ref and the embedded document's identity
+  and digest agree. A reader judges the artifact against the embedded
+  document (registry drift cannot reinterpret an old artifact) and
+  cross-checks the target runtime's catalog at pre-scan.
 
 - **Secret references.** Sensitive values appear in cut payloads only as
   `SecretReference` (identifier + digest) per
@@ -90,15 +103,29 @@ transcoding layer.
   both and verifies every referenced blob by digest before trusting the
   artifact ([guarantees.md](../spec/guarantees.md) §5.9): writer
   self-declaration is evidence about the writer, never the verdict. The
-  reader's output is `ArtifactFacts`; classification stays in
-  `EvidenceSemantics`.
+  event count counts **evidence-cut records (kind 0x01) only**, E1 and E7
+  included — blob, profile, and timeline records never count. The reader
+  also verifies `EvidenceSequence` contiguity over the cut stream (strictly
+  monotonic from zero; a gap is a structural violation). The reader's output
+  is `ArtifactFacts`; classification stays in `EvidenceSemantics`. A torn
+  tail is reported as truncation — the facts simply end early and
+  classification answers per [guarantees.md](../spec/guarantees.md) §6.3
+  (typically `Interrupted`); the external-integrity flag is reserved for
+  digest and closure verification failures, never mere truncation.
 
 - **Versioning.** An unsupported major is rejected, never guessed at. Minor
   revisions are additive (new record kinds from the reserved space, new
   reserved code strings — readers present unknown codes verbatim). Any change
   that alters an outcome taxonomy, a cut's durability rule, a terminal shape,
   or the failure matrix is a schema **major** plus an ADR
-  ([guarantees.md](../spec/guarantees.md) §10).
+  ([guarantees.md](../spec/guarantees.md) §10). Writers emit no timeline
+  (0x03) records until the delta/timeline PR lands; a 1.0 reader accepts the
+  reserved kind and excludes it from closure.
+- **Durability is defined at the store seam.** `IArtifactStore` append
+  answers `Committed` only after an operating-system-level flush of the
+  written record; the test memory backend is `IsDurable = false` and is
+  refused by the coordinator outside explicit test opt-in
+  ([adr 0015](0015-recording-replay-module-topology-and-evidence-seam.md)).
 
 - **Golden-vector discipline.** The codec PR commits hand-derived byte
   vectors with a byte-offset worksheet (the ADR 0012 method), a torn-write

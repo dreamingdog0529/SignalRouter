@@ -34,7 +34,8 @@ boundaries must answer, each verified against the code:
    ([guarantees.md](../spec/guarantees.md) §5.2,
    [recording-replay.md](../spec/recording-replay.md) §7). `PredicateArmed`
    and `AssertionEvaluated` have the same gap for predicate operands, and the
-   E6 cuts do not carry the scope string their re-evaluation needs. A portable
+   E6 cuts carry the view contract but not the observation scope string their
+   re-evaluation needs (E8 already carries it). A portable
    replay-input contract must therefore land **before** any evidence is
    written durably, or the first artifacts would be structurally unreplayable.
 2. **The coordinator needs kernel services the constructor cannot provide.**
@@ -58,7 +59,7 @@ Four new assemblies, each following the established `src/v2/<Module>` →
 | Module | References | Owns |
 |---|---|---|
 | `Codec.Recording` | Contracts only, zero packages | `RecordingEventSchema@1.0` writer/reader, `IArtifactStore` (file + test memory), `ArtifactFacts` production ([adr 0016](0016-recording-event-schema.md)) |
-| `Recording` | Contracts, Kernel, AdapterSdk, Codec.Recording | `DurableEvidenceCoordinator`, `RecordingOpenOptions`, capacity/contamination policies |
+| `Recording` | Contracts, Kernel, Codec.Recording | `DurableEvidenceCoordinator`, `RecordingOpenOptions`, capacity/contamination policies |
 | `Comparison` | Contracts only | `SemanticComparator`, value normalization, profile migration registry |
 | `Replay` | + Codec.CanonicalState, Codec.Recording, Comparison, Recording | pre-scan, trust boundary, `ReplayDriver`, `IReplayEnvironmentFactory`, seal evaluator |
 
@@ -90,6 +91,15 @@ replay before the affected entry ([recording-replay.md](../spec/recording-replay
 Redaction itself stays where it is — before materialization, in the
 observation path — this ADR adds no second redaction stage.
 
+The reference identifier is **contract-scoped, not request-scoped**: a
+sensitive argument's `SecretReference` id derives from the capability
+contract's argument declaration (`contract@version` plus the declared
+argument path), and its digest is the canonicalizer's existing keyed digest
+of the value. The application's resolver therefore answers stable names it
+already knows, not per-request tokens it never saw; at replay the resolved
+value is re-digested against the recorded digest, and a mismatch stops
+before the affected entry — never a silent substitution.
+
 ### 3. The seam: one coordinator object, a wider optional interface
 
 ```
@@ -106,19 +116,24 @@ IRecordingCoordinator : IEvidenceCoordinator          // E2/E3/E4 unchanged
     AdmissionPolicy : RecordingAdmissionPolicy        // UnkeyedTarget refusal
 ```
 
-- **A single object is the single source of recording truth.** The interface
+- **A single object owns the E2–E8 durability obligations.** The interface
   extends `IEvidenceCoordinator` rather than arriving as a second constructor
-  dependency, so the E2/E3/E4 gate and the lifecycle can never disagree about
-  whether a recording is active. Every existing coordinator implementation and
-  test double survives unchanged; a runtime without recording pays one type
-  test at construction, a null check per hook site, and one `CloseRequested`
-  read per pump.
+  dependency, so the evidence gate and the lifecycle can never disagree about
+  whether a recording is active. Fence and membership truth stays in the
+  kernel state machine — the coordinator answers durability, never drives
+  transitions. Every existing coordinator implementation and test double
+  survives unchanged; a runtime without recording pays one type test at
+  construction, a null check per hook site, and one `CloseRequested` read per
+  pump.
 - **Every hook returns `EvidenceReadiness`.** `Pending` on E6/E8 parks the
   evidence kernel-side and retries on later pumps — the same discipline the
   E4 commit already uses — so transient sink pressure degrades latency, never
   the artifact. This closes the silent-loss hole a fire-and-forget hook would
   open: a ReplayEvidence event either becomes durable or the artifact ceases
-  to be `Completed` ([guarantees.md](../spec/guarantees.md) §5, §8).
+  to be `Completed` ([guarantees.md](../spec/guarantees.md) §5, §8). With the
+  v2.0 synchronous file store, `Pending` reaches the kernel only from
+  scripted test stores; the park-and-retry machinery is normative anyway so a
+  future asynchronous sink needs no kernel change.
 - **The coordinator never initiates a fence.** Fence linearization is the
   kernel state machine's job. The coordinator requests degradation through
   exactly two channels: the E5 answer's disposition
@@ -127,13 +142,38 @@ IRecordingCoordinator : IEvidenceCoordinator          // E2/E3/E4 unchanged
   fault). The kernel reacts by driving the ordinary close fence; the
   coordinator writing an E7 on its own initiative is a protocol violation.
 - **Failure routing is fixed per lane** (the transition table): E1 `Fault` →
-  open answers `OpenFailed`; E2 `Fault` → admission refused (rejection reason
-  `"EvidenceUnavailable"`); E3 `Fault` → `Faulted(EvidenceUnavailable,
-  effectPermitted: false)`; E4 `Fault` → the true terminal stands, the
-  recording alone degrades; E5/E6/E8 `Fault` → the coordinator records the
-  degradation and raises `CloseRequested` with the matching reason. The two
+  the open control operation answers `OpenFailed`. E2 `Fault` → admission
+  refused (rejection reason `"EvidenceUnavailable"`). E3 `Fault` →
+  `Faulted(EvidenceUnavailable, effectPermitted: false)`. E4 `Fault` → the
+  true terminal stands (`RecoveryIndex` first), the coordinator records the
+  degradation and raises `CloseRequested(SinkFault)` — the artifact closes
+  `Incomplete(SinkFault)` while still writable, else the reader infers
+  `Interrupted`, and the recording control operation reports `Failed`
+  ([guarantees.md](../spec/guarantees.md) §7). E5/E6/E8 `Fault` → same
+  `CloseRequested` route. E7 `Pending` → retried across pumps inside
+  `ClosingCommitting`; E7 `Fault` → the close operation answers `Failed`, no
+  E7 is written, and the reader infers `Interrupted`. The two
   `EvidenceUnavailable` vocabularies (rejection reason at E2, fault code at
   E3) remain distinct.
+- **The E5 answer composes disposition and readiness independently.** The
+  disposition (`Continue | RequestClose(reason)`) comes from the open policy
+  and is valid immediately — under the terminate policy the close fence
+  starts regardless of the cut's durability progress. The readiness leg
+  covers only the barrier cut's append: `Pending` parks it like E6/E8,
+  `Fault` raises `CloseRequested(SinkFault)`. Multiple external mutations
+  observed within one pump coalesce into a single barrier whose interval
+  covers them ([guarantees.md](../spec/guarantees.md) §5.5 records intervals,
+  not points).
+- **`EvidenceSequence` is coordinator-assigned**: strictly monotonic,
+  contiguous from zero, over evidence cuts only. The reader verifies that
+  contiguity; a gap is a structural violation
+  ([adr 0016](0016-recording-event-schema.md)).
+- **A `Completed` close is pre-validated by the writer.** Before writing a
+  `Completed` E7 the coordinator checks its own stream against the reader's
+  structural rules (R1/R3 — no unresolved commitments, no malformed shapes);
+  a violation is a coordinator bug surfaced as `Failed` with no E7 (reader:
+  `Interrupted`), never a self-declared `Completed` the reader would
+  overturn.
 - `Bind` is the assembly seam: the kernel hands the coordinator its
   `IRecordObservationServices` during `Start`, before any callback can run.
   `IRecordObservationServices` itself gains `SnapshotCatalog()` (the contract
@@ -146,15 +186,36 @@ IRecordingCoordinator : IEvidenceCoordinator          // E2/E3/E4 unchanged
 `NotRecording → OpeningDraining → OpeningCommitting → Active →
 ClosingDraining → ClosingCommitting → NotRecording`, driven only on the pump
 thread, exposed as split-phase control operations on a new `IRecordingControl`
-facade (`OpenRecording`/`CloseRecording` with observers answering
-`Opened | OpenRefused | Closed | Failed` — `Failed` is the control operation's
-answer and never an artifact state).
+facade in the Kernel assembly (`OpenRecording`/`CloseRecording` with observers
+answering `Opened | OpenRefused | Closed | Failed` — `Failed` is the control
+operation's answer and never an artifact state). One recording per runtime:
+`OpenRecording` outside `NotRecording` answers `OpenRefused`. The artifact
+identity is the recording's `OperationId`, one artifact per operation,
+single-use — a closed operation is never reopened. `Bind` is valid exactly
+once, before `Start` completes; a second or late bind is a
+`KernelFaultException`.
+
+Which hooks are legal per state:
+
+| State | Legal coordinator calls |
+|---|---|
+| `NotRecording` | none (hooks are not invoked) |
+| `OpeningDraining` | none — pre-open interactions drain against the no-op discipline; their cuts are not part of the artifact |
+| `OpeningCommitting` | `PrepareOpenEvidence` (retried while `Pending`) |
+| `Active` | E2/E3/E4, `CommitExternalMutation`, E6a/E6b, E8 |
+| `ClosingDraining` | E3/E4 for draining members, E6b (close-fence cancellations), retries of parked E4/E5/E6/E8 |
+| `ClosingCommitting` | `CommitCloseEvidence` (retried while `Pending`) |
+| any | `NotifyTeardown`; `CloseRequested`/`AdmissionPolicy` reads |
 
 - **Draining is a dedicated admission freeze**, not the exclusive-control
   gate: all new mutations are held, human-intent refusals trace
   `HumanIntentBlocked`, and the fence completes when in-flight work — active
-  interactions, parked E4 commits, and any admission stalled on E2 `Pending`
-  from before the fence — has reached its terminal cut.
+  interactions, parked E4/E5/E6/E8 commits, and any admission stalled on E2
+  `Pending` from before the fence — has reached durability. A parked,
+  already-designated E8 is ReplayEvidence and drains before the close; the
+  "close neither waits for nor cancels assertions"
+  rule ([guarantees.md](../spec/guarantees.md) §5.10) speaks about
+  **not-yet-evaluated** assertion batches, which simply produce no E8.
 - The close fence resolves still-armed waits as `Cancelled` (each emitting its
   E6b hook) before the final snapshot and `CommitCloseEvidence`
   ([guarantees.md](../spec/guarantees.md) §5.9).
@@ -165,7 +226,16 @@ answer and never an artifact state).
   reader classifies `Interrupted`, which is the honest answer.
 - E5 has two kernel sites: the `ObservedExternal` processing path and the
   externally-caused state-source publication path; both feed
-  `CommitExternalMutation`.
+  `CommitExternalMutation` and coalesce per pump as above.
+- **Teardown reasons.** The orderly path is `CloseRecording`; the only
+  kernel-initiated teardown in v2 is incarnation teardown, so the
+  `NotifyTeardown` close attempt always closes
+  `Incomplete(IncarnationChanged)`. A crash produces no close at all — the
+  reader infers `Interrupted`.
+- Contract registration is bootstrap-only, so the E1-pinned tables cannot
+  change under an active recording; **node** registration remains a
+  control-lane operation and legitimately continues while recording — it
+  touches no pinned table.
 
 ### 5. Open policies and defaults
 
@@ -179,6 +249,14 @@ not support is refused at open, never improvised later
 | External mutation (E5) | **Barrier-continue** · Terminate (`Incomplete(ExternalMutation)` via `RequestClose`) |
 | Capacity | **Close `Incomplete(SizeLimit)`** · Refuse new admissions · Bounded normal close · Chunk rollover (declared, refused at open in v2.0) |
 | Contract change | Not a policy: contract registration is bootstrap-only in this kernel, so `Incomplete(ContractChanged)` is unreachable; the reason code stays reserved for a future dynamic-registration kernel |
+
+The declared `RecordingSink.*` bounds are `MaxArtifactBytes` (total file
+bytes, framing and blobs included), `MaxEventCount` (evidence-cut records
+only), and `MaxBlobBytes` (one blob); defaults land as a `ResourceProfile`
+revision with the coordinator PR. The refuse-new-admissions policy answers
+with a structured capacity rejection whose reserved code is fixed against
+[guarantees.md](../spec/guarantees.md) §3.5's vocabulary in the state-machine
+PR — explicitly not invented here.
 
 ### 6. Staging and non-goals
 
@@ -199,7 +277,12 @@ not support is refused at open, never improvised later
 - Storage writes are synchronous, flushed per evidence append, on the pump
   thread. Group commit is future work behind the storage answer vocabulary
   (`Committed | InFlight | Fault`), which already reserves the asynchronous
-  shape; nothing in v2.0 produces `InFlight` outside scripted tests.
+  shape; nothing in v2.0 produces `InFlight` outside scripted tests. While a
+  recording is active, the host-computable worst-case pump occupancy
+  ([kernel-execution.md](../spec/kernel-execution.md) §6) gains the storage
+  flush term — hosts budget for it, and the quiescence obligation of
+  [adr 0013](0013-performance-normativity-and-allocation-policy.md) is
+  untouched because a quiescent pump appends nothing.
 - Cancellation orders for E4: `requested` is captured when the cancel message
   is processed, `observed` at the terminal decision; a queue-time cancel
   legally has `requested == observed`.
@@ -228,7 +311,11 @@ not support is refused at open, never improvised later
 - The Contracts, Kernel, and Tck public surfaces take reviewed breaking
   changes; each lands with its regenerated API baseline in the same PR. New
   assemblies join the solution file and the API-surface test enumeration in
-  the PR that creates them.
+  the PR that creates them. [architecture.md](../architecture.md) §2's module
+  list gains the three runtime modules with this ADR.
+- The v2.0 subset of the comparison-profile content model (which of the ten
+  required components carry non-trivial starter vocabularies) is frozen in
+  the portable replay-input contracts PR, not here.
 
 ## Rejected alternatives
 

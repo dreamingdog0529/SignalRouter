@@ -41,6 +41,12 @@ Codec leaves (own the only serializer dependencies; independently versioned)
   ├─ Codec.Recording          ← RecordingEventSchema artifacts
   └─ Codec.Protocol           ← wire envelope encoding
 
+Recording and replay modules (BCL only; land with the recording module,
+[adr/0015](adr/0015-recording-replay-module-topology-and-evidence-seam.md))
+  ├─ Recording                ← durable evidence coordinator, open options, capacity/contamination policy
+  ├─ Comparison               ← semantic comparator, normalization, profile migration
+  └─ Replay                   ← pre-scan, trust boundary, replay driver, IReplayEnvironmentFactory
+
 Infrastructure leaves
   ├─ Transport.WebSocket      ← first ILocalDuplexChannel
   ├─ Gateway.Mcp              ← the external gateway executable
@@ -51,7 +57,9 @@ Infrastructure leaves
 Rules: dependencies point up this list, never sideways into an engine; JSON types never
 appear in Contracts/Kernel/AdapterSdk; distribution packaging may bundle logical
 modules, chosen by adapter restore burden, without changing these boundaries
-([adr/0007](adr/0007-codec-and-package-boundaries.md)). One additional edge exists
+([adr/0007](adr/0007-codec-and-package-boundaries.md)). `Recording` depends on
+`Kernel` and `Codec.Recording`; `Replay` on `Recording`, `Comparison`, and both
+state codec leaves — still up-list, never sideways. One additional edge exists
 inside the core: `Kernel` depends on `AdapterSdk`, which is a pure shape assembly
 (interfaces and message/descriptor types over Contracts, zero behavior) — the kernel
 calls `IEffectExecutor` and hands adapters its implemented counterpart sinks
