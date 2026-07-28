@@ -6,7 +6,8 @@ sealed class SignalRouter.V2.Codec.Recording.ArtifactReadLimits
   property MaxRecordBytes : System.Int32 { public get; }
   property MaxRecordCount : System.Int32 { public get; }
   property MaxStringLength : System.Int32 { public get; }
-  public ctor(System.Int64 maxArtifactBytes, System.Int32 maxRecordCount, System.Int32 maxRecordBytes, System.Int32 maxBlobBytes, System.Int32 maxStringLength)
+  property MaxTotalBlobBytes : System.Int64 { public get; }
+  public ctor(System.Int64 maxArtifactBytes, System.Int32 maxRecordCount, System.Int32 maxRecordBytes, System.Int32 maxBlobBytes, System.Int32 maxStringLength, System.Int64 maxTotalBlobBytes = 0)
 
 sealed class SignalRouter.V2.Codec.Recording.ArtifactReadResult
   property ArtifactId : System.String { public get; }

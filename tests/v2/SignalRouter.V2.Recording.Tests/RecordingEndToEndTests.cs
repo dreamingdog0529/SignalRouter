@@ -765,11 +765,8 @@ public sealed class RecordingEndToEndTests
 
     // ── TimelineTrack (1.1) ──────────────────────────────────────────────────
 
-    [Test]
-    public void UnsatisfiedWaitPollsLandOnTheTimelineLane()
+    private static (ArtifactReadResult Result, long FileLength) RecordPollingSession(World world)
     {
-        var world = new World(new RecordingCoordinatorOptions(
-            Profile(), allowNonDurableStore: true, timelineByteBudget: 4096));
         var observer = new Observer();
         var recording = world.Runtime.Recording.OpenRecording(OpenRequest(), observer);
         world.PumpUntilIdle();
@@ -789,9 +786,18 @@ public sealed class RecordingEndToEndTests
 
         world.Runtime.Recording.CloseRecording(recording, observer);
         world.PumpUntilIdle();
+        Assert.That(observer.ClosedReason!.Value.IsCompleted, Is.True,
+            "the polling session must close Completed");
 
-        var result = ArtifactReader.Read(
-            world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes), Limits);
+        var bytes = world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes);
+        return (ArtifactReader.Read(bytes, Limits), bytes.LongLength);
+    }
+
+    [Test]
+    public void UnsatisfiedWaitPollsLandOnTheTimelineLane()
+    {
+        var (result, _) = RecordPollingSession(new World(new RecordingCoordinatorOptions(
+            Profile(), allowNonDurableStore: true, timelineByteBudget: 4096)));
         Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
         Assert.That(result.Timeline.Count, Is.EqualTo(2), "two unsatisfied polls, then E6b");
         foreach (var entry in result.Timeline)
@@ -804,6 +810,32 @@ public sealed class RecordingEndToEndTests
             EvidenceSemantics.ClassifyArtifact(result.Facts).Outcome.Kind,
             Is.EqualTo(RecordingOutcomeKind.Completed),
             "the timeline lane never bears on classification");
+    }
+
+    [Test]
+    public void TimelineBytesNeverDisplaceEvidence()
+    {
+        var (control, controlLength) = RecordPollingSession(new World(
+            new RecordingCoordinatorOptions(Profile(), allowNonDurableStore: true)));
+        Assert.That(control.Timeline.Count, Is.Zero);
+
+        // The tightest possible evidence bound — exactly the lane-off file.
+        // Every timeline byte lifts the evidence ceiling by the same amount,
+        // so the same evidence still fits: the droppable lane never consumes
+        // capacity the non-droppable lane needs.
+        var (result, _) = RecordPollingSession(new World(new RecordingCoordinatorOptions(
+            Profile(), maxArtifactBytes: controlLength, allowNonDurableStore: true,
+            timelineByteBudget: 4096)));
+        Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
+        Assert.That(result.Timeline.Count, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void AnUnlimitedTimelineBudgetDoesNotOverflow()
+    {
+        var (result, _) = RecordPollingSession(new World(new RecordingCoordinatorOptions(
+            Profile(), allowNonDurableStore: true, timelineByteBudget: long.MaxValue)));
+        Assert.That(result.Timeline.Count, Is.EqualTo(2), "an effectively unlimited lane records");
     }
 
     [Test]

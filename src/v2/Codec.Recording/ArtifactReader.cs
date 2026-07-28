@@ -174,6 +174,7 @@ namespace SignalRouter.V2.Codec.Recording
             var chainDepths = new Dictionary<ContentId, int>();
             var timeline = new List<TimelineRecord>();
             var deltaBlobCount = 0;
+            var totalBlobBytes = 0L;
             ReplayComparisonProfile? profile = null;
             var truncated = false;
             var integrityFailure = false;
@@ -258,6 +259,14 @@ namespace SignalRouter.V2.Codec.Recording
                                     "OverBudget", payloadStart, "A blob exceeds the blob budget.");
                             }
 
+                            totalBlobBytes += length;
+                            if (totalBlobBytes > limits.MaxTotalBlobBytes)
+                            {
+                                throw new RecordingFormatException(
+                                    "OverBudget", payloadStart,
+                                    "The artifact exceeds the aggregate decoded-blob budget.");
+                            }
+
                             var bytes = new byte[length];
                             for (var i = 0; i < length; i++)
                             {
@@ -295,6 +304,18 @@ namespace SignalRouter.V2.Codec.Recording
                             {
                                 throw new RecordingFormatException(
                                     "OverBudget", payloadStart, "A delta blob exceeds the blob budget.");
+                            }
+
+                            // Amplification guard: a small delta record may
+                            // declare a large result — the aggregate decoded
+                            // budget is enforced before the allocation, so a
+                            // bounded file cannot decompress without bound.
+                            totalBlobBytes += resultLength;
+                            if (totalBlobBytes > limits.MaxTotalBlobBytes)
+                            {
+                                throw new RecordingFormatException(
+                                    "OverBudget", payloadStart,
+                                    "The artifact exceeds the aggregate decoded-blob budget.");
                             }
 
                             var prefix = reader.ReadVaruint();

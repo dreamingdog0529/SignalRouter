@@ -107,7 +107,10 @@ namespace SignalRouter.V2.Recording
         /// <summary>
         /// TimelineTrack byte-rate cap (recording-replay.md §3): total framed
         /// timeline bytes per artifact. Zero disables the lane. Overflow drops
-        /// events; loss is marked with a gap record at close.
+        /// events; loss is marked with a gap record at close. The lane spends
+        /// only this budget — every timeline byte lifts the evidence ceiling
+        /// by the same amount, so diagnostics never displace evidence and the
+        /// declared file bound is MaxArtifactBytes + TimelineByteBudget.
         /// </summary>
         public long TimelineByteBudget { get; }
     }

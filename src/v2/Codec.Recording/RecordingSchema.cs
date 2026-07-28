@@ -52,10 +52,11 @@ namespace SignalRouter.V2.Codec.Recording
             int maxRecordCount,
             int maxRecordBytes,
             int maxBlobBytes,
-            int maxStringLength)
+            int maxStringLength,
+            long maxTotalBlobBytes = 0)
         {
             if (maxArtifactBytes < 1 || maxRecordCount < 1 || maxRecordBytes < 1 ||
-                maxBlobBytes < 1 || maxStringLength < 1)
+                maxBlobBytes < 1 || maxStringLength < 1 || maxTotalBlobBytes < 0)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(maxArtifactBytes), "Read limits must be positive.");
@@ -66,6 +67,12 @@ namespace SignalRouter.V2.Codec.Recording
             MaxRecordBytes = maxRecordBytes;
             MaxBlobBytes = maxBlobBytes;
             MaxStringLength = maxStringLength;
+            var fanOut = RecordingSchema.MaxDeltaChainDepth + 1;
+            MaxTotalBlobBytes = maxTotalBlobBytes > 0
+                ? maxTotalBlobBytes
+                : maxArtifactBytes > long.MaxValue / fanOut
+                    ? long.MaxValue
+                    : maxArtifactBytes * fanOut;
         }
 
         public long MaxArtifactBytes { get; }
@@ -77,5 +84,15 @@ namespace SignalRouter.V2.Codec.Recording
         public int MaxBlobBytes { get; }
 
         public int MaxStringLength { get; }
+
+        /// <summary>
+        /// The aggregate decoded-blob budget (full and delta-reconstructed
+        /// alike), enforced before each allocation: a bounded file must not
+        /// amplify into unbounded memory through many small deltas each
+        /// declaring a large result. Defaults to
+        /// (MaxDeltaChainDepth + 1) × MaxArtifactBytes — the structural
+        /// fan-out an honest chain can reach.
+        /// </summary>
+        public long MaxTotalBlobBytes { get; }
     }
 }

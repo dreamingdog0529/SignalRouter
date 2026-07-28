@@ -239,6 +239,45 @@ public sealed class DeltaAndTimelineTests
     }
 
     [Test]
+    public void TheAggregateDecodedBudgetStopsDeltaAmplification()
+    {
+        // Small delta records each declare a full-size result: without an
+        // aggregate decoded budget a bounded file amplifies without bound
+        // (codex review). Base 64 + one delta of 64 sit at the 128 budget;
+        // the second delta must refuse OverBudget before allocating.
+        var limits = new ArtifactReadLimits(
+            maxArtifactBytes: 1024 * 1024, maxRecordCount: 128,
+            maxRecordBytes: 64 * 1024, maxBlobBytes: 1024, maxStringLength: 1024,
+            maxTotalBlobBytes: 128);
+        var store = new MemoryArtifactStore();
+        var previous = Payload(64, 0x41);
+        using (var writer = Open(store, "amplify"))
+        {
+            writer.AppendBlob(IdOf(previous), previous);
+            for (var i = 1; i <= 2; i++)
+            {
+                var next = (byte[])previous.Clone();
+                next[8 * i] ^= 0xFF;
+                writer.AppendBlobOrDelta(
+                    IdOf(next), next, IdOf(previous), previous, long.MaxValue, out var wroteDelta);
+                Assert.That(wroteDelta, Is.True);
+                previous = next;
+            }
+        }
+
+        try
+        {
+            ArtifactReader.Read(
+                store.ReadAll("amplify", limits.MaxArtifactBytes), limits);
+            Assert.Fail("Expected a RecordingFormatException.");
+        }
+        catch (RecordingFormatException exception)
+        {
+            Assert.That(exception.Code, Is.EqualTo("OverBudget"));
+        }
+    }
+
+    [Test]
     public void TheDeltaRecordLayoutMatchesTheIndependentDerivation()
     {
         // A hundred 0x41 bytes with byte 50 changed to 0xEE: prefix 50,

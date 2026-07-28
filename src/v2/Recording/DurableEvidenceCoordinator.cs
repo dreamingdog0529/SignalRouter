@@ -682,7 +682,7 @@ namespace SignalRouter.V2.Recording
             }
 
             switch (writer!.AppendCut(
-                cut, enforceBounds ? options.MaxArtifactBytes : long.MaxValue))
+                cut, enforceBounds ? EvidenceByteBudget() : long.MaxValue))
             {
                 case WriteAnswer.OverBudget:
                     CloseRequested ??= new IncompleteReason("SizeLimit");
@@ -715,7 +715,7 @@ namespace SignalRouter.V2.Recording
             // result; the bound forces a periodic full checkpoint. The close
             // path (enforceBounds: false) always writes full — an artifact's
             // final checkpoint never depends on a chain.
-            var budget = enforceBounds ? options.MaxArtifactBytes : long.MaxValue;
+            var budget = enforceBounds ? EvidenceByteBudget() : long.MaxValue;
             var effectiveChain = Math.Min(
                 options.MaxDeltaChainLength, RecordingCoordinatorOptions.StoreMaxChainLength);
             WriteAnswer written;
@@ -787,14 +787,14 @@ namespace SignalRouter.V2.Recording
 
         private void AppendTimelineRecord(TimelineRecord entry)
         {
-            // Two caps: the lane's own byte budget, and an evidence floor —
-            // the last MaxBlobBytes of the artifact budget stay reserved for
-            // the non-droppable lane, so diagnostics can never be what pushes
-            // evidence into Incomplete(SizeLimit).
+            // The lane spends only its own byte budget: every timeline byte
+            // lifts the evidence ceiling by the same amount (see
+            // EvidenceByteBudget), so the droppable lane can never consume
+            // capacity the non-droppable lane needs — the declared file bound
+            // is MaxArtifactBytes + TimelineByteBudget.
             var before = writer!.WrittenBytes;
-            var budget = Math.Min(
-                options.MaxArtifactBytes - options.MaxBlobBytes,
-                before + (options.TimelineByteBudget - timelineWrittenBytes));
+            var budget = SaturatingAdd(
+                before, options.TimelineByteBudget - timelineWrittenBytes);
             switch (writer.AppendTimeline(entry, budget))
             {
                 case WriteAnswer.Committed:
@@ -829,6 +829,18 @@ namespace SignalRouter.V2.Recording
                     TimelineRecord.Gap(droppedTimelineEvents), long.MaxValue);
             }
         }
+
+        /// <summary>
+        /// The evidence lane's byte ceiling: the declared bound plus every
+        /// byte the timeline lane has spent — diagnostics never displace
+        /// evidence, so the total file bound is MaxArtifactBytes +
+        /// TimelineByteBudget (RecordingCoordinatorOptions).
+        /// </summary>
+        private long EvidenceByteBudget() =>
+            SaturatingAdd(options.MaxArtifactBytes, timelineWrittenBytes);
+
+        private static long SaturatingAdd(long value, long addend) =>
+            value > long.MaxValue - addend ? long.MaxValue : value + addend;
 
         private EvidenceReadiness OverBudgetAnswer()
         {
