@@ -590,27 +590,46 @@ namespace SignalRouter.V2.Contracts
         {
             foreach (var cut in facts.Cuts)
             {
-                switch (cut)
+                foreach (var contentId in ReferencedContentIds(cut))
                 {
-                    case RecordingOpened opened:
-                        yield return opened.BaseSnapshot;
-                        break;
-                    case EffectPermit permit:
-                        yield return permit.BeforeView;
-                        break;
-                    case TerminalCut terminal:
-                        yield return terminal.AfterView;
-                        break;
-                    case PredicateResolved resolved:
-                        yield return resolved.WitnessOrFinalObservation;
-                        break;
-                    case AssertionEvaluated assertion:
-                        yield return assertion.Snapshot;
-                        break;
-                    case RecordingClosed closed:
-                        yield return closed.FinalCheckpoint;
-                        break;
+                    yield return contentId;
                 }
+            }
+        }
+
+        /// <summary>
+        /// The ContentIds one cut references — the single definition shared by
+        /// closure verification, the artifact reader's blob-before-reference
+        /// check, and the writer's reachable-set tracking (ADR 0016): a new cut
+        /// kind extends this once, never three drifting switches.
+        /// </summary>
+        public static IEnumerable<ContentId> ReferencedContentIds(EvidenceCut cut)
+        {
+            if (cut == null)
+            {
+                throw new ArgumentNullException(nameof(cut));
+            }
+
+            switch (cut)
+            {
+                case RecordingOpened opened:
+                    yield return opened.BaseSnapshot;
+                    break;
+                case EffectPermit permit:
+                    yield return permit.BeforeView;
+                    break;
+                case TerminalCut terminal:
+                    yield return terminal.AfterView;
+                    break;
+                case PredicateResolved resolved:
+                    yield return resolved.WitnessOrFinalObservation;
+                    break;
+                case AssertionEvaluated assertion:
+                    yield return assertion.Snapshot;
+                    break;
+                case RecordingClosed closed:
+                    yield return closed.FinalCheckpoint;
+                    break;
             }
         }
 

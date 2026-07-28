@@ -205,7 +205,7 @@ namespace SignalRouter.V2.Codec.Recording
                             // cut referencing a blob the artifact has not yet
                             // carried — or never carries — is an integrity
                             // failure, not evidence.
-                            foreach (var reference in ReferencedContentIds(cut))
+                            foreach (var reference in EvidenceSemantics.ReferencedContentIds(cut))
                             {
                                 if (!blobs.ContainsKey(reference))
                                 {
@@ -428,30 +428,6 @@ namespace SignalRouter.V2.Codec.Recording
             return expectedCrc == actualCrc && data[crcOffset + 4] == RecordingSchema.CommitByte;
         }
 
-        private static IEnumerable<ContentId> ReferencedContentIds(EvidenceCut cut)
-        {
-            switch (cut)
-            {
-                case RecordingOpened opened:
-                    yield return opened.BaseSnapshot;
-                    break;
-                case EffectPermit permit:
-                    yield return permit.BeforeView;
-                    break;
-                case TerminalCut terminal:
-                    yield return terminal.AfterView;
-                    break;
-                case PredicateResolved resolved:
-                    yield return resolved.WitnessOrFinalObservation;
-                    break;
-                case AssertionEvaluated assertion:
-                    yield return assertion.Snapshot;
-                    break;
-                case RecordingClosed closed:
-                    yield return closed.FinalCheckpoint;
-                    break;
-            }
-        }
 
         private static bool VerifyBlob(ContentId id, byte[] payload)
         {

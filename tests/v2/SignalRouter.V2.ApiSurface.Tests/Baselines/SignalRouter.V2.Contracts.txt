@@ -573,6 +573,7 @@ static class SignalRouter.V2.Contracts.EvidenceSemantics
   public static method CheckStructure(SignalRouter.V2.Contracts.ArtifactFacts facts) : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.RuleViolation>
   public static method ClassifyArtifact(SignalRouter.V2.Contracts.ArtifactFacts facts) : SignalRouter.V2.Contracts.ArtifactClassification
   public static method ClassifyInteractions(SignalRouter.V2.Contracts.ArtifactFacts facts) : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.InteractionClassification>
+  public static method ReferencedContentIds(SignalRouter.V2.Contracts.EvidenceCut cut) : System.Collections.Generic.IEnumerable<SignalRouter.V2.Contracts.ContentId>
   public static method ScanStaticReplayHazards(SignalRouter.V2.Contracts.ArtifactFacts facts) : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.StaticReplayHazard>
   public static method VerifyRecomputableClosure(SignalRouter.V2.Contracts.ArtifactFacts facts) : SignalRouter.V2.Contracts.ClosureCheckResult
   static property ComparisonBearingCutKinds : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.EvidenceCutKind> { public get; }
