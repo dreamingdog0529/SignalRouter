@@ -370,11 +370,18 @@ public sealed class RuntimeBridgeSessionTests
     }
 
     // The session under test wired to an in-memory duplex; the test plays the
-    // host peer. PostToMainThread executes inline, so ledger access stays on
-    // the delivering thread deterministically.
+    // host peer. PostToMainThread enqueues onto a single-threaded pump, exactly
+    // like the production main-thread marshal: the ledger is documented as
+    // main-pump-only and not thread-safe, and an inline post would run
+    // completion continuations' ledger work on thread-pool threads. That
+    // unsynchronized access can misread a half-written RetainUntil as expired,
+    // evict a live terminal entry, and turn a byte-exact resend into a second
+    // admission (the CI-observed flake).
     private sealed class SessionHarness : IDisposable
     {
         private readonly InMemoryDuplexChannel channel = new();
+        private readonly Channel<Action> mainThread = Channel.CreateUnbounded<Action>();
+        private readonly Task mainThreadPump;
         private readonly Task runTask;
         private int nextMessageId;
 
@@ -399,7 +406,7 @@ public sealed class RuntimeBridgeSessionTests
                 postThrows
                     ? new Action<Action>(_ => throw new InvalidOperationException(
                         "The interaction runtime is shut down."))
-                    : action => action(),
+                    : PostToMainThread,
                 Submitter.Submit,
                 requestId =>
                 {
@@ -423,6 +430,13 @@ public sealed class RuntimeBridgeSessionTests
                     },
                 queryControl);
             Session = new RuntimeBridgeSession(channel, options);
+            mainThreadPump = Task.Run(async () =>
+            {
+                await foreach (var work in mainThread.Reader.ReadAllAsync())
+                {
+                    work();
+                }
+            });
             runTask = Session.RunAsync();
         }
 
@@ -544,7 +558,28 @@ public sealed class RuntimeBridgeSessionTests
                 Assert.Fail("The session loop did not stop after the channel closed.");
             }
 
+            mainThread.Writer.TryComplete();
+            try
+            {
+                // Propagates any exception a posted work item threw: main-thread
+                // work never throws in production, so a throw here is a bug the
+                // test must surface, not swallow.
+                mainThreadPump.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            }
+            catch (TimeoutException)
+            {
+                Assert.Fail("The main-thread pump did not drain after the session stopped.");
+            }
+
             channel.Dispose();
+        }
+
+        private void PostToMainThread(Action work)
+        {
+            if (!mainThread.Writer.TryWrite(work))
+            {
+                throw new InvalidOperationException("The main-thread pump is stopped.");
+            }
         }
 
         private sealed class FixedClock : IInteractionClock
