@@ -258,8 +258,175 @@ public sealed class ReplayPreScanTests
         var plan = result.Plan!;
         Assert.That(plan.Stop!.Kind, Is.EqualTo(ReplayStopKind.Contamination));
         Assert.That(
-            plan.Stop.Position, Is.EqualTo(plan.Entries[1].Permit!.Sequence),
-            "positions at or beyond the interval are incomparable (guarantees.md §3.5)");
+            plan.Stop.Position, Is.EqualTo(plan.Entries[1].Admission.Sequence),
+            "positions at or beyond the interval are incomparable (guarantees.md §3.5) — " +
+            "the admission is already a compared position");
+    }
+
+    [Test]
+    public void ATerminatedArtifactStopsAtItsFinalCheckpointComparison()
+    {
+        var world = new ReplayArtifactWorld(
+            externalMutationPolicy: SignalRouter.V2.Recording.ExternalMutationPolicy.Terminate);
+        world.Open();
+        world.ReportExternal("external-effect");
+        var artifact = world.Artifact();
+
+        var result = ReplayPreScan.Scan(
+            artifact, ReplayArtifactWorld.Limits, AllowlistFor(artifact),
+            new ComparisonVocabulary(), null, Trusted());
+        var plan = result.Plan!;
+        Assert.That(
+            plan.Classification.Outcome.Kind, Is.EqualTo(RecordingOutcomeKind.Incomplete));
+        Assert.That(
+            plan.Stop!.Kind, Is.EqualTo(ReplayStopKind.Contamination),
+            "the close's final checkpoint is post-mutation comparison material");
+    }
+
+    [Test]
+    public void APreCancelledEntryStaysReplayable()
+    {
+        var world = new ReplayArtifactWorld();
+        world.Open();
+        world.SubmitAndCancelBeforeEffect("r-1");
+        world.Close();
+        var artifact = world.Artifact();
+
+        var result = ReplayPreScan.Scan(
+            artifact, ReplayArtifactWorld.Limits, AllowlistFor(artifact),
+            new ComparisonVocabulary(), null, Trusted());
+        var plan = result.Plan!;
+        Assert.That(plan.Entries.Count, Is.EqualTo(1));
+        Assert.That(plan.Entries[0].Kind, Is.EqualTo(ReplayEntryKind.PreCancelled));
+        Assert.That(plan.Entries[0].Permit, Is.Null);
+        Assert.That(
+            plan.Stop, Is.Null,
+            "a BeforeEffect cancellation replays with a synthetic token (guarantees.md §5.7)");
+    }
+
+    [Test]
+    public void AnInterruptedEffectPlansAnOutcomeUnknownStop()
+    {
+        var world = new ReplayArtifactWorld();
+        world.Open();
+        world.SubmitWithoutCompleting("r-1");
+        world.TearDown();
+        var artifact = world.Artifact();
+
+        var result = ReplayPreScan.Scan(
+            artifact, ReplayArtifactWorld.Limits, AllowlistFor(artifact),
+            new ComparisonVocabulary(), null, Trusted());
+        Assert.That(
+            result.Refusal?.Code ?? result.Incomparability?.ToString(), Is.Null,
+            "the scan must plan this artifact");
+        var plan = result.Plan!;
+        Assert.That(plan.Entries[0].Kind, Is.EqualTo(ReplayEntryKind.OutcomeUnknown));
+        Assert.That(plan.Stop!.Kind, Is.EqualTo(ReplayStopKind.OutcomeUnknown));
+        Assert.That(
+            plan.Stop.Position, Is.EqualTo(plan.Entries[0].Permit!.Sequence),
+            "strict replay stops before this effect (guarantees.md §7)");
+    }
+
+    [Test]
+    public void ARecordedUnevaluableAssertionStopsWithItsVerbatimReason()
+    {
+        var world = new ReplayArtifactWorld();
+        world.Open();
+        world.EvaluateAssertion(); // the source has no document: Unevaluable(SourceUnavailable)
+        world.Close();
+        var artifact = world.Artifact();
+
+        var result = ReplayPreScan.Scan(
+            artifact, ReplayArtifactWorld.Limits, AllowlistFor(artifact),
+            new ComparisonVocabulary(), null, Trusted());
+        var plan = result.Plan!;
+        Assert.That(plan.Stop!.Kind, Is.EqualTo(ReplayStopKind.RecordedUnevaluable));
+        Assert.That(
+            plan.Stop.Incomparability,
+            Is.EqualTo((IncomparableReason?)new IncomparableReason("SourceUnavailable")),
+            "the reason passes through verbatim (guarantees.md §3.3)");
+    }
+
+    [Test]
+    public void APreEffectFaultStopsInsteadOfRedispatching()
+    {
+        var world = new ReplayArtifactWorld();
+        world.Open();
+
+        // Script the E3 cut append to fault: the permit's blob commits, the cut
+        // does not — Faulted(EvidenceUnavailable, effectPermitted: false).
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed);
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Fault);
+        world.SubmitWithoutCompleting("r-1");
+        var artifact = world.Artifact();
+
+        var result = ReplayPreScan.Scan(
+            artifact, ReplayArtifactWorld.Limits, AllowlistFor(artifact),
+            new ComparisonVocabulary(), null, Trusted());
+        var plan = result.Plan!;
+        Assert.That(plan.Entries[0].Kind, Is.EqualTo(ReplayEntryKind.PreEffectFault));
+        Assert.That(plan.Stop!.Kind, Is.EqualTo(ReplayStopKind.PreEffectFault));
+        Assert.That(
+            plan.Stop.Position, Is.EqualTo(plan.Entries[0].Admission.Sequence),
+            "a healthy replay environment would not fault: re-dispatch could " +
+            "perform the never-permitted effect");
+    }
+
+    [Test]
+    public void AStructurallyViolatingStreamIsRefused()
+    {
+        // A hand-written stream with an orphan permit: correctly framed and
+        // digest-clean, but violating reader rule R1 — never execution input.
+        var store = new MemoryArtifactStore();
+        var writer = new ArtifactWriter(store.Create("malformed"));
+        Assert.That(
+            writer.WriteHeader("malformed", new RuntimeIncarnationId("incarnation-x")),
+            Is.EqualTo(WriteAnswer.Committed));
+        Assert.That(
+            writer.AppendProfile(ReplayArtifactWorld.Profile()), Is.EqualTo(WriteAnswer.Committed));
+
+        var basePayload = new byte[] { 1, 2, 3, 4 };
+        var baseId = Sha256ContentId(basePayload);
+        Assert.That(writer.AppendBlob(baseId, basePayload), Is.EqualTo(WriteAnswer.Committed));
+        Assert.That(
+            writer.AppendCut(new RecordingOpened(
+                new EvidenceSequence(0),
+                ReplayArtifactWorld.Profile().Reference,
+                ReplayArtifactWorld.RecordView,
+                new RedactionPolicyId("default-redaction"),
+                ValueArray<CompletionBinding>.Empty,
+                ValueArray<StateSourceBinding>.Empty,
+                ValueArray<PredicateContractRef>.Empty,
+                new RuntimeIncarnationId("incarnation-x"),
+                baseId)),
+            Is.EqualTo(WriteAnswer.Committed));
+        Assert.That(
+            writer.AppendCut(new EffectPermit(
+                new EvidenceSequence(1),
+                new RequestId("orphan"),
+                new LogicalOrder(1),
+                new SourceRevision(1),
+                baseId,
+                reusedCheckpointBlob: true)),
+            Is.EqualTo(WriteAnswer.Committed));
+
+        var artifact = store.ReadAll("malformed", ReplayArtifactWorld.Limits.MaxArtifactBytes);
+        var allowlist = new ReplayAllowlist(
+            ValueArray<CompletionBinding>.Empty,
+            ValueArray<StateSourceBinding>.Empty,
+            ValueArray<PredicateAllowlistEntry>.Empty,
+            ReplayArtifactWorld.Profile());
+
+        var result = ReplayPreScan.Scan(
+            artifact, ReplayArtifactWorld.Limits, allowlist,
+            new ComparisonVocabulary(), null, Trusted());
+        Assert.That(result.Refusal!.Code, Is.EqualTo(ReplayRefusalCodes.ArtifactIntegrity));
+    }
+
+    private static ContentId Sha256ContentId(byte[] payload)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return new ContentId("sha256", 1, DigestValue.From(sha.ComputeHash(payload)));
     }
 
     [Test]

@@ -130,17 +130,24 @@ internal sealed class ReplayArtifactWorld
     }
 
     private readonly Executor executor = new();
-    private readonly MemoryArtifactStore store = new();
     private readonly LifecycleObserver observer = new();
     private OperationId recording;
     private long logicalNow = 100;
 
     internal KernelRuntime Runtime { get; }
 
-    internal ReplayArtifactWorld(bool sensitiveArgument = false)
+    internal MemoryArtifactStore Store { get; } = new();
+
+    internal ReplayArtifactWorld(
+        bool sensitiveArgument = false,
+        ExternalMutationPolicy externalMutationPolicy = ExternalMutationPolicy.BarrierContinue)
     {
         var coordinator = new DurableEvidenceCoordinator(
-            store, new RecordingCoordinatorOptions(Profile(), allowNonDurableStore: true));
+            Store,
+            new RecordingCoordinatorOptions(
+                Profile(),
+                allowNonDurableStore: true,
+                externalMutationPolicy: externalMutationPolicy));
         var options = new KernelOptions(
             new ManualClock(),
             new byte[] { 9, 9, 9, 9 },
@@ -253,6 +260,30 @@ internal sealed class ReplayArtifactWorld
         PumpUntilIdle();
     }
 
+    internal void SubmitAndCancelBeforeEffect(string request)
+    {
+        // Admit in exactly one turn, then cancel while the interaction still
+        // waits in the admitted queue — a BeforeEffect cancellation with no
+        // permit ever minted.
+        Runtime.Ingress.Submit(new IntentSubmission(
+            new RequestId(request),
+            Invoke,
+            TargetReference.ForKey(new AuthorKey("save")),
+            InvocationPayload.Empty,
+            new IdentityEnvelope(Agent, IngressPath.Mcp, Provenance.Automation, Causality.Root()),
+            observer: null));
+        Runtime.Pump(new PumpBudget(
+            1, long.MaxValue, new LogicalTime(logicalNow++), FramePhase.Update));
+        Runtime.Control.RequestCancel(new RequestId(request));
+        PumpUntilIdle();
+    }
+
+    internal void TearDown()
+    {
+        Runtime.Control.TearDownIncarnation();
+        PumpUntilIdle();
+    }
+
     internal void ArmWaitWithTimeout(long timeoutAtLogicalTime)
     {
         Runtime.Control.ArmWait(CountIsFive, Agent, timeoutAtLogicalTime, new WaitObserver());
@@ -287,7 +318,7 @@ internal sealed class ReplayArtifactWorld
         PumpUntilIdle();
     }
 
-    internal byte[] Artifact() => store.ReadAll(recording.Value, Limits.MaxArtifactBytes);
+    internal byte[] Artifact() => Store.ReadAll(recording.Value, Limits.MaxArtifactBytes);
 
     private void PumpUntilIdle(int maxPumps = 24)
     {

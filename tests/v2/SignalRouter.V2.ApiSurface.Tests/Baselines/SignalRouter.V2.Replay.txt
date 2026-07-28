@@ -52,10 +52,11 @@ sealed class SignalRouter.V2.Replay.ReplayEntry
 
 enum SignalRouter.V2.Replay.ReplayEntryKind
   : System.Int32
-  AdmittedOnly = 4
+  AdmittedOnly = 5
   Completed = 0
-  OutcomeUnknown = 3
+  OutcomeUnknown = 4
   PreCancelled = 2
+  PreEffectFault = 3
   Rejected = 1
 
 sealed class SignalRouter.V2.Replay.ReplayPlan
@@ -77,6 +78,7 @@ sealed class SignalRouter.V2.Replay.ReplayRefusal
 static class SignalRouter.V2.Replay.ReplayRefusalCodes
   public const field ArtifactIntegrity : System.String = "ArtifactIntegrity"
   public const field ContractAllowlist : System.String = "ContractAllowlist"
+  public const field OpenFailed : System.String = "OpenFailed"
   public const field PredicateDigestMismatch : System.String = "PredicateDigestMismatch"
   public const field ResourceLimit : System.String = "ResourceLimit"
   public const field UntrustedProvenance : System.String = "UntrustedProvenance"
@@ -86,9 +88,10 @@ enum SignalRouter.V2.Replay.ReplayStopKind
   CancellationTiming = 3
   Contamination = 0
   OutcomeUnknown = 4
+  PreEffectFault = 5
   PredicateFault = 2
-  RecordedUnevaluable = 5
-  SecretUnresolvable = 6
+  RecordedUnevaluable = 6
+  SecretUnresolvable = 7
   WaitTiming = 1
 
 sealed class SignalRouter.V2.Replay.ReplayTrustOptions

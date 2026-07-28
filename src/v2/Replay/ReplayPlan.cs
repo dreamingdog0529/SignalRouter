@@ -23,6 +23,13 @@ namespace SignalRouter.V2.Replay
             ArtifactProvenance provenance,
             bool acceptUntrustedArtifacts = false)
         {
+            if (provenance != ArtifactProvenance.Trusted && provenance != ArtifactProvenance.Untrusted)
+            {
+                // Fail closed: an undefined provenance (deserialized
+                // configuration) must never ride the trusted path.
+                throw new ArgumentOutOfRangeException(nameof(provenance));
+            }
+
             Provenance = provenance;
             AcceptUntrustedArtifacts = acceptUntrustedArtifacts;
         }
@@ -98,7 +105,15 @@ namespace SignalRouter.V2.Replay
 
         public const string ResourceLimit = "ResourceLimit";
 
+        /// <summary>
+        /// Integrity in the §7 sense: byte/digest verification, recomputable
+        /// closure, and the reader's structural rules — a violating artifact is
+        /// never execution input, not a partially replayable one.
+        /// </summary>
         public const string ArtifactIntegrity = "ArtifactIntegrity";
+
+        /// <summary>No artifact exists (E1 or its base snapshot never became durable).</summary>
+        public const string OpenFailed = "OpenFailed";
 
         public const string ContractAllowlist = "ContractAllowlist";
 
@@ -116,17 +131,36 @@ namespace SignalRouter.V2.Replay
         public string Code { get; }
     }
 
-    /// <summary>The §6.1 shape a replay entry executes as.</summary>
+    /// <summary>
+    /// The §6.1 evidence shape of a replay entry. The shape names what the
+    /// evidence contains, never whether execution proceeds — execution
+    /// eligibility has exactly one authority, <see cref="ReplayPlan.Stop"/>;
+    /// a Completed shape can still sit at or beyond a planned stop.
+    /// </summary>
     public enum ReplayEntryKind
     {
         /// <summary>E2 + E3 + E4: re-admit, permit, execute, compare.</summary>
         Completed,
 
-        /// <summary>E2 + E4 without E3: re-dispatch to verify the same rejection and zero effect.</summary>
+        /// <summary>
+        /// E2 + E4 without E3 — a rejection, or any pre-effect terminal such as
+        /// Faulted(EvidenceUnavailable): re-dispatch to verify the same terminal
+        /// and the zero-effect guarantee. The driver compares the recorded
+        /// terminal itself and never branches on this shape alone.
+        /// </summary>
         Rejected,
 
-        /// <summary>A BeforeEffect cancellation: replayed with a synthetic pre-cancelled token.</summary>
+        /// <summary>A BeforeEffect cancellation (no permit): replayed with a synthetic pre-cancelled token.</summary>
         PreCancelled,
+
+        /// <summary>
+        /// E2 + a Faulted terminal without E3 — a pre-effect infrastructure
+        /// failure (e.g. Faulted(EvidenceUnavailable)): NOT re-dispatched. A
+        /// healthy replay environment would not fault, so re-dispatch would
+        /// perform the effect the live run never permitted; strict replay stops
+        /// before this entry instead.
+        /// </summary>
+        PreEffectFault,
 
         /// <summary>E2 + E3 without E4: strict replay stops before this effect.</summary>
         OutcomeUnknown,
@@ -180,6 +214,9 @@ namespace SignalRouter.V2.Replay
 
         /// <summary>An E2+E3 shape without E4 (guarantees.md §6.1, §7).</summary>
         OutcomeUnknown,
+
+        /// <summary>A pre-effect infrastructure fault: re-dispatch could perform the unpermitted effect.</summary>
+        PreEffectFault,
 
         /// <summary>A recorded E8 outcome of Unevaluable (guarantees.md §5.10).</summary>
         RecordedUnevaluable,

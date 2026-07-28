@@ -13,7 +13,11 @@ namespace SignalRouter.V2.Replay
     /// and secret resolvability — then reuses the reader-authoritative
     /// <see cref="EvidenceSemantics"/> classification and its static hazard
     /// scan to plan the earliest strict-replay stop. Pure and side-effect free:
-    /// no execution, no environment, no secret materialization.
+    /// no execution, no environment, no secret materialization. Decode-time
+    /// budgets (bytes, records, blobs, strings) are enforced here through
+    /// <see cref="ArtifactReadLimits"/>; the semantic ceilings of
+    /// security-resources.md §5 (nodes, depth) bind the twin runtime's own
+    /// ResourceProfile at execution, not the artifact decode.
     /// </summary>
     public static class ReplayPreScan
     {
@@ -50,9 +54,11 @@ namespace SignalRouter.V2.Replay
                 throw new ArgumentNullException(nameof(trust));
             }
 
-            // Provenance gates even parsing: an untrusted artifact is refused
-            // before its bytes are interpreted (security-resources.md §6).
-            if (trust.Provenance == ArtifactProvenance.Untrusted && !trust.AcceptUntrustedArtifacts)
+            // Provenance gates even parsing: anything that is not exactly
+            // Trusted — including an undefined enum value from deserialized
+            // configuration — is refused unless explicitly opted in
+            // (security-resources.md §6; fail closed).
+            if (trust.Provenance != ArtifactProvenance.Trusted && !trust.AcceptUntrustedArtifacts)
             {
                 return PreScanResult.Refused(new ReplayRefusal(ReplayRefusalCodes.UntrustedProvenance));
             }
@@ -79,10 +85,35 @@ namespace SignalRouter.V2.Replay
             }
 
             var classification = EvidenceSemantics.ClassifyArtifact(reading.Facts);
-            if (classification.Outcome.Kind == RecordingOutcomeKind.OpenFailed ||
-                reading.Profile == null)
+            if (classification.Outcome.Kind == RecordingOutcomeKind.OpenFailed)
             {
-                // No usable manifest: nothing exists to replay against.
+                // No artifact exists to replay against (guarantees.md §3.2).
+                return PreScanResult.Refused(new ReplayRefusal(ReplayRefusalCodes.OpenFailed));
+            }
+
+            if (reading.Profile == null)
+            {
+                return PreScanResult.Refused(new ReplayRefusal(ReplayRefusalCodes.ArtifactIntegrity));
+            }
+
+            // The reader's own verdicts join the trust boundary (§7 "integrity"
+            // covers closure and structure, not just bytes): a rule violation or
+            // a failed closure recomputation makes the artifact non-input.
+            // Honest incompleteness stays plannable — a missing close, and the
+            // missing-tail shapes the failure matrix explicitly plans stops for
+            // (an unterminated chain, an unresolved arm) are truncation facts,
+            // not tampering.
+            for (var index = 0; index < classification.Violations.Count; index++)
+            {
+                if (!IsHonestIncompleteness(classification.Violations[index]))
+                {
+                    return PreScanResult.Refused(new ReplayRefusal(ReplayRefusalCodes.ArtifactIntegrity));
+                }
+            }
+
+            if (classification.Closure != ClosureCheckResult.Verified &&
+                classification.Closure != ClosureCheckResult.MissingClose)
+            {
                 return PreScanResult.Refused(new ReplayRefusal(ReplayRefusalCodes.ArtifactIntegrity));
             }
 
@@ -115,6 +146,24 @@ namespace SignalRouter.V2.Replay
             return PreScanResult.Planned(new ReplayPlan(
                 opened, resolution.Effective!, classification, entries, stop, reading));
         }
+
+        /// <summary>
+        /// The reader-rule violations that are truncation shapes rather than
+        /// malformation: the failure matrix plans stops for them (guarantees.md
+        /// §7) instead of rejecting the artifact. The descriptions are the
+        /// frozen public vocabulary of <see cref="EvidenceSemantics"/> —
+        /// matched exactly, never by substring.
+        /// </summary>
+        private static bool IsHonestIncompleteness(RuleViolation violation) =>
+            string.Equals(
+                violation.Description, "Permitted interaction without terminal",
+                StringComparison.Ordinal) ||
+            string.Equals(
+                violation.Description, "Admitted interaction without terminal",
+                StringComparison.Ordinal) ||
+            string.Equals(
+                violation.Description, "PredicateArmed without a matching PredicateResolved",
+                StringComparison.Ordinal);
 
         private static RecordingOpened? FindOpened(ValueArray<EvidenceCut> cuts)
         {
@@ -296,8 +345,11 @@ namespace SignalRouter.V2.Replay
                         admissions.Add(admission.RequestId, admission);
                         break;
                     case EffectPermit permit:
+                        // A permit after its terminal is an out-of-order chain
+                        // (R1: one interaction's E2 → E3 → E4 in that order).
                         if (!admissions.ContainsKey(permit.RequestId) ||
-                            permits.ContainsKey(permit.RequestId))
+                            permits.ContainsKey(permit.RequestId) ||
+                            terminals.ContainsKey(permit.RequestId))
                         {
                             structuralViolation = true;
                             return ValueArray<ReplayEntry>.Empty;
@@ -325,18 +377,46 @@ namespace SignalRouter.V2.Replay
                 var admission = admissions[request];
                 permits.TryGetValue(request, out var permit);
                 terminals.TryGetValue(request, out var terminal);
-                entries[index] = new ReplayEntry(
-                    request, ClassifyEntry(permit, terminal), admission, permit, terminal);
+
+                // A BeforeEffect cancellation with a permit contradicts itself
+                // (the permit IS the effect boundary): treating it as
+                // PreCancelled would route a permitted effect through the
+                // synthetic no-effect path. The permitted flag must also agree
+                // with the permit's existence (R1).
+                if (terminal != null &&
+                    (terminal.EffectPermitted != (permit != null) ||
+                        (permit != null && terminal.Cancellation != null &&
+                            terminal.Cancellation.Phase == CancellationPhase.BeforeEffect)))
+                {
+                    structuralViolation = true;
+                    return ValueArray<ReplayEntry>.Empty;
+                }
+
+                var kind = ClassifyEntry(permit, terminal, out var shapeViolation);
+                if (shapeViolation)
+                {
+                    structuralViolation = true;
+                    return ValueArray<ReplayEntry>.Empty;
+                }
+
+                entries[index] = new ReplayEntry(request, kind, admission, permit, terminal);
             }
 
             return ValueArray<ReplayEntry>.From(entries);
         }
 
-        private static ReplayEntryKind ClassifyEntry(EffectPermit? permit, TerminalCut? terminal)
+        private static ReplayEntryKind ClassifyEntry(
+            EffectPermit? permit, TerminalCut? terminal, out bool shapeViolation)
         {
+            shapeViolation = false;
             if (terminal == null)
             {
                 return permit == null ? ReplayEntryKind.AdmittedOnly : ReplayEntryKind.OutcomeUnknown;
+            }
+
+            if (permit != null)
+            {
+                return ReplayEntryKind.Completed;
             }
 
             if (terminal.Cancellation != null &&
@@ -345,7 +425,20 @@ namespace SignalRouter.V2.Replay
                 return ReplayEntryKind.PreCancelled;
             }
 
-            return permit == null ? ReplayEntryKind.Rejected : ReplayEntryKind.Completed;
+            if (terminal.Outcome == InteractionOutcome.Rejected)
+            {
+                return ReplayEntryKind.Rejected;
+            }
+
+            if (terminal.Outcome == InteractionOutcome.Faulted)
+            {
+                return ReplayEntryKind.PreEffectFault;
+            }
+
+            // A Succeeded (or otherwise effectful) terminal without a permit is
+            // not a §6.1 shape at all.
+            shapeViolation = true;
+            return ReplayEntryKind.Rejected;
         }
 
         // ── Stop planning (guarantees.md §5.5–§5.10, §7) ─────────────────────
@@ -370,11 +463,15 @@ namespace SignalRouter.V2.Replay
             // Replay-specific candidates the shared scan does not own:
             // positions at or beyond the first contamination interval are
             // incomparable even when no effect window overlapped it
-            // (guarantees.md §3.5 "at or beyond").
+            // (guarantees.md §3.5 "at or beyond") — the interval's own recorded
+            // endpoint is the boundary, not the barrier cut's stream position.
+            // Temporal predicates would join here (Incomparable(TemporalPredicate),
+            // §5.6), but the v2 predicate grammar cannot express one — the
+            // reason stays reserved, not detected.
             var barrier = FirstBarrier(cuts);
             if (barrier != null)
             {
-                var position = FirstExecutionBearingAfter(cuts, barrier.Sequence);
+                var position = FirstComparedAtOrBeyond(cuts, barrier.FirstObservedCut);
                 if (position != null)
                 {
                     candidates.Add(new PlannedStop(
@@ -393,6 +490,20 @@ namespace SignalRouter.V2.Replay
                         assertion.Sequence,
                         ReplayStopKind.RecordedUnevaluable,
                         IncomparableReason.FromUnevaluable(assertion.Outcome.Reason)));
+                }
+            }
+
+            // A pre-effect infrastructure fault stops before its entry: a
+            // healthy replay environment would not reproduce the fault, and
+            // re-dispatch could perform the never-permitted effect.
+            for (var index = 0; index < entries.Count; index++)
+            {
+                if (entries[index].Kind == ReplayEntryKind.PreEffectFault)
+                {
+                    candidates.Add(new PlannedStop(
+                        entries[index].Admission.Sequence,
+                        ReplayStopKind.PreEffectFault,
+                        incomparability: null));
                 }
             }
 
@@ -445,10 +556,16 @@ namespace SignalRouter.V2.Replay
             StaticReplayHazardKind.ContaminatedEffect => ReplayStopKind.Contamination,
             StaticReplayHazardKind.DuringEffectCancellation => ReplayStopKind.CancellationTiming,
             StaticReplayHazardKind.CancelledAfterEffectTerminal => ReplayStopKind.CancellationTiming,
-            _ => hazard.Reason.HasValue &&
+            StaticReplayHazardKind.PredicateResolutionNotSatisfied =>
+                hazard.Reason.HasValue &&
                 hazard.Reason.Value.Equals(IncomparableReason.PredicateFault)
-                ? ReplayStopKind.PredicateFault
-                : ReplayStopKind.WaitTiming,
+                    ? ReplayStopKind.PredicateFault
+                    : ReplayStopKind.WaitTiming,
+
+            // Fail closed: a hazard kind this scanner does not know cannot be
+            // silently downgraded to a milder stop.
+            _ => throw new InvalidOperationException(
+                "Unknown static replay hazard kind: " + hazard.Kind),
         };
 
         private static ExternalMutationBarrier? FirstBarrier(ValueArray<EvidenceCut> cuts)
@@ -464,23 +581,29 @@ namespace SignalRouter.V2.Replay
             return null;
         }
 
-        private static EvidenceSequence? FirstExecutionBearingAfter(
-            ValueArray<EvidenceCut> cuts, EvidenceSequence barrier)
+        /// <summary>
+        /// The first compared position at or beyond the interval boundary:
+        /// every R4-compared cut counts — an admission, a terminal, and the
+        /// close's final checkpoint are as incomparable beyond the interval as
+        /// an effect would be. Only the barriers themselves are not comparison
+        /// positions.
+        /// </summary>
+        private static EvidenceSequence? FirstComparedAtOrBeyond(
+            ValueArray<EvidenceCut> cuts, EvidenceSequence boundary)
         {
             for (var index = 0; index < cuts.Count; index++)
             {
-                if (cuts[index].Sequence <= barrier)
+                if (cuts[index].Sequence < boundary)
                 {
                     continue;
                 }
 
-                switch (cuts[index].Kind)
+                if (cuts[index].Kind == EvidenceCutKind.ExternalMutationBarrier)
                 {
-                    case EvidenceCutKind.EffectPermit:
-                    case EvidenceCutKind.PredicateResolved:
-                    case EvidenceCutKind.AssertionEvaluated:
-                        return cuts[index].Sequence;
+                    continue;
                 }
+
+                return cuts[index].Sequence;
             }
 
             return null;
