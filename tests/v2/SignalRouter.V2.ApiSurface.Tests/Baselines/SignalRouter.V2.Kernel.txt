@@ -1,13 +1,14 @@
 # API surface of SignalRouter.V2.Kernel
 
 sealed class SignalRouter.V2.Kernel.AdmissionEvidence
+  property Arguments : SignalRouter.V2.Contracts.RecordedArguments { public get; }
   property Envelope : SignalRouter.V2.Contracts.IdentityEnvelope { public get; }
   property Fingerprint : SignalRouter.V2.Contracts.SemanticFingerprint { public get; }
   property Invocation : SignalRouter.V2.Contracts.CapabilityInvocation { public get; }
   property Order : SignalRouter.V2.Contracts.LogicalOrder { public get; }
   property Request : SignalRouter.V2.Contracts.RequestId { public get; }
   property ResolvedTarget : SignalRouter.V2.Contracts.ResolvedTarget { public get; }
-  public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.CapabilityInvocation invocation, SignalRouter.V2.Contracts.ResolvedTarget resolvedTarget, SignalRouter.V2.Contracts.IdentityEnvelope envelope)
+  public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.CapabilityInvocation invocation, SignalRouter.V2.Contracts.RecordedArguments arguments, SignalRouter.V2.Contracts.ResolvedTarget resolvedTarget, SignalRouter.V2.Contracts.IdentityEnvelope envelope)
 
 sealed class SignalRouter.V2.Kernel.AssertionBatch
   property Observer : SignalRouter.V2.Kernel.IAssertionObserver { public get; }
@@ -161,7 +162,9 @@ sealed class SignalRouter.V2.Kernel.RecordMaterialization
 
 sealed class SignalRouter.V2.Kernel.TerminalEvidence
   property AfterWatermark : SignalRouter.V2.Contracts.SourceRevision { public get; }
-  property CancellationPhase : SignalRouter.V2.Contracts.CancellationPhase? { public get; }
+  property Cancellation : SignalRouter.V2.Contracts.CancellationEvidence? { public get; }
+  property Commitments : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ContinuationCommitment> { public get; }
+  property Completion : SignalRouter.V2.Contracts.CompletionEvidence? { public get; }
   property Continuations : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.ContinuationRequest> { public get; }
   property EffectPermitted : System.Boolean { public get; }
   property EffectStarted : System.Boolean { public get; }
@@ -171,7 +174,7 @@ sealed class SignalRouter.V2.Kernel.TerminalEvidence
   property Postcondition : SignalRouter.V2.Contracts.PostconditionResult? { public get; }
   property RejectionReason : SignalRouter.V2.Contracts.RejectionReason? { public get; }
   property Request : SignalRouter.V2.Contracts.RequestId { public get; }
-  public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.InteractionOutcome outcome, System.Boolean effectPermitted, System.Boolean effectStarted, SignalRouter.V2.Contracts.RejectionReason? rejectionReason, SignalRouter.V2.Contracts.FaultCode? faultCode, SignalRouter.V2.Contracts.CancellationPhase? cancellationPhase, SignalRouter.V2.Contracts.PostconditionResult? postcondition, SignalRouter.V2.Contracts.SourceRevision afterWatermark, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.ContinuationRequest> continuations)
+  public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.InteractionOutcome outcome, System.Boolean effectPermitted, System.Boolean effectStarted, SignalRouter.V2.Contracts.RejectionReason? rejectionReason, SignalRouter.V2.Contracts.FaultCode? faultCode, SignalRouter.V2.Contracts.CancellationEvidence? cancellation, SignalRouter.V2.Contracts.PostconditionResult? postcondition, SignalRouter.V2.Contracts.CompletionEvidence? completion, SignalRouter.V2.Contracts.SourceRevision afterWatermark, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.AdapterSdk.ContinuationRequest> continuations, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ContinuationCommitment> commitments)
 
 sealed class SignalRouter.V2.Kernel.TimelineEntry
   property AfterGap : System.Boolean { public get; }

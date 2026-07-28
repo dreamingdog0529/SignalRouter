@@ -16,6 +16,9 @@ namespace SignalRouter.V2.Kernel
     {
         private const string KernelViewId = "kernel-raw";
 
+        // The disposition of a kernel-decided pre-permit cancellation (ADR 0015).
+        private const string PreEffectDisposition = "PreEffect";
+
         private readonly KernelOptions options;
         private readonly IEvidenceCoordinator coordinator;
         private readonly Mailbox mailbox;
@@ -58,7 +61,10 @@ namespace SignalRouter.V2.Kernel
         private readonly DeadlineIndex<OperationId> waitDeadlines = new DeadlineIndex<OperationId>();
 
         private Interaction? active;
-        private SubmissionMessage? stalledAdmission;
+        // FIFO: multiple admissions can stall on E2 Pending at once (a stalled
+        // human submission plus a continuation child, close-fence drains); a
+        // single slot would silently overwrite the earlier one.
+        private readonly Queue<SubmissionMessage> stalledAdmissions = new Queue<SubmissionMessage>();
         private bool started;
         private readonly ProjectionScratch projectionScratch = new ProjectionScratch();
         private bool sampledVisibleToAgent;
@@ -85,6 +91,7 @@ namespace SignalRouter.V2.Kernel
         private bool gated;
         private IEffectExecutor? executor;
         private volatile bool executingEffect;
+        private readonly bool coordinatorIsNoOp;
 
         public KernelRuntime(
             RuntimeIncarnationId incarnation,
@@ -93,6 +100,10 @@ namespace SignalRouter.V2.Kernel
         {
             this.options = options ?? throw new ArgumentNullException(nameof(options));
             coordinator = evidenceCoordinator ?? NoOpEvidenceCoordinator.Instance;
+            // With the explicit no-op every obligation is vacuous, so the kernel
+            // skips building admission evidence (incl. the recorded-arguments
+            // projection) entirely — recording-off admissions pay nothing new.
+            coordinatorIsNoOp = ReferenceEquals(coordinator, NoOpEvidenceCoordinator.Instance);
             mailbox = new Mailbox(options);
             nodeStore = new NodeStore(incarnation);
             sourceTable = new SourceSlotTable();
@@ -268,17 +279,25 @@ namespace SignalRouter.V2.Kernel
                 return true;
             }
 
-            if (stalledAdmission != null)
+            if (stalledAdmissions.Count > 0)
             {
-                var stalled = stalledAdmission;
-                stalledAdmission = null;
-                ProcessSubmission(stalled);
+                // Head-only retry preserves admission order: later stalls (and
+                // every new mailbox submission) wait behind the oldest one.
+                if (ProcessSubmission(stalledAdmissions.Peek()))
+                {
+                    stalledAdmissions.Dequeue();
+                }
+
                 return true;
             }
 
             if (mailbox.TryDequeueSubmission(out var submission))
             {
-                ProcessSubmission(submission);
+                if (!ProcessSubmission(submission))
+                {
+                    stalledAdmissions.Enqueue(submission);
+                }
+
                 return true;
             }
 
@@ -333,7 +352,7 @@ namespace SignalRouter.V2.Kernel
                 submissionDepth > 0 ||
                 (!tornDown && (
                     publicationDepth > 0 ||
-                    stalledAdmission != null ||
+                    stalledAdmissions.Count > 0 ||
                     committingEvidence.Count > 0 ||
                     deferredSnapshots.Count > 0 ||
                     (!awaitingCompletion && (admitted.Count > 0 || active != null))));
@@ -349,13 +368,13 @@ namespace SignalRouter.V2.Kernel
 
         // ── Admission (kernel-execution.md §3) ───────────────────────────────
 
-        private void ProcessSubmission(SubmissionMessage message)
+        private bool ProcessSubmission(SubmissionMessage message)
         {
             var submission = message.Submission;
             if (tornDown)
             {
                 Reject(submission, RejectionReason.IncarnationMismatch);
-                return;
+                return true;
             }
 
             // Resolve the target for this principal; unregistered, unresolvable,
@@ -364,7 +383,7 @@ namespace SignalRouter.V2.Kernel
                 !TryResolveVisibleTarget(submission.Target, domain, out var record))
             {
                 Reject(submission, RejectionReason.TargetNotFound);
-                return;
+                return true;
             }
 
             if (!capabilityContracts.TryGetValue(submission.Capability, out var descriptor) ||
@@ -373,7 +392,7 @@ namespace SignalRouter.V2.Kernel
                 // Undeclared, unregistered, and unexposed capability on a visible
                 // node merge into one code (guarantees.md §3.5).
                 Reject(submission, RejectionReason.CapabilityUnavailable);
-                return;
+                return true;
             }
 
             if (gated && !domain.Equals(gateHolder))
@@ -384,7 +403,7 @@ namespace SignalRouter.V2.Kernel
                 }
 
                 Reject(submission, new RejectionReason("AdmissionGated"));
-                return;
+                return true;
             }
 
             CanonicalInvocation canonical;
@@ -400,7 +419,7 @@ namespace SignalRouter.V2.Kernel
             catch (ArgumentException)
             {
                 Reject(submission, new RejectionReason("MalformedArguments"));
-                return;
+                return true;
             }
 
             // Dedup by (incarnation, RequestId) with fingerprint verification.
@@ -415,7 +434,7 @@ namespace SignalRouter.V2.Kernel
                     Reject(submission, RejectionReason.RequestIdConflict);
                 }
 
-                return;
+                return true;
             }
 
             if (recoveryIndex.TryGetTerminal(submission.Request, out var terminalEntry))
@@ -429,29 +448,37 @@ namespace SignalRouter.V2.Kernel
                     Reject(submission, RejectionReason.RequestIdConflict);
                 }
 
-                return;
+                return true;
             }
 
             if (recoveryIndex.AtCapacity)
             {
                 Reject(submission, RejectionReason.CapacityExhausted);
-                return;
+                return true;
             }
 
             var resolvedTarget = new ResolvedTarget(record.Reference, record.Registration.AuthorKey);
             var invocation = new CapabilityInvocation(
                 submission.Capability, submission.Target, canonical.Arguments);
             var order = new LogicalOrder(logicalOrderCounter + 1);
-            switch (coordinator.PrepareAdmissionEvidence(new AdmissionEvidence(
-                submission.Request, order, canonical.Fingerprint, invocation,
-                resolvedTarget, submission.Envelope)))
+            if (!coordinatorIsNoOp)
             {
-                case EvidenceReadiness.Pending:
-                    stalledAdmission = message;
-                    return;
-                case EvidenceReadiness.Fault:
-                    Reject(submission, new RejectionReason("EvidenceUnavailable"));
-                    return;
+                // The projection cannot throw here: Canonicalize validated the
+                // same payload against the same schema above.
+                var recorded = InvocationCanonicalizer.Project(
+                    submission.Capability, submission.Payload,
+                    descriptor.Arguments, options.RedactionKey);
+                switch (coordinator.PrepareAdmissionEvidence(new AdmissionEvidence(
+                    submission.Request, order, canonical.Fingerprint, invocation,
+                    recorded, resolvedTarget, submission.Envelope)))
+                {
+                    case EvidenceReadiness.Pending:
+                        // The caller parks the message; retried head-first.
+                        return false;
+                    case EvidenceReadiness.Fault:
+                        Reject(submission, new RejectionReason("EvidenceUnavailable"));
+                        return true;
+                }
             }
 
             logicalOrderCounter++;
@@ -467,6 +494,14 @@ namespace SignalRouter.V2.Kernel
                 domain,
                 record.Reference,
                 descriptor);
+            if (message.CancelRequested)
+            {
+                // A cancel that arrived while this admission was stalled on E2
+                // Pending is honored as an ordinary BeforeEffect cancellation.
+                interaction.CancellationRequested = true;
+                interaction.CancelRequestedOrder = order;
+            }
+
             admitted.Enqueue(interaction);
             PublishStatus();
             submission.Observer?.OnAccepted(submission.Request);
@@ -475,6 +510,7 @@ namespace SignalRouter.V2.Kernel
                 CausationOf(submission.Envelope),
                 request: submission.Request,
                 order: order);
+            return true;
         }
 
         private void Reject(IntentSubmission submission, RejectionReason reason)
@@ -727,6 +763,47 @@ namespace SignalRouter.V2.Kernel
             // terminal evidence commits. E4 uses this, never a fresh materialization.
             CaptureAfterBasis(interaction);
 
+            // Continuation commitments are computed here — before the evidence
+            // commits — and all-or-nothing: a list the kernel already knows it
+            // cannot admit is dropped whole, never partially honored, so E4
+            // commitments and later admissions cannot disagree
+            // (guarantees.md §5.8).
+            var continuations = details.Outcome == InteractionOutcome.Rejected
+                ? ValueArray<ContinuationRequest>.Empty
+                : interaction.Completion?.Continuations ?? ValueArray<ContinuationRequest>.Empty;
+            var commitments = ValueArray<ContinuationCommitment>.Empty;
+            if (continuations.Count > 0)
+            {
+                var overLimit = continuations.Count > options.MaxContinuationsPerParent;
+                if (overLimit || !TryComputeCommitments(interaction, continuations, out commitments))
+                {
+                    Emit(
+                        EventKind.TerminalCommitted, EventCausation.OfRequest(interaction.Request),
+                        request: interaction.Request,
+                        detailCode: overLimit
+                            ? "ContinuationLimitExceeded"
+                            : "ContinuationCommitmentFailed");
+                    continuations = ValueArray<ContinuationRequest>.Empty;
+                    commitments = ValueArray<ContinuationCommitment>.Empty;
+                }
+            }
+
+            CancellationEvidence? cancellation = null;
+            if (details.CancellationPhase.HasValue)
+            {
+                // requested: captured when the cancel message was processed;
+                // observed: the terminal decision. A queue-time cancel legally has
+                // requested == observed (ADR 0015).
+                var observed = new LogicalOrder(logicalOrderCounter);
+                cancellation = new CancellationEvidence(
+                    interaction.CancelRequestedOrder ?? observed,
+                    observed,
+                    details.CancellationPhase.Value,
+                    details.CancellationDisposition ?? PreEffectDisposition,
+                    interaction.EffectPermitted,
+                    interaction.EffectStarted);
+            }
+
             // The ephemeral payload's lifetime ends at the terminal
             // (kernel-execution.md §3).
             interaction.Payload = null;
@@ -738,10 +815,14 @@ namespace SignalRouter.V2.Kernel
                 interaction.EffectStarted,
                 details.RejectionReason,
                 details.FaultCode,
-                details.CancellationPhase,
+                cancellation,
                 details.Postcondition,
+                details.Outcome == InteractionOutcome.Succeeded
+                    ? interaction.Completion!.Resolution.CompletionEvidence
+                    : null,
                 nodeStore.Revision,
-                interaction.Completion?.Continuations ?? ValueArray<ContinuationRequest>.Empty);
+                continuations,
+                commitments);
             interaction.State = InteractionState.CommittingEvidence;
             if (!TryCommitEvidence(interaction) && !ReferenceEquals(active, interaction))
             {
@@ -827,17 +908,62 @@ namespace SignalRouter.V2.Kernel
             }
         }
 
-        private void AdmitContinuations(Interaction parent, ValueArray<ContinuationRequest> continuations)
+        /// <summary>
+        /// Canonicalizes every committed child at the terminal decision. False
+        /// when any child cannot be canonicalized (unresolvable target, unknown
+        /// contract, malformed payload, over limit) — the caller drops the whole
+        /// list; commitments are never partial.
+        /// </summary>
+        private bool TryComputeCommitments(
+            Interaction parent,
+            ValueArray<ContinuationRequest> continuations,
+            out ValueArray<ContinuationCommitment> commitments)
         {
-            if (continuations.Count > options.MaxContinuationsPerParent)
+            commitments = ValueArray<ContinuationCommitment>.Empty;
+            if (!options.TryResolveDomain(parent.Envelope.Principal, out var domain))
             {
-                // Adapter protocol violation: traced, never partially honored.
-                Emit(
-                    EventKind.TerminalCommitted, EventCausation.OfRequest(parent.Request),
-                    request: parent.Request, detailCode: "ContinuationLimitExceeded");
-                return;
+                return false;
             }
 
+            var computed = new ContinuationCommitment[continuations.Count];
+            var fingerprints = new SemanticFingerprint[continuations.Count];
+            for (var ordinal = 0; ordinal < continuations.Count; ordinal++)
+            {
+                var continuation = continuations[ordinal];
+                try
+                {
+                    if (!TryResolveVisibleTarget(continuation.Target, domain, out var childRecord) ||
+                        !capabilityContracts.TryGetValue(continuation.Capability, out var childDescriptor))
+                    {
+                        return false;
+                    }
+
+                    fingerprints[ordinal] = InvocationCanonicalizer.Canonicalize(
+                        continuation.Capability,
+                        new ResolvedTarget(childRecord.Reference, childRecord.Registration.AuthorKey),
+                        continuation.Payload,
+                        childDescriptor.Arguments,
+                        options.RedactionKey).Fingerprint;
+                }
+                catch (ArgumentException)
+                {
+                    return false;
+                }
+
+                computed[ordinal] = new ContinuationCommitment(ordinal, fingerprints[ordinal]);
+            }
+
+            parent.CommittedChildFingerprints = fingerprints;
+            commitments = ValueArray<ContinuationCommitment>.From(computed);
+            return true;
+        }
+
+        private void AdmitContinuations(Interaction parent, ValueArray<ContinuationRequest> continuations)
+        {
+            // Fingerprints were computed at the terminal decision (all-or-nothing);
+            // a terminal whose commitments were dropped carries no continuations,
+            // so reaching here without them is a kernel invariant violation.
+            var fingerprints = parent.CommittedChildFingerprints!;
             for (var ordinal = 0; ordinal < continuations.Count; ordinal++)
             {
                 var continuation = continuations[ordinal];
@@ -849,28 +975,7 @@ namespace SignalRouter.V2.Kernel
                     "continuation-" + parent.Order.Value.ToString(CultureInfo.InvariantCulture) +
                     "-" + ordinal.ToString(CultureInfo.InvariantCulture));
 
-                SemanticFingerprint childFingerprint;
-                try
-                {
-                    if (!options.TryResolveDomain(parent.Envelope.Principal, out var domain) ||
-                        !TryResolveVisibleTarget(continuation.Target, domain, out var childRecord) ||
-                        !capabilityContracts.TryGetValue(continuation.Capability, out var childDescriptor))
-                    {
-                        continue; // child admission fails like any admission; traced below
-                    }
-
-                    childFingerprint = InvocationCanonicalizer.Canonicalize(
-                        continuation.Capability,
-                        new ResolvedTarget(childRecord.Reference, childRecord.Registration.AuthorKey),
-                        continuation.Payload,
-                        childDescriptor.Arguments,
-                        options.RedactionKey).Fingerprint;
-                }
-                catch (ArgumentException)
-                {
-                    continue;
-                }
-
+                var childFingerprint = fingerprints[ordinal];
                 var envelope = new IdentityEnvelope(
                     parent.Envelope.Principal,
                     parent.Envelope.Ingress,
@@ -884,7 +989,13 @@ namespace SignalRouter.V2.Kernel
                     continuation.Payload,
                     envelope,
                     observer: null);
-                ProcessSubmission(new SubmissionMessage(submission, humanPriority: false));
+                var childMessage = new SubmissionMessage(submission, humanPriority: false);
+                if (!ProcessSubmission(childMessage))
+                {
+                    // A child stalled on E2 Pending parks behind any existing
+                    // stalls — never overwriting them.
+                    stalledAdmissions.Enqueue(childMessage);
+                }
             }
         }
 
@@ -1295,6 +1406,11 @@ namespace SignalRouter.V2.Kernel
             if (active != null && active.Request.Equals(request))
             {
                 active.CancellationRequested = true;
+                if (!active.CancelRequestedOrder.HasValue)
+                {
+                    active.CancelRequestedOrder = new LogicalOrder(logicalOrderCounter);
+                }
+
                 if (active.State == InteractionState.Validating ||
                     (active.State == InteractionState.Invoking && !active.EffectPermitted))
                 {
@@ -1311,6 +1427,23 @@ namespace SignalRouter.V2.Kernel
                     // Cancellation of a queued interaction is always BeforeEffect;
                     // it terminates when it reaches Validating.
                     queued.CancellationRequested = true;
+                    if (!queued.CancelRequestedOrder.HasValue)
+                    {
+                        queued.CancelRequestedOrder = new LogicalOrder(logicalOrderCounter);
+                    }
+
+                    return;
+                }
+            }
+
+            // A submission stalled on E2 Pending is visible to cancellation too —
+            // the cancel window must not silently close while evidence is in
+            // flight (guarantees.md §8).
+            foreach (var stalled in stalledAdmissions)
+            {
+                if (stalled.Submission.Request.Equals(request))
+                {
+                    stalled.CancelRequested = true;
                     return;
                 }
             }
@@ -1629,7 +1762,7 @@ namespace SignalRouter.V2.Kernel
             active = null;
             admitted.Clear();
             committingEvidence.Clear();
-            stalledAdmission = null;
+            stalledAdmissions.Clear();
             executor?.Detach();
 
             foreach (var stranded in recoveryIndex.DrainPending())
@@ -1857,7 +1990,13 @@ namespace SignalRouter.V2.Kernel
 
             internal bool CancellationDelivered { get; set; }
 
+            /// <summary>The logical order at which the cancel message was processed.</summary>
+            internal LogicalOrder? CancelRequestedOrder { get; set; }
+
             internal bool Contaminated { get; set; }
+
+            /// <summary>Ordinal-aligned child fingerprints computed at the terminal decision.</summary>
+            internal SemanticFingerprint[]? CommittedChildFingerprints { get; set; }
 
             internal TerminalEvidence? PendingTerminal { get; set; }
         }
@@ -1904,6 +2043,8 @@ namespace SignalRouter.V2.Kernel
 
             internal CancellationPhase? CancellationPhase { get; private set; }
 
+            internal string? CancellationDisposition { get; private set; }
+
             internal PostconditionResult? Postcondition { get; private set; }
 
             internal static TerminalDetails Succeeded(PostconditionResult? postcondition) =>
@@ -1925,7 +2066,11 @@ namespace SignalRouter.V2.Kernel
 
             internal static TerminalDetails Cancelled(
                 CancellationPhase phase, string? disposition = null) =>
-                new TerminalDetails(InteractionOutcome.Cancelled) { CancellationPhase = phase };
+                new TerminalDetails(InteractionOutcome.Cancelled)
+                {
+                    CancellationPhase = phase,
+                    CancellationDisposition = disposition,
+                };
         }
 
         // ── Facades ──────────────────────────────────────────────────────────
