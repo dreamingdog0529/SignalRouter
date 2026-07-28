@@ -25,6 +25,7 @@ namespace SignalRouter.V2.Kernel
             LogicalOrder order,
             SemanticFingerprint fingerprint,
             CapabilityInvocation invocation,
+            RecordedArguments arguments,
             ResolvedTarget resolvedTarget,
             IdentityEnvelope envelope)
         {
@@ -32,6 +33,7 @@ namespace SignalRouter.V2.Kernel
             Order = order;
             Fingerprint = fingerprint;
             Invocation = invocation ?? throw new ArgumentNullException(nameof(invocation));
+            Arguments = arguments ?? throw new ArgumentNullException(nameof(arguments));
             ResolvedTarget = resolvedTarget;
             Envelope = envelope ?? throw new ArgumentNullException(nameof(envelope));
         }
@@ -43,6 +45,14 @@ namespace SignalRouter.V2.Kernel
         public SemanticFingerprint Fingerprint { get; }
 
         public CapabilityInvocation Invocation { get; }
+
+        /// <summary>
+        /// The portable replay input (ADR 0015): the admitted arguments in
+        /// recorded form, projected by the kernel at admission from the live
+        /// payload. Re-digesting this form yields
+        /// <see cref="CapabilityInvocation.Arguments"/>.
+        /// </summary>
+        public RecordedArguments Arguments { get; }
 
         public ResolvedTarget ResolvedTarget { get; }
 
@@ -70,7 +80,14 @@ namespace SignalRouter.V2.Kernel
         public SourceRevision Watermark { get; }
     }
 
-    /// <summary>The E4 material (guarantees.md §5.4).</summary>
+    /// <summary>
+    /// The E4 material (guarantees.md §5.4): everything a durable coordinator
+    /// needs to build a valid <see cref="TerminalCut"/> — the completion evidence
+    /// and cancellation detail the adapter reported, and the continuation
+    /// commitments (ordinal + fingerprint) computed at the terminal decision. The
+    /// after-view ContentId deliberately stays out: the coordinator fetches the
+    /// retained after-basis through <c>TryGetAfterMaterialization</c>.
+    /// </summary>
     public sealed class TerminalEvidence
     {
         public TerminalEvidence(
@@ -81,11 +98,20 @@ namespace SignalRouter.V2.Kernel
             bool effectStarted,
             RejectionReason? rejectionReason,
             FaultCode? faultCode,
-            CancellationPhase? cancellationPhase,
+            CancellationEvidence? cancellation,
             PostconditionResult? postcondition,
+            CompletionEvidence? completion,
             SourceRevision afterWatermark,
-            ValueArray<ContinuationRequest> continuations)
+            ValueArray<ContinuationRequest> continuations,
+            ValueArray<ContinuationCommitment> commitments)
         {
+            if (continuations.Count != commitments.Count)
+            {
+                throw new ArgumentException(
+                    "Commitments and continuations are all-or-nothing and must agree.",
+                    nameof(commitments));
+            }
+
             Request = request;
             Order = order;
             Outcome = outcome;
@@ -93,10 +119,12 @@ namespace SignalRouter.V2.Kernel
             EffectStarted = effectStarted;
             RejectionReason = rejectionReason;
             FaultCode = faultCode;
-            CancellationPhase = cancellationPhase;
+            Cancellation = cancellation;
             Postcondition = postcondition;
+            Completion = completion;
             AfterWatermark = afterWatermark;
             Continuations = continuations;
+            Commitments = commitments;
         }
 
         public RequestId Request { get; }
@@ -113,13 +141,24 @@ namespace SignalRouter.V2.Kernel
 
         public FaultCode? FaultCode { get; }
 
-        public CancellationPhase? CancellationPhase { get; }
+        /// <summary>Full cancellation evidence (requested/observed orders, phase, disposition).</summary>
+        public CancellationEvidence? Cancellation { get; }
 
         public PostconditionResult? Postcondition { get; }
+
+        /// <summary>The adapter's completion evidence; present exactly for Succeeded.</summary>
+        public CompletionEvidence? Completion { get; }
 
         public SourceRevision AfterWatermark { get; }
 
         public ValueArray<ContinuationRequest> Continuations { get; }
+
+        /// <summary>
+        /// The E4 commitments, index-aligned with <see cref="Continuations"/> —
+        /// computed before the terminal commits so commitments and later
+        /// admissions can never disagree (guarantees.md §5.8).
+        /// </summary>
+        public ValueArray<ContinuationCommitment> Commitments { get; }
     }
 
     /// <summary>
