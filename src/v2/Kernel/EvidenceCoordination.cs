@@ -151,6 +151,11 @@ namespace SignalRouter.V2.Kernel
 
         public SourceRevision AfterWatermark { get; }
 
+        /// <summary>
+        /// The live continuation batch, admission-side only — it carries raw
+        /// invocation payloads and MUST NOT be persisted; the artifact records
+        /// <see cref="Commitments"/> alone (guarantees.md §5.8).
+        /// </summary>
         public ValueArray<ContinuationRequest> Continuations { get; }
 
         /// <summary>

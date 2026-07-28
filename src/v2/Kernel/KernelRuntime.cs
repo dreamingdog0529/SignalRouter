@@ -61,7 +61,10 @@ namespace SignalRouter.V2.Kernel
         private readonly DeadlineIndex<OperationId> waitDeadlines = new DeadlineIndex<OperationId>();
 
         private Interaction? active;
-        private SubmissionMessage? stalledAdmission;
+        // FIFO: multiple admissions can stall on E2 Pending at once (a stalled
+        // human submission plus a continuation child, close-fence drains); a
+        // single slot would silently overwrite the earlier one.
+        private readonly Queue<SubmissionMessage> stalledAdmissions = new Queue<SubmissionMessage>();
         private bool started;
         private readonly ProjectionScratch projectionScratch = new ProjectionScratch();
         private bool sampledVisibleToAgent;
@@ -276,17 +279,25 @@ namespace SignalRouter.V2.Kernel
                 return true;
             }
 
-            if (stalledAdmission != null)
+            if (stalledAdmissions.Count > 0)
             {
-                var stalled = stalledAdmission;
-                stalledAdmission = null;
-                ProcessSubmission(stalled);
+                // Head-only retry preserves admission order: later stalls (and
+                // every new mailbox submission) wait behind the oldest one.
+                if (ProcessSubmission(stalledAdmissions.Peek()))
+                {
+                    stalledAdmissions.Dequeue();
+                }
+
                 return true;
             }
 
             if (mailbox.TryDequeueSubmission(out var submission))
             {
-                ProcessSubmission(submission);
+                if (!ProcessSubmission(submission))
+                {
+                    stalledAdmissions.Enqueue(submission);
+                }
+
                 return true;
             }
 
@@ -341,7 +352,7 @@ namespace SignalRouter.V2.Kernel
                 submissionDepth > 0 ||
                 (!tornDown && (
                     publicationDepth > 0 ||
-                    stalledAdmission != null ||
+                    stalledAdmissions.Count > 0 ||
                     committingEvidence.Count > 0 ||
                     deferredSnapshots.Count > 0 ||
                     (!awaitingCompletion && (admitted.Count > 0 || active != null))));
@@ -357,13 +368,13 @@ namespace SignalRouter.V2.Kernel
 
         // ── Admission (kernel-execution.md §3) ───────────────────────────────
 
-        private void ProcessSubmission(SubmissionMessage message)
+        private bool ProcessSubmission(SubmissionMessage message)
         {
             var submission = message.Submission;
             if (tornDown)
             {
                 Reject(submission, RejectionReason.IncarnationMismatch);
-                return;
+                return true;
             }
 
             // Resolve the target for this principal; unregistered, unresolvable,
@@ -372,7 +383,7 @@ namespace SignalRouter.V2.Kernel
                 !TryResolveVisibleTarget(submission.Target, domain, out var record))
             {
                 Reject(submission, RejectionReason.TargetNotFound);
-                return;
+                return true;
             }
 
             if (!capabilityContracts.TryGetValue(submission.Capability, out var descriptor) ||
@@ -381,7 +392,7 @@ namespace SignalRouter.V2.Kernel
                 // Undeclared, unregistered, and unexposed capability on a visible
                 // node merge into one code (guarantees.md §3.5).
                 Reject(submission, RejectionReason.CapabilityUnavailable);
-                return;
+                return true;
             }
 
             if (gated && !domain.Equals(gateHolder))
@@ -392,7 +403,7 @@ namespace SignalRouter.V2.Kernel
                 }
 
                 Reject(submission, new RejectionReason("AdmissionGated"));
-                return;
+                return true;
             }
 
             CanonicalInvocation canonical;
@@ -408,7 +419,7 @@ namespace SignalRouter.V2.Kernel
             catch (ArgumentException)
             {
                 Reject(submission, new RejectionReason("MalformedArguments"));
-                return;
+                return true;
             }
 
             // Dedup by (incarnation, RequestId) with fingerprint verification.
@@ -423,7 +434,7 @@ namespace SignalRouter.V2.Kernel
                     Reject(submission, RejectionReason.RequestIdConflict);
                 }
 
-                return;
+                return true;
             }
 
             if (recoveryIndex.TryGetTerminal(submission.Request, out var terminalEntry))
@@ -437,13 +448,13 @@ namespace SignalRouter.V2.Kernel
                     Reject(submission, RejectionReason.RequestIdConflict);
                 }
 
-                return;
+                return true;
             }
 
             if (recoveryIndex.AtCapacity)
             {
                 Reject(submission, RejectionReason.CapacityExhausted);
-                return;
+                return true;
             }
 
             var resolvedTarget = new ResolvedTarget(record.Reference, record.Registration.AuthorKey);
@@ -462,11 +473,11 @@ namespace SignalRouter.V2.Kernel
                     recorded, resolvedTarget, submission.Envelope)))
                 {
                     case EvidenceReadiness.Pending:
-                        stalledAdmission = message;
-                        return;
+                        // The caller parks the message; retried head-first.
+                        return false;
                     case EvidenceReadiness.Fault:
                         Reject(submission, new RejectionReason("EvidenceUnavailable"));
-                        return;
+                        return true;
                 }
             }
 
@@ -483,6 +494,14 @@ namespace SignalRouter.V2.Kernel
                 domain,
                 record.Reference,
                 descriptor);
+            if (message.CancelRequested)
+            {
+                // A cancel that arrived while this admission was stalled on E2
+                // Pending is honored as an ordinary BeforeEffect cancellation.
+                interaction.CancellationRequested = true;
+                interaction.CancelRequestedOrder = order;
+            }
+
             admitted.Enqueue(interaction);
             PublishStatus();
             submission.Observer?.OnAccepted(submission.Request);
@@ -491,6 +510,7 @@ namespace SignalRouter.V2.Kernel
                 CausationOf(submission.Envelope),
                 request: submission.Request,
                 order: order);
+            return true;
         }
 
         private void Reject(IntentSubmission submission, RejectionReason reason)
@@ -969,7 +989,13 @@ namespace SignalRouter.V2.Kernel
                     continuation.Payload,
                     envelope,
                     observer: null);
-                ProcessSubmission(new SubmissionMessage(submission, humanPriority: false));
+                var childMessage = new SubmissionMessage(submission, humanPriority: false);
+                if (!ProcessSubmission(childMessage))
+                {
+                    // A child stalled on E2 Pending parks behind any existing
+                    // stalls — never overwriting them.
+                    stalledAdmissions.Enqueue(childMessage);
+                }
             }
         }
 
@@ -1409,6 +1435,18 @@ namespace SignalRouter.V2.Kernel
                     return;
                 }
             }
+
+            // A submission stalled on E2 Pending is visible to cancellation too —
+            // the cancel window must not silently close while evidence is in
+            // flight (guarantees.md §8).
+            foreach (var stalled in stalledAdmissions)
+            {
+                if (stalled.Submission.Request.Equals(request))
+                {
+                    stalled.CancelRequested = true;
+                    return;
+                }
+            }
         }
 
         private void ProcessFence(EffectPermitToken permit)
@@ -1724,7 +1762,7 @@ namespace SignalRouter.V2.Kernel
             active = null;
             admitted.Clear();
             committingEvidence.Clear();
-            stalledAdmission = null;
+            stalledAdmissions.Clear();
             executor?.Detach();
 
             foreach (var stranded in recoveryIndex.DrainPending())

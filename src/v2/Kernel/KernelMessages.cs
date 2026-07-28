@@ -295,5 +295,12 @@ namespace SignalRouter.V2.Kernel
         internal IntentSubmission Submission { get; }
 
         internal bool HumanPriority { get; }
+
+        /// <summary>
+        /// A cancel arrived while this submission was stalled on E2 Pending; the
+        /// admission honors it as a BeforeEffect cancellation instead of silently
+        /// dropping the request's cancel window.
+        /// </summary>
+        internal bool CancelRequested { get; set; }
     }
 }

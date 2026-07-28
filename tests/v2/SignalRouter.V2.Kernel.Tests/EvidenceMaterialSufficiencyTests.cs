@@ -206,6 +206,155 @@ public sealed class EvidenceMaterialSufficiencyTests
     }
 
     [Test]
+    public void AnExecutorRefusalIsE4Sufficient()
+    {
+        var (fixture, coordinator) = Build();
+        fixture.Executor.Behavior = ScriptedExecutor.Mode.Refuse;
+        fixture.Submit("r-1");
+        fixture.PumpUntilIdle();
+
+        var evidence = coordinator.Terminals[0];
+        Assert.That(evidence.Outcome, Is.EqualTo(InteractionOutcome.Faulted));
+        Assert.That(evidence.EffectStarted, Is.False);
+        _ = CutOf(evidence); // the ctor invariants are the oracle; a throw fails the test
+    }
+
+    [Test]
+    public void APostconditionFaultIsE4Sufficient()
+    {
+        var coordinator = new ScriptedCoordinator();
+        var fixture = new KernelFixture(
+            coordinator: coordinator,
+            codec: new TestCanonicalStateCodec(),
+            invokePostcondition: new PredicateDefinition(
+                ValueArray<PredicateClause>.From(new[]
+                {
+                    new PredicateClause(
+                        new ClauseId("c0"),
+                        new ComparisonExpression(
+                            new FieldPath("nodes/save/attributes/label"),
+                            ComparisonOperator.Eq,
+                            PredicateOperand.Of("Never"))),
+                })));
+        fixture.Submit("r-1");
+        fixture.PumpUntilIdle();
+        fixture.Executor.CompleteLast(EffectResolution.Succeeded(
+            new CompletionEvidence(KernelFixture.Applied, CompletionEvidenceKind.Applied, default)));
+        fixture.PumpUntilIdle();
+
+        var evidence = coordinator.Terminals[0];
+        Assert.That(evidence.FaultCode, Is.EqualTo(FaultCode.CompletionPostconditionNotSatisfied));
+        Assert.That(evidence.Postcondition, Is.EqualTo(PostconditionResult.False));
+        _ = CutOf(evidence); // the ctor invariants are the oracle; a throw fails the test
+    }
+
+    [Test]
+    public void AnActiveCancellationObservesALaterOrderThanItRequested()
+    {
+        var (fixture, coordinator) = Build();
+        fixture.Submit("r-1");
+        fixture.PumpUntilIdle();
+        fixture.Runtime.Control.RequestCancel(new RequestId("r-1"));
+        fixture.Pump();
+        fixture.Submit("r-2");
+        fixture.Pump();
+        fixture.Executor.CompleteLast(
+            EffectResolution.Cancelled(CancellationPhase.DuringEffect, "Cooperative"));
+        fixture.PumpUntilIdle();
+        fixture.Executor.CompleteLast(EffectResolution.Succeeded(
+            new CompletionEvidence(KernelFixture.Applied, CompletionEvidenceKind.Applied, default)));
+        fixture.PumpUntilIdle();
+
+        var evidence = coordinator.Terminals[0];
+        Assert.That(evidence.Request, Is.EqualTo(new RequestId("r-1")));
+        Assert.That(evidence.Cancellation!.RequestedOrder, Is.EqualTo(new LogicalOrder(1)));
+        Assert.That(
+            evidence.Cancellation.ObservedOrder, Is.EqualTo(new LogicalOrder(2)),
+            "r-2's admission advanced the order between request and observation");
+        _ = CutOf(evidence); // the ctor invariants are the oracle; a throw fails the test
+    }
+
+    [Test]
+    public void SecretArgumentsAdmitAndRedigestAsReferences()
+    {
+        var coordinator = new ScriptedCoordinator();
+        var fixture = new KernelFixture(
+            coordinator: coordinator,
+            codec: new TestCanonicalStateCodec(),
+            invokeSchema: new ArgumentSchema(ValueArray<ArgumentField>.From(new[]
+            {
+                new ArgumentField("token", FieldType.String, required: true, Sensitivity.Sensitive),
+            })));
+        fixture.Submit("r-1", payload: new InvocationPayload(ValueArray<NamedField>.From(new[]
+        {
+            new NamedField("token", FieldValue.Of("hunter2")),
+        })));
+        fixture.PumpUntilIdle();
+
+        var admission = coordinator.Admissions[0];
+        Assert.That(admission.Arguments.Fields[0].IsSecret, Is.True);
+        Assert.That(
+            InvocationCanonicalizer.DigestOf(admission.Arguments),
+            Is.EqualTo(admission.Invocation.Arguments));
+    }
+
+    [Test]
+    public void StalledAdmissionsQueueAndHonorCancels()
+    {
+        var (fixture, coordinator) = Build();
+        coordinator.AdmissionAnswer = EvidenceReadiness.Pending;
+        fixture.Submit("r-1");
+        fixture.Submit("r-2");
+        fixture.Pump(maxTurns: 4);
+        fixture.Runtime.Control.RequestCancel(new RequestId("r-1"));
+        fixture.Pump(maxTurns: 4);
+
+        coordinator.AdmissionAnswer = EvidenceReadiness.Ready;
+        fixture.PumpUntilIdle();
+        fixture.Executor.CompleteLast(EffectResolution.Succeeded(
+            new CompletionEvidence(KernelFixture.Applied, CompletionEvidenceKind.Applied, default)));
+        fixture.PumpUntilIdle();
+
+        // Both stalled admissions survived (no single-slot overwrite), in order;
+        // the cancel that arrived during the stall took effect as BeforeEffect.
+        Assert.That(coordinator.Admissions, Has.Count.EqualTo(2));
+        Assert.That(coordinator.Admissions[0].Request, Is.EqualTo(new RequestId("r-1")));
+        Assert.That(coordinator.Admissions[1].Request, Is.EqualTo(new RequestId("r-2")));
+        var cancelled = coordinator.Terminals[0];
+        Assert.That(cancelled.Request, Is.EqualTo(new RequestId("r-1")));
+        Assert.That(cancelled.Outcome, Is.EqualTo(InteractionOutcome.Cancelled));
+        Assert.That(cancelled.Cancellation!.Phase, Is.EqualTo(CancellationPhase.BeforeEffect));
+    }
+
+    [Test]
+    public void AnOverLimitContinuationListYieldsEmptyCommitments()
+    {
+        var (fixture, coordinator) = Build();
+        fixture.Submit("r-1");
+        fixture.PumpUntilIdle();
+        var overLimit = new ContinuationRequest[33]; // MaxContinuationsPerParent defaults to 32
+        for (var i = 0; i < overLimit.Length; i++)
+        {
+            overLimit[i] = new ContinuationRequest(
+                KernelFixture.Invoke,
+                TargetReference.ForKey(new AuthorKey("save")),
+                InvocationPayload.Empty);
+        }
+
+        fixture.Executor.CompleteLast(
+            EffectResolution.Succeeded(new CompletionEvidence(
+                KernelFixture.Applied, CompletionEvidenceKind.Applied, default)),
+            ValueArray<ContinuationRequest>.From(overLimit));
+        fixture.PumpUntilIdle();
+
+        var evidence = coordinator.Terminals[0];
+        Assert.That(evidence.Commitments.Count, Is.Zero);
+        Assert.That(evidence.Continuations.Count, Is.Zero);
+        Assert.That(fixture.TraceKinds(), Has.Some.Contains("ContinuationLimitExceeded"));
+        _ = CutOf(evidence); // the ctor invariants are the oracle; a throw fails the test
+    }
+
+    [Test]
     public void AnUnresolvableContinuationDropsTheWholeCommitmentList()
     {
         var (fixture, coordinator) = Build();
