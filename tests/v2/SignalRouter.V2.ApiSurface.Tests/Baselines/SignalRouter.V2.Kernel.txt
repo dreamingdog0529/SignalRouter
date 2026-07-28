@@ -11,10 +11,34 @@ sealed class SignalRouter.V2.Kernel.AdmissionEvidence
   public ctor(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.Contracts.LogicalOrder order, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.CapabilityInvocation invocation, SignalRouter.V2.Contracts.RecordedArguments arguments, SignalRouter.V2.Contracts.ResolvedTarget resolvedTarget, SignalRouter.V2.Contracts.IdentityEnvelope envelope)
 
 sealed class SignalRouter.V2.Kernel.AssertionBatch
+  property DiagnosticOnly : System.Boolean { public get; }
   property Observer : SignalRouter.V2.Kernel.IAssertionObserver { public get; }
   property Predicates : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> { public get; }
   property Principal : SignalRouter.V2.Contracts.Principal { public get; }
   public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> predicates, SignalRouter.V2.Contracts.Principal principal, SignalRouter.V2.Kernel.IAssertionObserver observer)
+  public ctor(SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> predicates, SignalRouter.V2.Contracts.Principal principal, SignalRouter.V2.Kernel.IAssertionObserver observer, System.Boolean diagnosticOnly)
+
+sealed class SignalRouter.V2.Kernel.AssertionEvidence
+  property Clauses : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ClauseEvaluation> { public get; }
+  property Domain : SignalRouter.V2.Contracts.SecurityDomainId { public get; }
+  property Operands : SignalRouter.V2.Contracts.ArgumentDigest { public get; }
+  property Outcome : SignalRouter.V2.Contracts.PredicateEvaluationOutcome { public get; }
+  property Predicate : SignalRouter.V2.Contracts.PredicateContractRef { public get; }
+  property Snapshot : SignalRouter.V2.Kernel.RecordMaterialization { public get; }
+  property StateSourceTableVersion : System.Int32 { public get; }
+  public ctor(SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.ArgumentDigest operands, SignalRouter.V2.Contracts.SecurityDomainId domain, System.Int32 stateSourceTableVersion, SignalRouter.V2.Kernel.RecordMaterialization snapshot, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ClauseEvaluation> clauses, SignalRouter.V2.Contracts.PredicateEvaluationOutcome outcome)
+
+readonly struct SignalRouter.V2.Kernel.BarrierAnswer
+  property Readiness : SignalRouter.V2.Kernel.EvidenceReadiness { public get; }
+  property RequestedClose : SignalRouter.V2.Contracts.IncompleteReason? { public get; }
+  public static method Continue(SignalRouter.V2.Kernel.EvidenceReadiness readiness) : SignalRouter.V2.Kernel.BarrierAnswer
+  public static method RequestClose(SignalRouter.V2.Kernel.EvidenceReadiness readiness, SignalRouter.V2.Contracts.IncompleteReason reason) : SignalRouter.V2.Kernel.BarrierAnswer
+
+sealed class SignalRouter.V2.Kernel.BarrierEvidence
+  property ContaminatedRequests : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.RequestId> { public get; }
+  property RevisionAtDetection : SignalRouter.V2.Contracts.SourceRevision { public get; }
+  property SourceHint : System.String { public get; }
+  public ctor(SignalRouter.V2.Contracts.SourceRevision revisionAtDetection, System.String sourceHint, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.RequestId> contaminatedRequests)
 
 sealed class SignalRouter.V2.Kernel.CloseEvidence
   property FinalSnapshot : SignalRouter.V2.Kernel.RecordMaterialization { public get; }
@@ -68,7 +92,11 @@ interface SignalRouter.V2.Kernel.IRecordingCoordinator
   property AdmissionPolicy : SignalRouter.V2.Kernel.RecordingAdmissionPolicy { public get; }
   property CloseRequested : SignalRouter.V2.Contracts.IncompleteReason? { public get; }
   public method Bind(SignalRouter.V2.Kernel.IRecordObservationServices services) : System.Void
+  public method CommitAssertionEvidence(SignalRouter.V2.Kernel.AssertionEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   public method CommitCloseEvidence(SignalRouter.V2.Kernel.CloseEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  public method CommitExternalMutation(SignalRouter.V2.Kernel.BarrierEvidence evidence) : SignalRouter.V2.Kernel.BarrierAnswer
+  public method CommitWaitArmed(SignalRouter.V2.Kernel.WaitArmedEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  public method CommitWaitResolved(SignalRouter.V2.Kernel.WaitResolvedEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   public method NotifyTeardown() : System.Void
   public method PrepareOpenEvidence(SignalRouter.V2.Kernel.OpenEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
 
@@ -243,3 +271,19 @@ sealed class SignalRouter.V2.Kernel.TimelineEntry
 
 sealed class SignalRouter.V2.Kernel.TimelineIndex
   public method Snapshot(SignalRouter.V2.Contracts.Principal principal) : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Kernel.TimelineEntry>
+
+sealed class SignalRouter.V2.Kernel.WaitArmedEvidence
+  property ArmedSequence : SignalRouter.V2.Contracts.ViewSequence { public get; }
+  property Causality : SignalRouter.V2.Contracts.Causality { public get; }
+  property Fingerprint : SignalRouter.V2.Contracts.SemanticFingerprint { public get; }
+  property Operands : SignalRouter.V2.Contracts.ArgumentDigest { public get; }
+  property Operation : SignalRouter.V2.Contracts.OperationId { public get; }
+  property Predicate : SignalRouter.V2.Contracts.PredicateContractRef { public get; }
+  public ctor(SignalRouter.V2.Contracts.OperationId operation, SignalRouter.V2.Contracts.PredicateContractRef predicate, SignalRouter.V2.Contracts.ArgumentDigest operands, SignalRouter.V2.Contracts.SemanticFingerprint fingerprint, SignalRouter.V2.Contracts.Causality causality, SignalRouter.V2.Contracts.ViewSequence armedSequence)
+
+sealed class SignalRouter.V2.Kernel.WaitResolvedEvidence
+  property Observation : SignalRouter.V2.Kernel.RecordMaterialization { public get; }
+  property Operation : SignalRouter.V2.Contracts.OperationId { public get; }
+  property Resolution : SignalRouter.V2.Contracts.PredicateResolution { public get; }
+  property ResolvedSequence : SignalRouter.V2.Contracts.ViewSequence { public get; }
+  public ctor(SignalRouter.V2.Contracts.OperationId operation, SignalRouter.V2.Contracts.PredicateResolution resolution, SignalRouter.V2.Kernel.RecordMaterialization observation, SignalRouter.V2.Contracts.ViewSequence resolvedSequence)

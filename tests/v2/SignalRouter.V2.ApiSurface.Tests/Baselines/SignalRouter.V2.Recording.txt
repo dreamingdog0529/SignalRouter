@@ -6,12 +6,21 @@ sealed class SignalRouter.V2.Recording.DurableEvidenceCoordinator
   property CloseRequested : SignalRouter.V2.Contracts.IncompleteReason? { public get; }
   public ctor(SignalRouter.V2.Codec.Recording.IArtifactStore store, SignalRouter.V2.Recording.RecordingCoordinatorOptions options)
   public method Bind(SignalRouter.V2.Kernel.IRecordObservationServices boundServices) : System.Void
+  public method CommitAssertionEvidence(SignalRouter.V2.Kernel.AssertionEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   public method CommitCloseEvidence(SignalRouter.V2.Kernel.CloseEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  public method CommitExternalMutation(SignalRouter.V2.Kernel.BarrierEvidence evidence) : SignalRouter.V2.Kernel.BarrierAnswer
   public method CommitTerminalEvidence(SignalRouter.V2.Kernel.TerminalEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  public method CommitWaitArmed(SignalRouter.V2.Kernel.WaitArmedEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+  public method CommitWaitResolved(SignalRouter.V2.Kernel.WaitResolvedEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   public method NotifyTeardown() : System.Void
   public method PrepareAdmissionEvidence(SignalRouter.V2.Kernel.AdmissionEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   public method PrepareEffectPermit(SignalRouter.V2.Kernel.PermitEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
   public method PrepareOpenEvidence(SignalRouter.V2.Kernel.OpenEvidence evidence) : SignalRouter.V2.Kernel.EvidenceReadiness
+
+enum SignalRouter.V2.Recording.ExternalMutationPolicy
+  : System.Int32
+  BarrierContinue = 0
+  Terminate = 1
 
 enum SignalRouter.V2.Recording.RecordingCapacityPolicy
   : System.Int32
@@ -20,8 +29,9 @@ enum SignalRouter.V2.Recording.RecordingCapacityPolicy
 sealed class SignalRouter.V2.Recording.RecordingCoordinatorOptions
   property AllowNonDurableStore : System.Boolean { public get; }
   property CapacityPolicy : SignalRouter.V2.Recording.RecordingCapacityPolicy { public get; }
+  property ExternalMutation : SignalRouter.V2.Recording.ExternalMutationPolicy { public get; }
   property MaxArtifactBytes : System.Int64 { public get; }
   property MaxBlobBytes : System.Int32 { public get; }
   property MaxEventCount : System.Int32 { public get; }
   property Profile : SignalRouter.V2.Contracts.ReplayComparisonProfile { public get; }
-  public ctor(SignalRouter.V2.Contracts.ReplayComparisonProfile profile, System.Int64 maxArtifactBytes = 67108864, System.Int32 maxEventCount = 65536, System.Int32 maxBlobBytes = 8388608, SignalRouter.V2.Recording.RecordingCapacityPolicy capacityPolicy = 0, System.Boolean allowNonDurableStore = false)
+  public ctor(SignalRouter.V2.Contracts.ReplayComparisonProfile profile, System.Int64 maxArtifactBytes = 67108864, System.Int32 maxEventCount = 65536, System.Int32 maxBlobBytes = 8388608, SignalRouter.V2.Recording.RecordingCapacityPolicy capacityPolicy = 0, System.Boolean allowNonDurableStore = false, SignalRouter.V2.Recording.ExternalMutationPolicy externalMutationPolicy = 0)

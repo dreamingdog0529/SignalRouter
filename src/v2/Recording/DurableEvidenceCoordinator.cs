@@ -27,6 +27,7 @@ namespace SignalRouter.V2.Recording
         private bool recordingActive;
         private OperationId recording;
         private ViewContractRef recordView;
+        private RuntimeIncarnationId incarnation;
         private string scope = string.Empty;
         private ulong nextSequence;
         private int cutCount;
@@ -157,6 +158,7 @@ namespace SignalRouter.V2.Recording
             recording = evidence.Recording;
             recordView = evidence.RecordView;
             scope = evidence.Scope;
+            incarnation = evidence.Incarnation;
             recordingActive = true;
             openStep = 0;
             return EvidenceReadiness.Ready;
@@ -335,6 +337,142 @@ namespace SignalRouter.V2.Recording
                     unresolvedCommitments[(evidence.Request, evidence.Commitments[i].Ordinal)] =
                         evidence.Commitments[i].Fingerprint;
                 }
+            }
+
+            return answer;
+        }
+
+        // ── E5/E6/E8 (vacuous outside an open recording) ─────────────────────
+
+        public BarrierAnswer CommitExternalMutation(BarrierEvidence evidence)
+        {
+            if (!recordingActive)
+            {
+                return BarrierAnswer.Continue(EvidenceReadiness.Ready);
+            }
+
+            // The interval endpoints are append positions (guarantees.md §5.5):
+            // the last already-durable cut is the clean bound, and the barrier
+            // itself is the first cut at-or-after the detection. recordingActive
+            // implies E1 committed, so nextSequence is at least one.
+            var readiness = AppendCut(new ExternalMutationBarrier(
+                new EvidenceSequence(nextSequence),
+                lastKnownCleanCut: new EvidenceSequence(nextSequence - 1),
+                firstObservedCut: new EvidenceSequence(nextSequence),
+                evidence.RevisionAtDetection,
+                evidence.SourceHint,
+                evidence.ContaminatedRequests));
+            return options.ExternalMutation == ExternalMutationPolicy.Terminate
+                ? BarrierAnswer.RequestClose(readiness, IncompleteReason.ExternalMutation)
+                : BarrierAnswer.Continue(readiness);
+        }
+
+        public EvidenceReadiness CommitWaitArmed(WaitArmedEvidence evidence)
+        {
+            if (!recordingActive)
+            {
+                return EvidenceReadiness.Ready;
+            }
+
+            // E6a carries no snapshot: the witness is E6b's (guarantees.md §5.6).
+            // The view contract and observation scope are the recording's own —
+            // replay re-evaluates against the record-view materialization.
+            return AppendCut(new PredicateArmed(
+                new EvidenceSequence(nextSequence),
+                evidence.Operation,
+                evidence.Predicate,
+                evidence.Operands,
+                evidence.Fingerprint,
+                recordView,
+                scope,
+                evidence.Causality,
+                evidence.ArmedSequence));
+        }
+
+        public EvidenceReadiness CommitWaitResolved(WaitResolvedEvidence evidence)
+        {
+            if (!recordingActive)
+            {
+                return EvidenceReadiness.Ready;
+            }
+
+            var witnessId = evidence.Observation.Snapshot.ContentId;
+            if (!writer!.ContainsBlob(witnessId))
+            {
+                var blobAnswer = AppendBlobBounded(witnessId, evidence.Observation);
+                if (blobAnswer == EvidenceReadiness.Pending)
+                {
+                    return EvidenceReadiness.Pending;
+                }
+
+                if (blobAnswer == EvidenceReadiness.Fault)
+                {
+                    services!.ReleaseLease(witnessId, recording);
+                    return EvidenceReadiness.Fault;
+                }
+            }
+
+            var answer = AppendCut(new PredicateResolved(
+                new EvidenceSequence(nextSequence),
+                evidence.Operation,
+                evidence.Resolution,
+                witnessId,
+                evidence.ResolvedSequence));
+            if (answer != EvidenceReadiness.Pending)
+            {
+                // Cut-level release (ADR 0015): the kernel leased the witness at
+                // the site; the pin ends with the final answer either way.
+                services!.ReleaseLease(witnessId, recording);
+            }
+
+            return answer;
+        }
+
+        public EvidenceReadiness CommitAssertionEvidence(AssertionEvidence evidence)
+        {
+            if (!recordingActive)
+            {
+                return EvidenceReadiness.Ready;
+            }
+
+            var snapshot = evidence.Snapshot.Snapshot;
+            var snapshotId = snapshot.ContentId;
+            if (!writer!.ContainsBlob(snapshotId))
+            {
+                var blobAnswer = AppendBlobBounded(snapshotId, evidence.Snapshot);
+                if (blobAnswer == EvidenceReadiness.Pending)
+                {
+                    return EvidenceReadiness.Pending;
+                }
+
+                if (blobAnswer == EvidenceReadiness.Fault)
+                {
+                    services!.ReleaseLease(snapshotId, recording);
+                    return EvidenceReadiness.Fault;
+                }
+            }
+
+            var answer = AppendCut(new AssertionEvaluated(
+                new EvidenceSequence(nextSequence),
+                incarnation,
+                snapshot.Basis.Revision,
+                recordView,
+                evidence.StateSourceTableVersion,
+                scope,
+                evidence.Domain,
+                snapshotId,
+                completeForScope: snapshot.Completeness.Equals(CompletenessMap.Complete),
+                evidence.Predicate,
+                evidence.Operands,
+                evidence.Clauses,
+                evidence.Outcome,
+                // Witness-path extraction is diagnostic material the evaluator
+                // does not produce in v2.0: bounded to the empty set, never
+                // fabricated (guarantees.md §5.10).
+                ValueArray<string>.Empty));
+            if (answer != EvidenceReadiness.Pending)
+            {
+                services!.ReleaseLease(snapshotId, recording);
             }
 
             return answer;
@@ -527,6 +665,7 @@ namespace SignalRouter.V2.Recording
             recording = default;
             scope = string.Empty;
             recordView = default;
+            incarnation = default;
             nextSequence = 0;
             cutCount = 0;
             reachableSet.Clear();

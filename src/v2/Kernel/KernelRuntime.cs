@@ -109,6 +109,18 @@ namespace SignalRouter.V2.Kernel
         private RecordingCloseReason pendingCloseReason;
         private long recordingCounter;
 
+        // E5 accumulation — external mutations coalesce until the next
+        // cut-producing turn action, so one pump run yields one barrier whose
+        // interval covers them (ADR 0015; guarantees.md §5.5 records intervals,
+        // not points) — and the E6/E8 park-and-retry list (same discipline as
+        // committingEvidence: transient sink pressure degrades latency, never
+        // the artifact).
+        private string? pendingBarrierHint;
+        private SourceRevision pendingBarrierRevision;
+        private readonly List<RequestId> pendingBarrierContaminated = new List<RequestId>();
+        private readonly List<object> parkedRecordingEvidence = new List<object>();
+        private ulong recordingViewSequence;
+
         private enum RecordingPhase
         {
             NotRecording,
@@ -286,6 +298,11 @@ namespace SignalRouter.V2.Kernel
                 return true;
             }
 
+            if (!tornDown && TryProgressRecordingEvidence())
+            {
+                return true;
+            }
+
             if (!tornDown && TryProgressRecordingLifecycle())
             {
                 return true;
@@ -325,6 +342,16 @@ namespace SignalRouter.V2.Kernel
                     AdoptPublication(publication);
                     return true;
                 }
+            }
+
+            // A coalesced barrier flushes before any turn action that can append
+            // a non-E5 cut — an admission or effect cut committed between the
+            // mutation and its barrier would falsely read as pre-contamination.
+            // Publications dequeue above this point, so a publication burst
+            // keeps coalescing into the pending barrier.
+            if (FlushExternalBarrier())
+            {
+                return true;
             }
 
             if (stalledAdmissions.Count > 0)
@@ -410,6 +437,8 @@ namespace SignalRouter.V2.Kernel
                     publicationDepth > 0 ||
                     stalledAdmissions.Count > 0 ||
                     committingEvidence.Count > 0 ||
+                    parkedRecordingEvidence.Count > 0 ||
+                    pendingBarrierHint != null ||
                     deferredSnapshots.Count > 0 ||
                     (recordingPhase != RecordingPhase.NotRecording &&
                         recordingPhase != RecordingPhase.Active) ||
@@ -1084,6 +1113,15 @@ namespace SignalRouter.V2.Kernel
                 return;
             }
 
+            // Control operations can produce evidence cuts (E4 via completion,
+            // E6/E8, the close fence); a pending barrier must precede them.
+            // ObservedExternal is the accumulating message itself and keeps
+            // coalescing instead.
+            if (!(message is ObservedExternalMessage))
+            {
+                FlushExternalBarrier();
+            }
+
             switch (message)
             {
                 case CancelMessage cancel:
@@ -1632,6 +1670,8 @@ namespace SignalRouter.V2.Kernel
                 EventCausation.OfExternal(report.SourceHint),
                 request: intersecting ? active!.Request : (RequestId?)null,
                 revision: nodeStore.Revision);
+            AccumulateExternalBarrier(
+                report.SourceHint, intersecting ? active!.Request : (RequestId?)null);
         }
 
         private void ProcessRegistration(RegistrationMessage message)
@@ -1691,11 +1731,15 @@ namespace SignalRouter.V2.Kernel
             }
 
             Emit(EventKind.PredicateArmed, EventCausation.None, operation: message.Operation);
-            var entry = new WaitEntry(message.Operation, definition, domain, message.TimeoutAtLogicalTime, message.Observer);
+            var recordedArm = RecordWaitArmed(message.Operation, message.Predicate, definition);
+            var entry = new WaitEntry(
+                message.Operation, definition, domain, message.TimeoutAtLogicalTime,
+                message.Observer, recordedArm);
             var result = PredicateEvaluator.Evaluate(
                 definition, PinReader(domain), PredicateStructuralBounds.Default);
             if (result.Outcome.Kind == PredicateEvaluationKind.Satisfied)
             {
+                RecordWaitResolved(message.Operation, PredicateResolution.Satisfied, recordedArm);
                 Emit(EventKind.PredicateResolved, EventCausation.None, operation: message.Operation);
                 message.Observer.OnResolved(message.Operation, PredicateResolution.Satisfied);
                 return;
@@ -1705,6 +1749,7 @@ namespace SignalRouter.V2.Kernel
             // storing it would leave the observer unresolved on an idle kernel.
             if (message.TimeoutAtLogicalTime <= currentLogicalNow)
             {
+                RecordWaitResolved(message.Operation, PredicateResolution.TimedOut, recordedArm);
                 Emit(EventKind.PredicateResolved, EventCausation.None, operation: message.Operation);
                 message.Observer.OnResolved(message.Operation, PredicateResolution.TimedOut);
                 return;
@@ -1714,12 +1759,76 @@ namespace SignalRouter.V2.Kernel
             waitDeadlines.Add(message.Operation, message.TimeoutAtLogicalTime);
         }
 
+        /// <summary>
+        /// E6a. Answers whether the armed cut was issued — a wait whose arm never
+        /// reached the artifact must not produce an unpaired resolution cut.
+        /// </summary>
+        private bool RecordWaitArmed(
+            OperationId operation, PredicateContractRef predicate, PredicateDefinition definition)
+        {
+            // E6 bears on the artifact only while Active (ADR 0015 state table);
+            // a wait armed during a fence resolves without artifact evidence.
+            if (recordingPhase != RecordingPhase.Active)
+            {
+                return false;
+            }
+
+            FlushExternalBarrier();
+
+            // No operand values are recorded: waits arm registered contracts
+            // only, and E1 pins the definition — the digest identifies it
+            // (ADR 0015). Every wait the control surface can express today is
+            // root-caused; a continuation-caused arm API would carry its link.
+            var operands = PredicateCanonicalizer.DigestOf(definition);
+            return OfferRecordingEvidence(new WaitArmedEvidence(
+                operation,
+                predicate,
+                operands,
+                PredicateCanonicalizer.FingerprintOf(predicate, operands),
+                Causality.Root(),
+                new ViewSequence(recordingViewSequence++))) != EvidenceReadiness.Fault;
+        }
+
+        /// <summary>
+        /// E6b. The witness (for Satisfied) or final observation is the
+        /// record-view materialization at the resolution (guarantees.md §5.6),
+        /// leased here and released by the coordinator when the cut is durable.
+        /// </summary>
+        private void RecordWaitResolved(
+            OperationId operation, PredicateResolution resolution, bool recordedArm)
+        {
+            if (!recordedArm ||
+                (recordingPhase != RecordingPhase.Active &&
+                    recordingPhase != RecordingPhase.ClosingDraining))
+            {
+                return;
+            }
+
+            FlushExternalBarrier();
+            if (!RecordObservation.TryMaterializeView(
+                recordingRequest!.RecordView, recordingRequest.Scope, null, out var witness, out _))
+            {
+                DegradeRecording(IncompleteReason.SinkFault);
+                return;
+            }
+
+            if (RecordObservation.TryLease(witness!, recordingOperation) != LeaseAnswer.Retained)
+            {
+                DegradeRecording(IncompleteReason.SizeLimit);
+                return;
+            }
+
+            OfferRecordingEvidence(new WaitResolvedEvidence(
+                operation, resolution, witness!, new ViewSequence(recordingViewSequence++)));
+        }
+
         private void ResolveWait(OperationId operation, PredicateResolution resolution)
         {
             if (waits.TryGetValue(operation, out var entry))
             {
                 waits.Remove(operation);
                 waitDeadlines.Remove(operation);
+                RecordWaitResolved(operation, resolution, entry.RecordedArm);
                 Emit(EventKind.PredicateResolved, EventCausation.None, operation: operation);
                 entry.Observer.OnResolved(operation, resolution);
             }
@@ -1815,6 +1924,10 @@ namespace SignalRouter.V2.Kernel
                         ValueArray<ClauseEvaluation>.Empty));
                 }
             }
+            else if (recordingPhase == RecordingPhase.Active && !batch.DiagnosticOnly)
+            {
+                ProcessRecordedAssertions(batch, results);
+            }
             else
             {
                 // One pinned read for the whole batch (verification.md §3.2).
@@ -1836,6 +1949,90 @@ namespace SignalRouter.V2.Kernel
             }
 
             batch.Observer.OnEvaluated(ValueArray<PredicateEvaluationResult>.From(results));
+        }
+
+        /// <summary>
+        /// The evidence-bearing batch path (verification.md §3.3): while a
+        /// recording is active, evaluation runs against the record-domain
+        /// projection — E8 persists exactly the evaluation the caller received —
+        /// still one materialization for the whole batch (§3.2).
+        /// </summary>
+        private void ProcessRecordedAssertions(AssertionBatch batch, List<PredicateEvaluationResult> results)
+        {
+            FlushExternalBarrier();
+            if (!RecordObservation.TryMaterializeView(
+                recordingRequest!.RecordView, recordingRequest.Scope, null, out var snapshot, out _))
+            {
+                snapshot = null;
+            }
+
+            if (snapshot == null)
+            {
+                // The projection is unavailable: refusing the batch is the
+                // honest answer — an evaluation whose promised E8 cannot exist
+                // would be silent evidence loss.
+                foreach (var _ in batch.Predicates)
+                {
+                    results.Add(new PredicateEvaluationResult(
+                        PredicateEvaluationOutcome.Unevaluable(new UnevaluableReason("EvidenceUnavailable")),
+                        ValueArray<ClauseEvaluation>.Empty));
+                }
+
+                return;
+            }
+
+            var lookup = new ExposureTrackingLookup(new MaterializationLookup(snapshot.Materialization));
+            foreach (var predicate in batch.Predicates)
+            {
+                if (!predicateContracts.TryGetValue(predicate, out var definition))
+                {
+                    results.Add(new PredicateEvaluationResult(
+                        PredicateEvaluationOutcome.Unevaluable(UnevaluableReason.UnsupportedContract),
+                        ValueArray<ClauseEvaluation>.Empty));
+                    continue;
+                }
+
+                lookup.ResetExposure();
+                var result = PredicateEvaluator.Evaluate(
+                    definition, lookup, PredicateStructuralBounds.Default);
+                if (lookup.OutOfScopeReferenced)
+                {
+                    // The predicate references material outside the record
+                    // view's exposure: refused with a distinct error — the
+                    // record-exposure opt-in is never bypassed through
+                    // assertion evidence (§3.3). Redacted lookups and
+                    // secret-operand outcomes stay recordable: the record view
+                    // carries its redaction marks, so replay reproduces them.
+                    results.Add(new PredicateEvaluationResult(
+                        PredicateEvaluationOutcome.Unevaluable(new UnevaluableReason("RecordExposure")),
+                        ValueArray<ClauseEvaluation>.Empty));
+                    Emit(
+                        EventKind.AssertionEvaluated, EventCausation.None,
+                        detailCode: "RecordExposureRefused");
+                    continue;
+                }
+
+                results.Add(result);
+                Emit(EventKind.AssertionEvaluated, EventCausation.None);
+                if (RecordObservation.TryLease(snapshot, recordingOperation) != LeaseAnswer.Retained)
+                {
+                    // The answer already reached the caller; without its E8 the
+                    // artifact must degrade instead of silently omitting it.
+                    DegradeRecording(IncompleteReason.SizeLimit);
+                    continue;
+                }
+
+                OfferRecordingEvidence(new AssertionEvidence(
+                    predicate,
+                    PredicateCanonicalizer.DigestOf(definition),
+                    options.RecordDomain,
+                    // Contract registration is bootstrap-only in this kernel;
+                    // the state-source table version is fixed (SnapshotCatalog).
+                    stateSourceTableVersion: 1,
+                    snapshot,
+                    result.Clauses,
+                    result.Outcome));
+            }
         }
 
         // ── Recording lifecycle (ADR 0015) ───────────────────────────────────
@@ -1893,6 +2090,136 @@ namespace SignalRouter.V2.Kernel
             recordingPhase = RecordingPhase.ClosingDraining;
         }
 
+        private void AccumulateExternalBarrier(string sourceHint, RequestId? contaminated)
+        {
+            // E5 bears on the artifact only while Active (ADR 0015 state table);
+            // during the fences publications are frozen and an ObservedExternal
+            // report only moves the yet-unfixed base/final snapshot.
+            if (recordingPhase != RecordingPhase.Active)
+            {
+                return;
+            }
+
+            // Coalesced (ADR 0015): the first mutation names the barrier, the
+            // revision tracks the latest detection, the contaminated set unions.
+            pendingBarrierHint ??= sourceHint;
+            pendingBarrierRevision = nodeStore.Revision;
+            if (contaminated.HasValue && !pendingBarrierContaminated.Contains(contaminated.Value))
+            {
+                pendingBarrierContaminated.Add(contaminated.Value);
+            }
+        }
+
+        private bool FlushExternalBarrier()
+        {
+            if (pendingBarrierHint == null)
+            {
+                return false;
+            }
+
+            if (recordingPhase != RecordingPhase.Active &&
+                recordingPhase != RecordingPhase.ClosingDraining)
+            {
+                // The recording ended before the barrier committed (close fault,
+                // teardown): the artifact is already degraded or gone, and the
+                // mutation stays in the trace.
+                pendingBarrierHint = null;
+                pendingBarrierContaminated.Clear();
+                return false;
+            }
+
+            var answer = recordingCoordinator!.CommitExternalMutation(new BarrierEvidence(
+                pendingBarrierRevision,
+                pendingBarrierHint,
+                ValueArray<RequestId>.From(pendingBarrierContaminated)));
+            if (answer.Readiness != EvidenceReadiness.Pending)
+            {
+                // Ready: durable. Fault: the coordinator raised CloseRequested
+                // itself — the close makes the artifact honest.
+                pendingBarrierHint = null;
+                pendingBarrierContaminated.Clear();
+            }
+
+            if (answer.RequestedClose.HasValue)
+            {
+                // The disposition is valid immediately and independent of the
+                // readiness leg (ADR 0015). Under an already-degrading close the
+                // first degradation reason stands.
+                if (recordingPhase == RecordingPhase.Active)
+                {
+                    BeginRecordingClose(RecordingCloseReason.Incomplete(answer.RequestedClose.Value));
+                }
+                else if (pendingCloseReason.IsCompleted)
+                {
+                    pendingCloseReason = RecordingCloseReason.Incomplete(answer.RequestedClose.Value);
+                }
+            }
+
+            return true;
+        }
+
+        private EvidenceReadiness CommitRecordingEvidence(object evidence)
+        {
+            switch (evidence)
+            {
+                case WaitArmedEvidence armed:
+                    return recordingCoordinator!.CommitWaitArmed(armed);
+                case WaitResolvedEvidence resolved:
+                    return recordingCoordinator!.CommitWaitResolved(resolved);
+                default:
+                    return recordingCoordinator!.CommitAssertionEvidence((AssertionEvidence)evidence);
+            }
+        }
+
+        private EvidenceReadiness OfferRecordingEvidence(object evidence)
+        {
+            var answer = CommitRecordingEvidence(evidence);
+            if (answer == EvidenceReadiness.Pending)
+            {
+                // Parked and retried at later turns (ADR 0015): transient sink
+                // pressure degrades latency, never the artifact. Fault needs no
+                // kernel action — the coordinator raises CloseRequested itself.
+                parkedRecordingEvidence.Add(evidence);
+            }
+
+            return answer;
+        }
+
+        private bool TryProgressRecordingEvidence()
+        {
+            for (var i = 0; i < parkedRecordingEvidence.Count; i++)
+            {
+                if (CommitRecordingEvidence(parkedRecordingEvidence[i]) != EvidenceReadiness.Pending)
+                {
+                    // Swap-remove: retry order among parked commits is
+                    // unspecified (cross-request evidence interleave is normal,
+                    // guarantees.md §6.2) and this stays deterministic.
+                    var last = parkedRecordingEvidence.Count - 1;
+                    parkedRecordingEvidence[i] = parkedRecordingEvidence[last];
+                    parkedRecordingEvidence.RemoveAt(last);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// A ReplayEvidence obligation could not be produced kernel-side: the
+        /// artifact must not close Completed (no silent loss, guarantees.md §5, §8).
+        /// </summary>
+        private void DegradeRecording(IncompleteReason reason)
+        {
+            if (recordingPhase == RecordingPhase.Active)
+            {
+                BeginRecordingClose(RecordingCloseReason.Incomplete(reason));
+            }
+            else if (recordingPhase == RecordingPhase.ClosingDraining && pendingCloseReason.IsCompleted)
+            {
+                pendingCloseReason = RecordingCloseReason.Incomplete(reason);
+            }
+        }
+
         /// <summary>
         /// Drives the open/close fences: draining completes when every fence
         /// member — the active interaction, queued admissions, parked evidence
@@ -1938,6 +2265,10 @@ namespace SignalRouter.V2.Kernel
 
                 case RecordingPhase.ClosingDraining:
                 {
+                    // A barrier that went Pending while Active is a fence member
+                    // and drains here — the fence cannot quiesce over it.
+                    FlushExternalBarrier();
+
                     // A degradation raised by a member draining under an orderly
                     // close makes the close honest: the reason downgrades from
                     // Completed once, never back.
@@ -1984,7 +2315,9 @@ namespace SignalRouter.V2.Kernel
             active == null &&
             admitted.Count == 0 &&
             committingEvidence.Count == 0 &&
-            stalledAdmissions.Count == 0;
+            stalledAdmissions.Count == 0 &&
+            parkedRecordingEvidence.Count == 0 &&
+            pendingBarrierHint == null;
 
         private bool TryBuildOpenEvidence()
         {
@@ -2146,6 +2479,10 @@ namespace SignalRouter.V2.Kernel
             pendingOpenEvidence = null;
             pendingCloseEvidence = null;
             pendingCloseReason = default;
+            pendingBarrierHint = null;
+            pendingBarrierContaminated.Clear();
+            parkedRecordingEvidence.Clear();
+            recordingViewSequence = 0;
         }
 
         private void ProcessTeardown()
@@ -2232,16 +2569,31 @@ namespace SignalRouter.V2.Kernel
             // contamination (observation-state.md §7.2). Only the active request's
             // own causation is exempt — another request's causation is still
             // external to THIS controlled work.
-            if (active != null && active.EffectStarted &&
+            var intersecting = active != null && active.EffectStarted &&
                 !(publication.Causation.Kind == EventCausationKind.Request &&
-                    publication.Causation.Request.Equals(active.Request)))
+                    publication.Causation.Request.Equals(active.Request));
+            if (intersecting)
             {
-                active.Contaminated = true;
+                active!.Contaminated = true;
                 Emit(
                     EventKind.ContaminationObserved,
                     publication.Causation,
                     request: active.Request,
                     revision: nodeStore.Revision);
+            }
+
+            // The second E5 site (ADR 0015): a source mutation whose causation
+            // is external to the controlled work. A request-caused publication —
+            // even another request's — is controlled work: its mutation is
+            // attributable to that request's own evidence chain, so it
+            // contaminates above but raises no barrier.
+            if (publication.Causation.Kind != EventCausationKind.Request)
+            {
+                AccumulateExternalBarrier(
+                    publication.Causation.Kind == EventCausationKind.External
+                        ? publication.Causation.ExternalHint
+                        : publication.Source.Value,
+                    intersecting ? active!.Request : (RequestId?)null);
             }
         }
 
@@ -2419,13 +2771,15 @@ namespace SignalRouter.V2.Kernel
                 PredicateDefinition definition,
                 SecurityDomainId domain,
                 long timeoutAtLogicalTime,
-                IWaitObserver observer)
+                IWaitObserver observer,
+                bool recordedArm)
             {
                 Operation = operation;
                 Definition = definition;
                 Domain = domain;
                 TimeoutAtLogicalTime = timeoutAtLogicalTime;
                 Observer = observer;
+                RecordedArm = recordedArm;
             }
 
             internal OperationId Operation { get; }
@@ -2437,6 +2791,9 @@ namespace SignalRouter.V2.Kernel
             internal long TimeoutAtLogicalTime { get; }
 
             internal IWaitObserver Observer { get; }
+
+            /// <summary>The E6a cut was issued; its resolution owes an E6b (guarantees.md §5.6).</summary>
+            internal bool RecordedArm { get; }
         }
 
         private sealed class TerminalDetails

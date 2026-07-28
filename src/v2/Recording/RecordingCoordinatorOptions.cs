@@ -11,6 +11,16 @@ namespace SignalRouter.V2.Recording
         CloseIncompleteOnSizeLimit = 0,
     }
 
+    /// <summary>The declared E5 policy (guarantees.md §5.5; ADR 0015). Chosen at open, never improvised.</summary>
+    public enum ExternalMutationPolicy
+    {
+        /// <summary>The default: the barrier is recorded and the artifact continues (§5.3 fresh-materialization rule).</summary>
+        BarrierContinue = 0,
+
+        /// <summary>The barrier is recorded and the artifact terminates Incomplete(ExternalMutation).</summary>
+        Terminate = 1,
+    }
+
     /// <summary>
     /// What the durable coordinator declares before any overflow can occur
     /// (ADR 0015): the comparison-profile document the artifact embeds, the
@@ -24,7 +34,8 @@ namespace SignalRouter.V2.Recording
             int maxEventCount = 65536,
             int maxBlobBytes = 8 * 1024 * 1024,
             RecordingCapacityPolicy capacityPolicy = RecordingCapacityPolicy.CloseIncompleteOnSizeLimit,
-            bool allowNonDurableStore = false)
+            bool allowNonDurableStore = false,
+            ExternalMutationPolicy externalMutationPolicy = ExternalMutationPolicy.BarrierContinue)
         {
             Profile = profile ?? throw new ArgumentNullException(nameof(profile));
             if (maxArtifactBytes < 1 || maxEventCount < 2 || maxBlobBytes < 1)
@@ -38,6 +49,7 @@ namespace SignalRouter.V2.Recording
             MaxBlobBytes = maxBlobBytes;
             CapacityPolicy = capacityPolicy;
             AllowNonDurableStore = allowNonDurableStore;
+            ExternalMutation = externalMutationPolicy;
         }
 
         /// <summary>The declarative document embedded in the artifact (record kind 0x04, ADR 0016).</summary>
@@ -53,6 +65,9 @@ namespace SignalRouter.V2.Recording
         public int MaxBlobBytes { get; }
 
         public RecordingCapacityPolicy CapacityPolicy { get; }
+
+        /// <summary>How an E5 barrier disposes the artifact (guarantees.md §5.5).</summary>
+        public ExternalMutationPolicy ExternalMutation { get; }
 
         /// <summary>
         /// Test-only opt-in: a non-durable store (the memory backend) is refused

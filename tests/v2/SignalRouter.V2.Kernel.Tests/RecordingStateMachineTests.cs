@@ -24,11 +24,29 @@ public sealed class RecordingStateMachineTests
 
         internal EvidenceReadiness CloseAnswer { get; set; } = EvidenceReadiness.Ready;
 
+        internal EvidenceReadiness BarrierReadiness { get; set; } = EvidenceReadiness.Ready;
+
+        internal IncompleteReason? BarrierCloseRequest { get; set; }
+
+        internal EvidenceReadiness WaitArmedAnswer { get; set; } = EvidenceReadiness.Ready;
+
+        internal EvidenceReadiness WaitResolvedAnswer { get; set; } = EvidenceReadiness.Ready;
+
+        internal EvidenceReadiness AssertionAnswer { get; set; } = EvidenceReadiness.Ready;
+
         internal List<OpenEvidence> Opens { get; } = new();
 
         internal List<CloseEvidence> Closes { get; } = new();
 
         internal List<TerminalEvidence> Terminals { get; } = new();
+
+        internal List<BarrierEvidence> Barriers { get; } = new();
+
+        internal List<WaitArmedEvidence> ArmedWaits { get; } = new();
+
+        internal List<WaitResolvedEvidence> ResolvedWaits { get; } = new();
+
+        internal List<AssertionEvidence> Assertions { get; } = new();
 
         internal bool TornDown { get; private set; }
 
@@ -85,6 +103,48 @@ public sealed class RecordingStateMachineTests
         {
             Terminals.Add(evidence);
             return EvidenceReadiness.Ready;
+        }
+
+        public BarrierAnswer CommitExternalMutation(BarrierEvidence evidence)
+        {
+            if (BarrierReadiness == EvidenceReadiness.Ready)
+            {
+                Barriers.Add(evidence);
+            }
+
+            return BarrierCloseRequest.HasValue
+                ? BarrierAnswer.RequestClose(BarrierReadiness, BarrierCloseRequest.Value)
+                : BarrierAnswer.Continue(BarrierReadiness);
+        }
+
+        public EvidenceReadiness CommitWaitArmed(WaitArmedEvidence evidence)
+        {
+            if (WaitArmedAnswer == EvidenceReadiness.Ready)
+            {
+                ArmedWaits.Add(evidence);
+            }
+
+            return WaitArmedAnswer;
+        }
+
+        public EvidenceReadiness CommitWaitResolved(WaitResolvedEvidence evidence)
+        {
+            if (WaitResolvedAnswer == EvidenceReadiness.Ready)
+            {
+                ResolvedWaits.Add(evidence);
+            }
+
+            return WaitResolvedAnswer;
+        }
+
+        public EvidenceReadiness CommitAssertionEvidence(AssertionEvidence evidence)
+        {
+            if (AssertionAnswer == EvidenceReadiness.Ready)
+            {
+                Assertions.Add(evidence);
+            }
+
+            return AssertionAnswer;
         }
     }
 
