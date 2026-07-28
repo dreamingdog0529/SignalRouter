@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
+using SignalRouter.V2.Codec.Shared;
 using SignalRouter.V2.Contracts;
 
 namespace SignalRouter.V2.Codec.CanonicalState
@@ -54,9 +55,21 @@ namespace SignalRouter.V2.Codec.CanonicalState
                     nameof(incarnation));
             }
 
-            var reader = new PayloadReader(canonicalPayload);
-            var materialization = DecodePayload(reader, incarnation, revision);
-            reader.ExpectEnd();
+            ObservationMaterialization materialization;
+            try
+            {
+                var reader = new PayloadReader(canonicalPayload);
+                materialization = DecodePayload(reader, incarnation, revision);
+                reader.ExpectEnd();
+            }
+            catch (CodecFormatException exception)
+            {
+                // The shared primitives throw the leaf-internal exception; this
+                // leaf's public contract is CanonicalStateFormatException with the
+                // same code and position (ADR 0016 shared-source discipline).
+                throw new CanonicalStateFormatException(
+                    exception.Code, exception.Position, exception.Message);
+            }
 
             // Canonical-form enforcement (ADR 0012): one re-encode comparison
             // subsumes every alternative-encoding attack — non-minimal framing that
@@ -120,7 +133,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
 
         private static void WritePayload(ref PayloadWriter writer, ObservationMaterialization materialization)
         {
-            writer.WriteMagic();
+            writer.WriteMagic(0x53, 0x52, 0x43, 0x53); // "SRCS"
             writer.WriteVaruint(RepresentationVersion);
 
             // Projection identity — no temporal legs (ADR 0012).

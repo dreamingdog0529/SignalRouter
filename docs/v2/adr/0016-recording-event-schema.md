@@ -1,8 +1,10 @@
 # ADR 0016 (v2): RecordingEventSchema@1.0 — Artifact Format
 
-> **Status:** Accepted (v2 design); the per-cut payload grammar appendix is
-> **staged** — it is frozen in the codec PR after the portable replay-input
-> contracts fix the cut shapes, with the same committed-worksheet discipline
+> **Status:** Accepted (v2 design). The per-cut payload grammar is frozen in
+> the codec leaf (`src/v2/Codec.Recording/RecordingPayloadCodec.cs` — field
+> order is constructor order, closed vocabularies as code strings) and pinned
+> by the golden vectors and byte worksheet in
+> `tests/v2/SignalRouter.V2.Codec.Recording.Tests`, with the same discipline
 > as [adr 0012](0012-canonical-state-representation-and-digest-policy.md)
 > **Date:** 2026-07-28
 > **Normative reference:** [../spec/recording-replay.md](../spec/recording-replay.md) §2, §4 ·

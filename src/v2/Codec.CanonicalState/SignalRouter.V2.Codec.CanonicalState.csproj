@@ -15,4 +15,10 @@
   <ItemGroup>
     <ProjectReference Include="../Contracts/SignalRouter.V2.Contracts.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Shared-source payload primitives (ADR 0007 permits single-source sharing
+         of primitive invariants; ADR 0016): each codec leaf compiles the same
+         files — internal types only, so no public type exists twice. -->
+    <Compile Include="../Codec.Shared/*.cs" LinkBase="Shared" />
+  </ItemGroup>
 </Project>
