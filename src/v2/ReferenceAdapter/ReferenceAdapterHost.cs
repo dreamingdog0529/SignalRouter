@@ -1,7 +1,9 @@
 using System;
 using SignalRouter.V2.AdapterSdk;
+using SignalRouter.V2.Codec.Recording;
 using SignalRouter.V2.Contracts;
 using SignalRouter.V2.Kernel;
+using SignalRouter.V2.Recording;
 
 namespace SignalRouter.V2.ReferenceAdapter
 {
@@ -23,12 +25,14 @@ namespace SignalRouter.V2.ReferenceAdapter
             KernelRuntime runtime,
             ReferenceNodeSource nodeSource,
             ReferenceIngress ingress,
-            ReferencePumpHost pumpHost)
+            ReferencePumpHost pumpHost,
+            MemoryArtifactStore? artifactStore)
         {
             Runtime = runtime;
             this.nodeSource = nodeSource;
             Ingress = ingress;
             PumpHost = pumpHost;
+            ArtifactStore = artifactStore;
         }
 
         public KernelRuntime Runtime { get; }
@@ -37,18 +41,25 @@ namespace SignalRouter.V2.ReferenceAdapter
 
         public ReferencePumpHost PumpHost { get; }
 
+        /// <summary>The recording sink backing this world; null when an external coordinator was injected.</summary>
+        public MemoryArtifactStore? ArtifactStore { get; }
+
         /// <summary>
         /// Builds and starts a fresh world. <paramref name="decorateExecutor"/>
         /// exists for TCK self-verification only: bad harnesses wrap the conformant
         /// executor to prove each check can fail. Production hosts pass null.
+        /// The world is recording-capable by default (a durable coordinator over
+        /// an in-memory sink); a replay twin injects the driver's capture
+        /// coordinator through <paramref name="evidence"/> instead.
         /// </summary>
         public static ReferenceAdapterHost Create(
-            Func<IEffectExecutor, IEffectExecutor>? decorateExecutor = null)
+            Func<IEffectExecutor, IEffectExecutor>? decorateExecutor = null,
+            IEvidenceCoordinator? evidence = null)
         {
             var clock = new FrameTickClock();
             var options = new KernelOptions(
                 clock,
-                new byte[] { 0x52, 0x65, 0x66, 0x41 },
+                ReferenceWorld.RedactionKey,
                 ValueArray<PrincipalDomainBinding>.From(new[]
                 {
                     new PrincipalDomainBinding(
@@ -56,13 +67,24 @@ namespace SignalRouter.V2.ReferenceAdapter
                     new PrincipalDomainBinding(
                         Principal.WellKnownKinds.LocalUser, ReferenceWorld.HumanDomain),
                 }),
-                ReferenceWorld.RecordDomain);
+                ReferenceWorld.RecordDomain,
+                canonicalStateCodec: new Codec.CanonicalState.CanonicalStateCodec());
+            MemoryArtifactStore? store = null;
+            if (evidence == null)
+            {
+                store = new MemoryArtifactStore();
+                evidence = new DurableEvidenceCoordinator(
+                    store,
+                    new RecordingCoordinatorOptions(
+                        ReferenceWorld.RecordingProfile(), allowNonDurableStore: true));
+            }
+
             // Every runtime incarnation gets a unique id: a NodeRef or permit
             // retained across a teardown must read as stale, never resolve into a
             // later world (guarantees.md §6.1).
             var incarnation = System.Threading.Interlocked.Increment(ref incarnationCounter);
             var runtime = new KernelRuntime(
-                new RuntimeIncarnationId("reference-incarnation-" + incarnation), options);
+                new RuntimeIncarnationId("reference-incarnation-" + incarnation), options, evidence);
 
             var nodeSource = new ReferenceNodeSource();
             nodeSource.Attach(runtime.Bootstrap, runtime.Registry);
@@ -78,7 +100,7 @@ namespace SignalRouter.V2.ReferenceAdapter
 
             var pumpHost = new ReferencePumpHost(referenceExecutor, clock);
             pumpHost.Attach(runtime);
-            return new ReferenceAdapterHost(runtime, nodeSource, ingress, pumpHost);
+            return new ReferenceAdapterHost(runtime, nodeSource, ingress, pumpHost, store);
         }
 
         /// <summary>Tears the incarnation down and detaches every adapter surface. Idempotent.</summary>

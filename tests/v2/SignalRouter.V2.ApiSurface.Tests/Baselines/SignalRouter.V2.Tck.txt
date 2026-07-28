@@ -9,13 +9,18 @@ interface SignalRouter.V2.Tck.ITckHarness
   property HumanPrincipal : SignalRouter.V2.Contracts.Principal { public get; }
   property LogicalNow : SignalRouter.V2.AdapterSdk.LogicalTime { public get; }
   property MutatingCapability : SignalRouter.V2.Contracts.CapabilityContractRef { public get; }
+  property RecordingProfile : SignalRouter.V2.Contracts.ReplayComparisonProfile { public get; }
+  property RedactionKey : System.Byte[] { public get; }
+  property ReplayEnvironments : SignalRouter.V2.Replay.IReplayEnvironmentFactory { public get; }
   property RevisionBoundSource : SignalRouter.V2.Contracts.StateSourceKey { public get; }
   property Runtime : SignalRouter.V2.Kernel.KernelRuntime { public get; }
   property SlowCapability : SignalRouter.V2.Contracts.CapabilityContractRef { public get; }
   property VisibleTargetKey : SignalRouter.V2.Contracts.AuthorKey { public get; }
+  public method DefinitionOf(SignalRouter.V2.Contracts.PredicateContractRef predicate) : SignalRouter.V2.Contracts.PredicateDefinition
   public method DriveFrames(System.Int32 frames) : System.Int32
   public method PublishCount(System.Int64 count) : SignalRouter.V2.AdapterSdk.PublicationAnswer
   public method PublishUndeclaredField() : SignalRouter.V2.AdapterSdk.PublicationAnswer
+  public method ReadArtifact(SignalRouter.V2.Contracts.OperationId recording) : System.Byte[]
   public method SimulateExternalMutation() : System.Void
   public method SimulateManagedInput(SignalRouter.V2.Contracts.RequestId request, SignalRouter.V2.AdapterSdk.ISubmissionObserver observer, System.Boolean asHuman) : System.Void
   public method TearDown() : System.Void
@@ -55,5 +60,5 @@ sealed class SignalRouter.V2.Tck.TckReport
   public ctor(System.String version, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Tck.TckCheckResult> checks)
 
 static class SignalRouter.V2.Tck.TckSuite
-  public const field Version : System.String = "tck-core-0.x"
+  public const field Version : System.String = "tck-core-1.0"
   public static method Run(SignalRouter.V2.Tck.ITckHarnessFactory factory, SignalRouter.V2.Tck.TckOptions? options = null) : SignalRouter.V2.Tck.TckReport

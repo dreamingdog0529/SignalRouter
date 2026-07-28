@@ -7,13 +7,25 @@ namespace SignalRouter.V2.Replay
     /// <summary>
     /// One isolated replay runtime (recording-replay.md §6): replay-only nodes,
     /// stages, and stores with no shared static or singleton state. The driver
-    /// owns pumping — the environment never pumps on its own — and disposal
-    /// tears the twin down.
+    /// owns advancement — the environment never advances on its own — and
+    /// disposal tears the twin down.
     /// </summary>
     public interface IReplayEnvironment : IDisposable
     {
-        /// <summary>Bootstrapped and started; the driver is the single pump consumer.</summary>
+        /// <summary>Bootstrapped and started; the driver is the single consumer.</summary>
         KernelRuntime Runtime { get; }
+
+        /// <summary>
+        /// Advances the twin by ONE bounded step — the finest grain the world
+        /// honestly supports: a single pump turn for pump-driven worlds, one
+        /// whole frame for frame-phased adapters. The driver checks its stop
+        /// conditions between steps, so a coarser grain widens the window in
+        /// which the twin can run past a boundary; keep it as fine as the
+        /// adapter allows. Answers false when the step observed no remaining
+        /// work (the driver grants an idle grace window for asynchronous
+        /// completions before declaring a stall).
+        /// </summary>
+        bool Advance();
     }
 
     /// <summary>

@@ -8,6 +8,7 @@ enum SignalRouter.V2.Replay.ArtifactProvenance
 interface SignalRouter.V2.Replay.IReplayEnvironment
   implements System.IDisposable
   property Runtime : SignalRouter.V2.Kernel.KernelRuntime { public get; }
+  public method Advance() : System.Boolean
 
 interface SignalRouter.V2.Replay.IReplayEnvironmentFactory
   public method Create(SignalRouter.V2.Contracts.RecordingOpened opened, SignalRouter.V2.Kernel.IEvidenceCoordinator evidence) : SignalRouter.V2.Replay.IReplayEnvironment
@@ -114,3 +115,17 @@ sealed class SignalRouter.V2.Replay.ReplayTrustOptions
   property AcceptUntrustedArtifacts : System.Boolean { public get; }
   property Provenance : SignalRouter.V2.Replay.ArtifactProvenance { public get; }
   public ctor(SignalRouter.V2.Replay.ArtifactProvenance provenance, System.Boolean acceptUntrustedArtifacts = false)
+
+static class SignalRouter.V2.Replay.SealConditions
+  public const field ArtifactRefused : System.String = "ArtifactRefused"
+  public const field ContractPreflight : System.String = "ContractPreflight"
+  public const field NotCompleted : System.String = "NotCompleted"
+  public const field RequiredAssertionNotSatisfied : System.String = "RequiredAssertionNotSatisfied"
+  public const field StrictIneligible : System.String = "StrictIneligible"
+
+sealed class SignalRouter.V2.Replay.SealEvaluation
+  property FailedCondition : System.String? { public get; }
+  property IsSealable : System.Boolean { public get; }
+
+static class SignalRouter.V2.Replay.SealEvaluator
+  public static method Evaluate(System.Byte[] artifact, SignalRouter.V2.Codec.Recording.ArtifactReadLimits limits, SignalRouter.V2.Replay.ReplayAllowlist allowlist, SignalRouter.V2.Comparison.ComparisonVocabulary vocabulary, SignalRouter.V2.Replay.ReplayTrustOptions trust, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.PredicateContractRef> requiredAssertions) : SignalRouter.V2.Replay.SealEvaluation

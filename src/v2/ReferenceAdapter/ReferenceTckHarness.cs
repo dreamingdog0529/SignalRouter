@@ -2,6 +2,7 @@ using System;
 using SignalRouter.V2.AdapterSdk;
 using SignalRouter.V2.Contracts;
 using SignalRouter.V2.Kernel;
+using SignalRouter.V2.Replay;
 using SignalRouter.V2.Tck;
 
 namespace SignalRouter.V2.ReferenceAdapter
@@ -81,6 +82,32 @@ namespace SignalRouter.V2.ReferenceAdapter
         }
 
         public int DriveFrames(int frames) => host.PumpHost.DriveFrames(frames);
+
+        public ReplayComparisonProfile RecordingProfile => ReferenceWorld.RecordingProfile();
+
+        public byte[] RedactionKey => ReferenceWorld.RedactionKey;
+
+        public PredicateDefinition DefinitionOf(PredicateContractRef predicate)
+        {
+            if (predicate.Equals(ReferenceWorld.CountAtLeastOne))
+            {
+                return ReferenceWorld.CountPredicate(1);
+            }
+
+            if (predicate.Equals(ReferenceWorld.CountAtLeastTwo))
+            {
+                return ReferenceWorld.CountPredicate(2);
+            }
+
+            throw new ArgumentException(
+                "Not a registered reference predicate: " + predicate, nameof(predicate));
+        }
+
+        public byte[] ReadArtifact(OperationId recording) =>
+            host.ArtifactStore!.ReadAll(recording.Value, 8L * 1024 * 1024);
+
+        public IReplayEnvironmentFactory ReplayEnvironments { get; } =
+            new ReferenceReplayEnvironmentFactory();
 
         public void TearDown() => host.TearDown();
     }

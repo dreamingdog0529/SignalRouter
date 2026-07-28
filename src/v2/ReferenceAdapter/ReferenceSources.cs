@@ -61,25 +61,21 @@ namespace SignalRouter.V2.ReferenceAdapter
                     maxDocumentBytes: 4096),
                 StateSourceClass.RevisionBound));
 
-            bootstrap.RegisterPredicateContract(ReferenceWorld.CountAtLeastOne, CountPredicate(1));
-            bootstrap.RegisterPredicateContract(ReferenceWorld.CountAtLeastTwo, CountPredicate(2));
+            bootstrap.RegisterPredicateContract(
+                ReferenceWorld.CountAtLeastOne, ReferenceWorld.CountPredicate(1));
+            bootstrap.RegisterPredicateContract(
+                ReferenceWorld.CountAtLeastTwo, ReferenceWorld.CountPredicate(2));
+
+            // The record view (item 5): the recording's single comparison surface.
+            bootstrap.RegisterViewContract(new ViewContractDescriptor(
+                ReferenceWorld.RecordView, ViewFamily.Record, "root",
+                maxNodes: 256, maxFieldBytes: 4096, includeKeylessNodes: false));
         }
 
         public void Detach()
         {
             targetNode = default;
         }
-
-        private static PredicateDefinition CountPredicate(long threshold) =>
-            new PredicateDefinition(ValueArray<PredicateClause>.From(new[]
-            {
-                new PredicateClause(
-                    new ClauseId("c0"),
-                    new ComparisonExpression(
-                        new FieldPath("sources/tck-counter/count"),
-                        ComparisonOperator.Ge,
-                        PredicateOperand.Of(threshold))),
-            }));
     }
 
     /// <summary>

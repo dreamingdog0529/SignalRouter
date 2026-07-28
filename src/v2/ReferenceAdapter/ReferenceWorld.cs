@@ -46,6 +46,50 @@ namespace SignalRouter.V2.ReferenceAdapter
 
         public const string ObservedInputClass = "external-scene-mutation";
 
+        public static readonly ViewContractRef RecordView =
+            new ViewContractRef(new ViewContractId("reference-record"), new ContractVersion(1, 0));
+
+        public static readonly RedactionPolicyId RedactionPolicy =
+            new RedactionPolicyId("reference-redaction");
+
+        /// <summary>The runtime's redaction material — one value for the recorder and every twin.</summary>
+        public static byte[] RedactionKey => new byte[] { 0x52, 0x65, 0x66, 0x41 };
+
+        /// <summary>One registered count predicate definition (the harness/allowlist material).</summary>
+        public static PredicateDefinition CountPredicate(long threshold) =>
+            new PredicateDefinition(ValueArray<PredicateClause>.From(new[]
+            {
+                new PredicateClause(
+                    new ClauseId("c0"),
+                    new ComparisonExpression(
+                        new FieldPath("sources/tck-counter/count"),
+                        ComparisonOperator.Ge,
+                        PredicateOperand.Of(threshold))),
+            }));
+
+        /// <summary>
+        /// The reference comparison profile. Whole-scope completeness is not
+        /// required: the counter source is registered without a document, so the
+        /// base snapshot carries a SourceUnavailable region by design — both
+        /// sides share it and the coinciding unknown region masks out of the
+        /// comparison walk.
+        /// </summary>
+        public static ReplayComparisonProfile RecordingProfile() => new ReplayComparisonProfile(
+            new ReplayComparisonProfileRef(
+                new ReplayComparisonProfileId("reference-strict"), new ContractVersion(1, 0)),
+            RecordView,
+            "root",
+            RedactionPolicy,
+            ReplayComparisonProfile.MatchByAuthorKey,
+            ValueArray<ComparedNodeRule>.Empty,
+            ValueArray<ComparedSourceRule>.Empty,
+            ValueArray<ItemKeyRule>.Empty,
+            ValueArray<CollectionRule>.Empty,
+            ValueArray<NormalizationRule>.Empty,
+            requireCompleteForScope: false,
+            ValueArray<ExtensionPolicy>.Empty,
+            ValueArray<ContractVersion>.Empty);
+
         /// <summary>
         /// The self-declaration (adapter-conformance.md §4): a synthetic
         /// Update/LateUpdate frame with the fence at LateUpdate, the fast capability

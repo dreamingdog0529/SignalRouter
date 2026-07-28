@@ -1,6 +1,7 @@
 using SignalRouter.V2.AdapterSdk;
 using SignalRouter.V2.Contracts;
 using SignalRouter.V2.Kernel;
+using SignalRouter.V2.Replay;
 
 namespace SignalRouter.V2.Tck
 {
@@ -73,6 +74,26 @@ namespace SignalRouter.V2.Tck
 
         /// <summary>Drives whole frames (every declared phase, in order); returns frames driven.</summary>
         int DriveFrames(int frames);
+
+        // ── The tier-2 recording and replay obligations (item 5) ─────────────
+        // The harness runtime MUST be recording-capable: constructed with a
+        // durable evidence coordinator, a canonical-state codec, and the
+        // registered record view the profile below names.
+
+        /// <summary>The comparison profile the harness world records and replays under.</summary>
+        ReplayComparisonProfile RecordingProfile { get; }
+
+        /// <summary>The runtime's redaction material — replay re-digests resolved secrets with it.</summary>
+        byte[] RedactionKey { get; }
+
+        /// <summary>The registered definition of a harness predicate (the replay allowlist's material).</summary>
+        PredicateDefinition DefinitionOf(PredicateContractRef predicate);
+
+        /// <summary>The closed recording's artifact bytes.</summary>
+        byte[] ReadArtifact(OperationId recording);
+
+        /// <summary>The adapter's twin builder (recording-replay.md §6).</summary>
+        IReplayEnvironmentFactory ReplayEnvironments { get; }
 
         void TearDown();
     }

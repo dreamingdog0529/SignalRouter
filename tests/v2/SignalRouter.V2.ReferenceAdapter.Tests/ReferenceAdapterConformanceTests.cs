@@ -8,50 +8,31 @@ using SignalRouter.V2.Tck;
 namespace SignalRouter.V2.ReferenceAdapter.Tests;
 
 /// <summary>
-/// The reference adapter under TCK 0.x Core Profile: every non-staged check
-/// passes, and the aggregate is — by specification, not by accident —
-/// <c>Incomplete</c>, because replay isolation and the fixture/reset contract are
-/// staged to the recording and replay module (adapter-conformance.md §7.2).
+/// The reference adapter under TCK 1.0 Core Profile: every check passes — the
+/// formerly staged obligations (replay isolation, the fixture/reset contract)
+/// are live with the recording and replay module — and the aggregate is
+/// <c>Passed</c> (adapter-conformance.md §7.2).
 /// </summary>
 public sealed class ReferenceAdapterConformanceTests
 {
-    private static readonly string[] StagedCheckIds =
-    {
-        "replay-environment-isolation",
-        "fixture-reset-contract",
-    };
-
     [Test]
-    public void TheReferenceAdapterPassesEveryNonStagedCheck()
+    public void TheReferenceAdapterPassesEveryCheck()
     {
         var report = TckSuite.Run(new ReferenceTckHarnessFactory());
 
         var failures = new StringBuilder();
         foreach (var check in report.Checks)
         {
-            if (check.Status == TckCheckStatus.Failed)
+            if (check.Status != TckCheckStatus.Passed)
             {
                 failures.AppendLine(check.ToString());
             }
         }
 
-        Assert.That(failures.Length, Is.Zero, "unexpected failures:\n" + failures);
-        foreach (var check in report.Checks)
-        {
-            if (StagedCheckIds.Contains(check.CheckId))
-            {
-                Assert.That(check.Status, Is.EqualTo(TckCheckStatus.Skipped), check.CheckId);
-                Assert.That(check.Required, Is.True, "staged checks stay required — that is what makes the aggregate honest");
-            }
-            else
-            {
-                Assert.That(check.Status, Is.EqualTo(TckCheckStatus.Passed), check.ToString());
-            }
-        }
-
+        Assert.That(failures.Length, Is.Zero, "non-passing checks:\n" + failures);
         Assert.That(
-            report.Aggregate, Is.EqualTo(TckAggregate.Incomplete),
-            "required skips must aggregate to Incomplete — this profile never claims SDK conformance");
+            report.Aggregate, Is.EqualTo(TckAggregate.Passed),
+            "with the staged obligations live, a conformant adapter reaches Passed");
     }
 
     // ── Adapter-specific behavior, transcribed from adapter-conformance.md ──

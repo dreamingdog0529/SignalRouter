@@ -75,7 +75,7 @@ namespace SignalRouter.V2.Replay
             var capture = new ReplayCaptureCoordinator(plan.Profile.RecordView, plan.Profile.Scope);
             using var environment = factory.Create(plan.Opened, capture);
             var run = new Run(
-                this, plan, allowlist, environment.Runtime, capture, secretResolver, redactionKey, mode);
+                this, plan, allowlist, environment, capture, secretResolver, redactionKey, mode);
             return run.Execute();
         }
 
@@ -85,6 +85,7 @@ namespace SignalRouter.V2.Replay
             private readonly ReplayDriver driver;
             private readonly ReplayPlan plan;
             private readonly ReplayAllowlist allowlist;
+            private readonly IReplayEnvironment environment;
             private readonly KernelRuntime runtime;
             private readonly ReplayCaptureCoordinator capture;
             private readonly ISecretReferenceResolver? secrets;
@@ -99,13 +100,11 @@ namespace SignalRouter.V2.Replay
             // rebound for continuation children the twin admits itself (§5.8).
             private readonly Dictionary<RequestId, RequestId> requestMap =
                 new Dictionary<RequestId, RequestId>();
-            private long logicalNow = 1;
-
             internal Run(
                 ReplayDriver driver,
                 ReplayPlan plan,
                 ReplayAllowlist allowlist,
-                KernelRuntime runtime,
+                IReplayEnvironment environment,
                 ReplayCaptureCoordinator capture,
                 ISecretReferenceResolver? secrets,
                 byte[] redactionKey,
@@ -114,7 +113,8 @@ namespace SignalRouter.V2.Replay
                 this.driver = driver;
                 this.plan = plan;
                 this.allowlist = allowlist;
-                this.runtime = runtime;
+                this.environment = environment;
+                runtime = environment.Runtime;
                 this.capture = capture;
                 this.secrets = secrets;
                 this.redactionKey = redactionKey;
@@ -211,8 +211,12 @@ namespace SignalRouter.V2.Replay
                 if (entry.Kind == ReplayEntryKind.PreCancelled)
                 {
                     // The synthetic pre-cancelled token (guarantees.md §5.7):
-                    // admit in one turn, cancel while still queued.
-                    PumpTurns(1);
+                    // one minimal step admits, then the cancel lands while the
+                    // interaction still waits. A frame-grained environment
+                    // cannot honor this timing — its whole-frame step runs the
+                    // effect, and the terminal comparison reports the honest
+                    // divergence.
+                    environment.Advance();
                     runtime.Control.RequestCancel(admission.RequestId);
                 }
 
@@ -657,30 +661,24 @@ namespace SignalRouter.V2.Replay
             private bool HasTerminal(RequestId request) =>
                 capture.TryGet(MapId(request), out var captured) && captured.Terminal != null;
 
-            private PumpReport PumpTurns(int maxTurns)
-            {
-                return runtime.Pump(new PumpBudget(
-                    maxTurns, long.MaxValue, new LogicalTime(logicalNow++), FramePhase.Update));
-            }
-
             private void PumpUntil(Func<bool> condition)
             {
-                // One turn at a time: the condition gates every step, so the
-                // twin can never run past a boundary the driver has not yet
-                // compared (an admission-only entry must not reach its effect).
-                // An idle twin gets a bounded grace window for an asynchronous
-                // executor to report its completion before it counts as stalled.
-                const int MaxTurnsPerStep = 65536;
+                // One environment step at a time: the condition gates every
+                // step, so the twin can never run past a boundary the driver
+                // has not yet compared (an admission-only entry must not reach
+                // its effect on a pump-grained world). An idle twin gets a
+                // bounded grace window for an asynchronous executor to report
+                // its completion before it counts as stalled.
+                const int MaxStepsPerWait = 65536;
                 var idleGrace = 256;
-                for (var turn = 0; turn < MaxTurnsPerStep; turn++)
+                for (var step = 0; step < MaxStepsPerWait; step++)
                 {
                     if (condition())
                     {
                         return;
                     }
 
-                    var report = PumpTurns(1);
-                    if (!report.WorkRemaining && !condition())
+                    if (!environment.Advance() && !condition())
                     {
                         if (--idleGrace <= 0)
                         {
