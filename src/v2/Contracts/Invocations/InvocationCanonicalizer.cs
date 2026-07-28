@@ -216,6 +216,29 @@ namespace SignalRouter.V2.Contracts
             return new ArgumentDigest(Sha256Hex(builder.ToString()));
         }
 
+        /// <summary>
+        /// The keyed digest of one sensitive value — what a recorded
+        /// <see cref="RecordedArgument.SecretValueDigest"/> holds. Replay
+        /// re-digests a resolved secret against the recorded digest with the
+        /// shared redaction material and stops before the affected entry on a
+        /// mismatch — never a silent substitution (ADR 0015).
+        /// </summary>
+        public static ArgumentDigest SensitiveValueDigest(byte[] redactionKey, FieldValue value)
+        {
+            if (redactionKey == null)
+            {
+                throw new ArgumentNullException(nameof(redactionKey));
+            }
+
+            if (value.IsDefault)
+            {
+                throw new ArgumentException(
+                    "A sensitive digest requires a non-default value.", nameof(value));
+            }
+
+            return new ArgumentDigest(HmacHex(redactionKey, CanonicalRendering(value)));
+        }
+
         // The single source of one field's canonical contribution — the projection
         // and the live digest path must never drift apart.
         private static void AppendSensitiveContribution(

@@ -14,7 +14,7 @@ interface SignalRouter.V2.Replay.IReplayEnvironmentFactory
 
 interface SignalRouter.V2.Replay.ISecretReferenceResolver
   public method CanResolve(SignalRouter.V2.Contracts.SecretReference reference) : System.Boolean
-  public method TryResolve(SignalRouter.V2.Contracts.SecretReference reference, out SignalRouter.V2.Contracts.FieldValue value) : System.Boolean
+  public method TryResolve(SignalRouter.V2.Contracts.SecretReference reference, SignalRouter.V2.Contracts.ArgumentDigest expectedDigest, out SignalRouter.V2.Contracts.FieldValue value) : System.Boolean
 
 sealed class SignalRouter.V2.Replay.PlannedStop
   property Incomparability : SignalRouter.V2.Contracts.IncomparableReason? { public get; }
@@ -44,7 +44,7 @@ sealed class SignalRouter.V2.Replay.ReplayAllowlist
 
 sealed class SignalRouter.V2.Replay.ReplayDriver
   public ctor(SignalRouter.V2.Codec.CanonicalState.CanonicalStateCodec codec, SignalRouter.V2.Comparison.ComparisonVocabulary vocabulary)
-  public method Execute(SignalRouter.V2.Replay.ReplayPlan plan, SignalRouter.V2.Replay.ReplayAllowlist allowlist, SignalRouter.V2.Replay.IReplayEnvironmentFactory factory, SignalRouter.V2.Replay.ISecretReferenceResolver? secretResolver, SignalRouter.V2.Replay.ReplayMode mode) : SignalRouter.V2.Replay.ReplayReport
+  public method Execute(SignalRouter.V2.Replay.ReplayPlan plan, SignalRouter.V2.Replay.ReplayAllowlist allowlist, SignalRouter.V2.Replay.IReplayEnvironmentFactory factory, SignalRouter.V2.Replay.ISecretReferenceResolver? secretResolver, System.Byte[] redactionKey, SignalRouter.V2.Replay.ReplayMode mode) : SignalRouter.V2.Replay.ReplayReport
 
 sealed class SignalRouter.V2.Replay.ReplayEntry
   property Admission : SignalRouter.V2.Contracts.AdmissionCut { public get; }

@@ -42,7 +42,12 @@ namespace SignalRouter.V2.Replay
         /// <summary>Answers resolvability without materializing the value (pre-scan planning).</summary>
         bool CanResolve(SecretReference reference);
 
-        /// <summary>In-memory resolution at entry execution.</summary>
-        bool TryResolve(SecretReference reference, out FieldValue value);
+        /// <summary>
+        /// In-memory resolution at entry execution, keyed by the reference plus
+        /// the recorded keyed digest (ADR 0015). The driver re-digests the
+        /// answer with the shared redaction material regardless of what the
+        /// resolver claims.
+        /// </summary>
+        bool TryResolve(SecretReference reference, ArgumentDigest expectedDigest, out FieldValue value);
     }
 }

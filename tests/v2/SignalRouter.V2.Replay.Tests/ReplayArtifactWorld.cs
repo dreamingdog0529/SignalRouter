@@ -60,7 +60,11 @@ internal sealed class ReplayArtifactWorld
         ValueArray<ItemKeyRule>.Empty,
         ValueArray<CollectionRule>.Empty,
         ValueArray<NormalizationRule>.Empty,
-        requireCompleteForScope: true,
+        // The world bootstraps a revision-bound source with no document, so the
+        // base snapshot carries a SourceUnavailable completeness entry by
+        // design; both sides share it, and the coinciding unknown region masks
+        // out of the walk (recording-replay.md §5.2).
+        requireCompleteForScope: false,
         ValueArray<ExtensionPolicy>.Empty,
         ValueArray<ContractVersion>.Empty);
 
@@ -288,14 +292,14 @@ internal sealed class ReplayArtifactWorld
         Assert.That(observer.Answers, Does.Contain("Closed"));
     }
 
-    internal void SubmitAuto(string request)
+    internal void SubmitAuto(string request, InvocationPayload? payload = null)
     {
         // The auto-completing executor publishes and completes inside the pump.
         Runtime.Ingress.Submit(new IntentSubmission(
             new RequestId(request),
             Invoke,
             TargetReference.ForKey(new AuthorKey("save")),
-            InvocationPayload.Empty,
+            payload ?? InvocationPayload.Empty,
             new IdentityEnvelope(Agent, IngressPath.Mcp, Provenance.Automation, Causality.Root()),
             observer: null));
         PumpUntilIdle();

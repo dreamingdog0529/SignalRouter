@@ -24,6 +24,9 @@ namespace SignalRouter.V2.Replay
             internal TerminalEvidence? Terminal { get; set; }
 
             internal RecordMaterialization? After { get; set; }
+
+            /// <summary>A record-view materialization failed inside a callback — never silently absent.</summary>
+            internal bool MaterializationFailed { get; set; }
         }
 
         private readonly ViewContractRef recordView;
@@ -70,6 +73,10 @@ namespace SignalRouter.V2.Replay
             {
                 Entry(evidence.Request).Before = before;
             }
+            else
+            {
+                Entry(evidence.Request).MaterializationFailed = true;
+            }
 
             return EvidenceReadiness.Ready;
         }
@@ -87,6 +94,10 @@ namespace SignalRouter.V2.Replay
                 recordView, scope, evidence.AfterWatermark, out var after, out _))
             {
                 entry.After = after;
+            }
+            else
+            {
+                entry.MaterializationFailed = true;
             }
 
             return EvidenceReadiness.Ready;

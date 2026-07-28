@@ -40,16 +40,18 @@ public sealed class ReplayDriverTests
     private sealed class TwinFactory : IReplayEnvironmentFactory
     {
         private readonly long? publishCount;
+        private readonly bool sensitiveArgument;
 
-        internal TwinFactory(long? publishCount)
+        internal TwinFactory(long? publishCount, bool sensitiveArgument = false)
         {
             this.publishCount = publishCount;
+            this.sensitiveArgument = sensitiveArgument;
         }
 
         public IReplayEnvironment Create(RecordingOpened opened, IEvidenceCoordinator evidence)
         {
             var runtime = ReplayArtifactWorld.BuildRuntime(
-                evidence, sensitiveArgument: false, "twin-incarnation-1");
+                evidence, sensitiveArgument, "twin-incarnation-1");
             var executor = new ReplayArtifactWorld.AutoCompletingExecutor
             {
                 Runtime = runtime,
@@ -57,6 +59,25 @@ public sealed class ReplayDriverTests
             };
             runtime.Start(executor);
             return new TwinEnvironment(runtime);
+        }
+    }
+
+    private sealed class FixedSecretResolver : ISecretReferenceResolver
+    {
+        private readonly string value;
+
+        internal FixedSecretResolver(string value)
+        {
+            this.value = value;
+        }
+
+        public bool CanResolve(SecretReference reference) => true;
+
+        public bool TryResolve(
+            SecretReference reference, ArgumentDigest expectedDigest, out FieldValue resolved)
+        {
+            resolved = FieldValue.Of(value);
+            return true;
         }
     }
 
@@ -110,7 +131,7 @@ public sealed class ReplayDriverTests
         var driver = new ReplayDriver(new CanonicalStateCodec(), new ComparisonVocabulary());
         var report = driver.Execute(
             plan, AllowlistFor(artifact), new TwinFactory(publishCount: 5),
-            secretResolver: null, ReplayMode.StrictSemantic);
+            secretResolver: null, new byte[] { 9, 9, 9, 9 }, ReplayMode.StrictSemantic);
 
         Assert.That(
             report.Outcome, Is.EqualTo(ReplayComparisonOutcome.Equal),
@@ -134,7 +155,7 @@ public sealed class ReplayDriverTests
         var driver = new ReplayDriver(new CanonicalStateCodec(), new ComparisonVocabulary());
         var report = driver.Execute(
             plan, AllowlistFor(artifact), new TwinFactory(publishCount: 7),
-            secretResolver: null, ReplayMode.StrictSemantic);
+            secretResolver: null, new byte[] { 9, 9, 9, 9 }, ReplayMode.StrictSemantic);
 
         Assert.That(
             report.Outcome, Is.EqualTo(ReplayComparisonOutcome.Diverged),
@@ -158,7 +179,7 @@ public sealed class ReplayDriverTests
         var driver = new ReplayDriver(new CanonicalStateCodec(), new ComparisonVocabulary());
         var report = driver.Execute(
             plan, AllowlistFor(artifact), new TwinFactory(publishCount: 5),
-            secretResolver: null, ReplayMode.ExactArtifact);
+            secretResolver: null, new byte[] { 9, 9, 9, 9 }, ReplayMode.ExactArtifact);
 
         Assert.That(
             report.Outcome, Is.EqualTo(ReplayComparisonOutcome.Equal),
@@ -173,7 +194,7 @@ public sealed class ReplayDriverTests
         var driver = new ReplayDriver(new CanonicalStateCodec(), new ComparisonVocabulary());
         driver.Execute(
             plan, AllowlistFor(artifact), new TwinFactory(publishCount: 5),
-            secretResolver: null, ReplayMode.StrictSemantic);
+            secretResolver: null, new byte[] { 9, 9, 9, 9 }, ReplayMode.StrictSemantic);
 
         // Direct try/catch: the Assert.Throws lambda overloads are ambiguous
         // on this NUnit version.
@@ -181,12 +202,86 @@ public sealed class ReplayDriverTests
         {
             driver.Execute(
                 plan, AllowlistFor(artifact), new TwinFactory(publishCount: 5),
-                secretResolver: null, ReplayMode.StrictSemantic);
+                secretResolver: null, new byte[] { 9, 9, 9, 9 }, ReplayMode.StrictSemantic);
             Assert.Fail("single-flight (recording-replay.md §6): the second execution must throw");
         }
         catch (InvalidOperationException)
         {
         }
+    }
+
+    [Test]
+    public void AResolvedSecretReplaysAndASubstitutedOneStopsBeforeTheEntry()
+    {
+        var world = new ReplayArtifactWorld(sensitiveArgument: true, autoPublishCount: null);
+        world.Open();
+        world.SubmitAndComplete("r-secret", new InvocationPayload(ValueArray<NamedField>.From(new[]
+        {
+            new NamedField("token", FieldValue.Of("hunter2")),
+        })));
+        world.Close();
+        var artifact = world.Artifact();
+
+        ReplayPlan PlanWith(ISecretReferenceResolver resolver)
+        {
+            var result = ReplayPreScan.Scan(
+                artifact, ReplayArtifactWorld.Limits, AllowlistFor(artifact),
+                new ComparisonVocabulary(), resolver,
+                new ReplayTrustOptions(ArtifactProvenance.Trusted));
+            Assert.That(result.Plan, Is.Not.Null);
+            return result.Plan!;
+        }
+
+        var faithful = new ReplayDriver(new CanonicalStateCodec(), new ComparisonVocabulary())
+            .Execute(
+                PlanWith(new FixedSecretResolver("hunter2")), AllowlistFor(artifact),
+                new TwinFactory(publishCount: null, sensitiveArgument: true),
+                new FixedSecretResolver("hunter2"), new byte[] { 9, 9, 9, 9 },
+                ReplayMode.StrictSemantic);
+        Assert.That(
+            faithful.Outcome, Is.EqualTo(ReplayComparisonOutcome.Equal),
+            faithful.DetailCode + ": " + Render(faithful.Diff));
+
+        var substituted = new ReplayDriver(new CanonicalStateCodec(), new ComparisonVocabulary())
+            .Execute(
+                PlanWith(new FixedSecretResolver("hunter2")), AllowlistFor(artifact),
+                new TwinFactory(publishCount: null, sensitiveArgument: true),
+                new FixedSecretResolver("wrong"), new byte[] { 9, 9, 9, 9 },
+                ReplayMode.StrictSemantic);
+        Assert.That(substituted.Outcome, Is.EqualTo(ReplayComparisonOutcome.Diverged));
+        Assert.That(
+            substituted.DetailCode, Is.EqualTo("SecretDigestMismatch"),
+            "the resolved value re-digests against the recorded keyed digest " +
+            "BEFORE the entry executes — never a silent substitution (ADR 0015)");
+        Assert.That(
+            substituted.StoppedAt,
+            Is.EqualTo(ArtifactEntrySequence(artifact)),
+            "stopped before the affected entry: nothing was submitted");
+    }
+
+    private static EvidenceSequence ArtifactEntrySequence(byte[] artifact) =>
+        Plan(artifact).Entries[0].Admission.Sequence;
+
+    [Test]
+    public void APreCancelledEntryReplaysWithTheSyntheticToken()
+    {
+        var world = new ReplayArtifactWorld(autoPublishCount: 5);
+        world.Open();
+        world.SubmitAndCancelBeforeEffect("r-cancel");
+        world.Close();
+        var artifact = world.Artifact();
+        var plan = Plan(artifact);
+        Assert.That(plan.Entries[0].Kind, Is.EqualTo(ReplayEntryKind.PreCancelled));
+
+        var driver = new ReplayDriver(new CanonicalStateCodec(), new ComparisonVocabulary());
+        var report = driver.Execute(
+            plan, AllowlistFor(artifact), new TwinFactory(publishCount: 5),
+            secretResolver: null, new byte[] { 9, 9, 9, 9 }, ReplayMode.StrictSemantic);
+
+        Assert.That(
+            report.Outcome, Is.EqualTo(ReplayComparisonOutcome.Equal),
+            report.DetailCode + ": " + Render(report.Diff) +
+            " — a BeforeEffect cancellation replays deterministically (guarantees.md §5.7)");
     }
 
     [Test]
@@ -207,7 +302,7 @@ public sealed class ReplayDriverTests
         var driver = new ReplayDriver(new CanonicalStateCodec(), new ComparisonVocabulary());
         var report = driver.Execute(
             plan, AllowlistFor(artifact), new TwinFactory(publishCount: 5),
-            secretResolver: null, ReplayMode.StrictSemantic);
+            secretResolver: null, new byte[] { 9, 9, 9, 9 }, ReplayMode.StrictSemantic);
 
         Assert.That(report.StopKind, Is.EqualTo(ReplayStopKind.Contamination));
         Assert.That(

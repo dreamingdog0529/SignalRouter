@@ -22,8 +22,6 @@ namespace SignalRouter.V2.Replay
     /// </summary>
     public sealed class ReplayDriver
     {
-        private const int MaxPumpsPerStep = 64;
-
         private readonly Codec.CanonicalState.CanonicalStateCodec codec;
         private readonly SemanticComparator comparator;
         private bool executed;
@@ -41,6 +39,7 @@ namespace SignalRouter.V2.Replay
             ReplayAllowlist allowlist,
             IReplayEnvironmentFactory factory,
             ISecretReferenceResolver? secretResolver,
+            byte[] redactionKey,
             ReplayMode mode)
         {
             if (plan == null)
@@ -58,6 +57,14 @@ namespace SignalRouter.V2.Replay
                 throw new ArgumentNullException(nameof(factory));
             }
 
+            if (redactionKey == null)
+            {
+                // The shared redaction material (ADR 0015): the host supplies
+                // the recording runtime's key so resolved secrets re-digest
+                // against the recorded keyed digests.
+                throw new ArgumentNullException(nameof(redactionKey));
+            }
+
             if (executed)
             {
                 throw new InvalidOperationException("A replay driver executes exactly once.");
@@ -68,7 +75,7 @@ namespace SignalRouter.V2.Replay
             var capture = new ReplayCaptureCoordinator(plan.Profile.RecordView, plan.Profile.Scope);
             using var environment = factory.Create(plan.Opened, capture);
             var run = new Run(
-                this, plan, allowlist, environment.Runtime, capture, secretResolver, mode);
+                this, plan, allowlist, environment.Runtime, capture, secretResolver, redactionKey, mode);
             return run.Execute();
         }
 
@@ -81,11 +88,17 @@ namespace SignalRouter.V2.Replay
             private readonly KernelRuntime runtime;
             private readonly ReplayCaptureCoordinator capture;
             private readonly ISecretReferenceResolver? secrets;
+            private readonly byte[] redactionKey;
             private readonly ReplayMode mode;
             private readonly Dictionary<RequestId, ReplayEntry> entriesByRequest =
                 new Dictionary<RequestId, ReplayEntry>();
             private readonly Dictionary<RequestId, SubmissionProbe> probes =
                 new Dictionary<RequestId, SubmissionProbe>();
+
+            // Recorded → twin request ids: identity for re-submitted roots,
+            // rebound for continuation children the twin admits itself (§5.8).
+            private readonly Dictionary<RequestId, RequestId> requestMap =
+                new Dictionary<RequestId, RequestId>();
             private long logicalNow = 1;
 
             internal Run(
@@ -95,6 +108,7 @@ namespace SignalRouter.V2.Replay
                 KernelRuntime runtime,
                 ReplayCaptureCoordinator capture,
                 ISecretReferenceResolver? secrets,
+                byte[] redactionKey,
                 ReplayMode mode)
             {
                 this.driver = driver;
@@ -103,6 +117,7 @@ namespace SignalRouter.V2.Replay
                 this.runtime = runtime;
                 this.capture = capture;
                 this.secrets = secrets;
+                this.redactionKey = redactionKey;
                 this.mode = mode;
                 for (var index = 0; index < plan.Entries.Count; index++)
                 {
@@ -174,15 +189,15 @@ namespace SignalRouter.V2.Replay
                     return AwaitContinuationAdmission(admission);
                 }
 
-                if (!TryBuildPayload(admission, out var payload))
+                var payloadFailure = TryBuildPayload(admission, out var payload);
+                if (payloadFailure != null)
                 {
-                    // The pre-scan plans a stop for unresolvable references; a
-                    // resolver that answered CanResolve but fails TryResolve
-                    // stops at the same boundary.
-                    return ReplayReport.Diverged(
-                        admission.Sequence, "SecretUnresolvable", null);
+                    // Stops BEFORE the affected entry (ADR 0015): nothing was
+                    // submitted, no order consumed.
+                    return ReplayReport.Diverged(admission.Sequence, payloadFailure, null);
                 }
 
+                requestMap[admission.RequestId] = admission.RequestId;
                 var probe = new SubmissionProbe();
                 probes[admission.RequestId] = probe;
                 runtime.Ingress.Submit(new IntentSubmission(
@@ -204,6 +219,18 @@ namespace SignalRouter.V2.Replay
                 if (entry.Kind == ReplayEntryKind.Rejected)
                 {
                     PumpUntil(() => probe.Answered || HasTerminal(admission.RequestId));
+
+                    // A post-admission rejection still carries E2 identity: when
+                    // the twin admitted before rejecting, the fingerprints must
+                    // agree.
+                    if (capture.TryGet(admission.RequestId, out var rejectedCapture) &&
+                        rejectedCapture.Admission != null &&
+                        !rejectedCapture.Admission.Fingerprint.Equals(admission.Fingerprint))
+                    {
+                        return ReplayReport.Diverged(
+                            admission.Sequence, "AdmissionFingerprint", null);
+                    }
+
                     return null;
                 }
 
@@ -245,6 +272,10 @@ namespace SignalRouter.V2.Replay
                         admission.Sequence, "ContinuationFingerprint", null);
                 }
 
+                // Bound by (parent, ordinal), never by id (guarantees.md §5.8):
+                // the twin's child id is its own; later cuts resolve through
+                // the map.
+                requestMap[admission.RequestId] = captured.Request;
                 return null;
             }
 
@@ -264,7 +295,8 @@ namespace SignalRouter.V2.Replay
                 return null;
             }
 
-            private bool TryBuildPayload(AdmissionCut admission, out InvocationPayload payload)
+            /// <summary>Null on success; the structured stop code otherwise — nothing submitted either way.</summary>
+            private string? TryBuildPayload(AdmissionCut admission, out InvocationPayload payload)
             {
                 var fields = new NamedField[admission.Arguments.Fields.Count];
                 for (var index = 0; index < admission.Arguments.Fields.Count; index++)
@@ -272,14 +304,23 @@ namespace SignalRouter.V2.Replay
                     var argument = admission.Arguments.Fields[index];
                     if (argument.IsSecret)
                     {
-                        // In-memory resolution; the twin's own canonicalization
-                        // re-digests the value with the shared redaction
-                        // material, so a substituted secret diverges at the
-                        // admission fingerprint (ADR 0015).
-                        if (secrets == null || !secrets.TryResolve(argument.Secret, out var resolved))
+                        if (secrets == null ||
+                            !secrets.TryResolve(
+                                argument.Secret, argument.SecretValueDigest, out var resolved))
                         {
                             payload = InvocationPayload.Empty;
-                            return false;
+                            return "SecretUnresolvable";
+                        }
+
+                        // The explicit re-digest against the recorded keyed
+                        // digest, BEFORE the entry executes (ADR 0015): a
+                        // substituted secret stops here, never a silent
+                        // substitution — and never a consumed admission.
+                        if (!InvocationCanonicalizer.SensitiveValueDigest(redactionKey, resolved)
+                            .Equals(argument.SecretValueDigest))
+                        {
+                            payload = InvocationPayload.Empty;
+                            return "SecretDigestMismatch";
                         }
 
                         fields[index] = new NamedField(argument.Name, resolved);
@@ -291,20 +332,31 @@ namespace SignalRouter.V2.Replay
                 }
 
                 payload = new InvocationPayload(ValueArray<NamedField>.From(fields));
-                return true;
+                return null;
             }
 
             // ── E3: the before view ──────────────────────────────────────────
 
             private ReplayReport? ComparePermit(EffectPermit permit)
             {
+                var twinId = MapId(permit.RequestId);
                 PumpUntil(() =>
-                    capture.TryGet(permit.RequestId, out var captured) && captured.Before != null);
-                capture.TryGet(permit.RequestId, out var entry);
+                    capture.TryGet(twinId, out var captured) &&
+                    (captured.Before != null || captured.MaterializationFailed));
+                capture.TryGet(twinId, out var entry);
+                if (entry.Before == null)
+                {
+                    throw new InvalidOperationException(
+                        "The twin's before view did not materialize.");
+                }
+
                 var recorded = DecodeBlob(permit.BeforeView, permit.Watermark);
                 return CompareStates(
-                    permit.Sequence, "BeforeState", recorded, permit.BeforeView, entry.Before!);
+                    permit.Sequence, "BeforeState", recorded, permit.BeforeView, entry.Before);
             }
+
+            private RequestId MapId(RequestId recorded) =>
+                requestMap.TryGetValue(recorded, out var twin) ? twin : recorded;
 
             // ── E4: the terminal ─────────────────────────────────────────────
 
@@ -316,9 +368,10 @@ namespace SignalRouter.V2.Replay
                     return CompareRejectedTerminal(terminal);
                 }
 
+                var twinId = MapId(terminal.RequestId);
                 PumpUntil(() =>
-                    capture.TryGet(terminal.RequestId, out var captured) && captured.Terminal != null);
-                capture.TryGet(terminal.RequestId, out var twin);
+                    capture.TryGet(twinId, out var captured) && captured.Terminal != null);
+                capture.TryGet(twinId, out var twin);
                 var observed = twin.Terminal!;
 
                 if (observed.Outcome != terminal.Outcome)
@@ -328,6 +381,11 @@ namespace SignalRouter.V2.Replay
                             "entries/" + terminal.RequestId.Value,
                             terminal.Outcome.ToString(),
                             observed.Outcome.ToString()));
+                }
+
+                if (observed.EffectPermitted != terminal.EffectPermitted)
+                {
+                    return ReplayReport.Diverged(terminal.Sequence, "EffectPermitted", null);
                 }
 
                 if (!Nullable.Equals(observed.FaultCode, terminal.FaultCode))
@@ -360,6 +418,12 @@ namespace SignalRouter.V2.Replay
                     return ReplayReport.Diverged(terminal.Sequence, "CancellationPhase", null);
                 }
 
+                if (twin.MaterializationFailed && twin.After == null)
+                {
+                    throw new InvalidOperationException(
+                        "The twin's after view did not materialize.");
+                }
+
                 var after = twin.After;
                 if (after == null)
                 {
@@ -376,7 +440,7 @@ namespace SignalRouter.V2.Replay
             private ReplayReport? CompareRejectedTerminal(TerminalCut terminal)
             {
                 probes.TryGetValue(terminal.RequestId, out var probe);
-                capture.TryGet(terminal.RequestId, out var twin);
+                capture.TryGet(MapId(terminal.RequestId), out var twin);
                 var observedReason = twin?.Terminal?.RejectionReason ?? probe?.RejectionReason;
                 if (observedReason == null)
                 {
@@ -438,6 +502,15 @@ namespace SignalRouter.V2.Replay
                     definition,
                     new MaterializationLookup(MaterializeTwinView().Materialization),
                     PredicateStructuralBounds.Default);
+                if (result.Outcome.Kind == PredicateEvaluationKind.Unevaluable)
+                {
+                    // An evaluation that cannot be performed at replay answers
+                    // Incomparable(reason), verbatim (guarantees.md §3.3).
+                    return ReplayReport.Incomparable(
+                        resolved.Sequence,
+                        IncomparableReason.FromUnevaluable(result.Outcome.Reason));
+                }
+
                 if (result.Outcome.Kind != PredicateEvaluationKind.Satisfied)
                 {
                     return ReplayReport.Diverged(resolved.Sequence, "WaitNotSatisfied", null);
@@ -455,6 +528,15 @@ namespace SignalRouter.V2.Replay
                     definition,
                     new MaterializationLookup(MaterializeTwinView().Materialization),
                     PredicateStructuralBounds.Default);
+                if (result.Outcome.Kind == PredicateEvaluationKind.Unevaluable)
+                {
+                    // An evaluation that cannot be performed at replay answers
+                    // Incomparable(reason) (guarantees.md §5.10, §3.3).
+                    return ReplayReport.Incomparable(
+                        assertion.Sequence,
+                        IncomparableReason.FromUnevaluable(result.Outcome.Reason));
+                }
+
                 if (result.Outcome.Kind != assertion.Outcome.Kind)
                 {
                     return ReplayReport.Diverged(
@@ -507,13 +589,30 @@ namespace SignalRouter.V2.Replay
                 ContentId recordedId,
                 RecordMaterialization twin)
             {
-                // ContentId equality is only a fast path; inequality routes to
-                // the typed comparator (recording-replay.md §5.1).
-                if (recordedId.Equals(twin.Canonical.Id))
+                if (mode == ReplayMode.ExactArtifact)
                 {
-                    return null;
+                    // This mode is defined by canonical equality alone (§5.3):
+                    // unequal ids are the verdict; the typed comparator only
+                    // explains the mismatch when it can.
+                    if (recordedId.Equals(twin.Canonical.Id))
+                    {
+                        return null;
+                    }
+
+                    var explanation = driver.comparator.CompareState(
+                        recorded, twin.Materialization, plan.Profile);
+                    return ReplayReport.Diverged(
+                        position, "CanonicalMismatch",
+                        explanation.Outcome.Kind == ReplayComparisonKind.Diverged
+                            ? explanation.Diff
+                            : null);
                 }
 
+                // StrictSemantic: the typed comparator is the verdict, and its
+                // eligibility gates (completeness, mandatory extensions) must
+                // run even when the canonical ids happen to match — a hash fast
+                // path here would bypass Incomparable answers (§5.1 makes the
+                // fast path an optimization, never a different semantics).
                 var typed = driver.comparator.CompareState(
                     recorded, twin.Materialization, plan.Profile);
                 switch (typed.Outcome.Kind)
@@ -523,11 +622,7 @@ namespace SignalRouter.V2.Replay
                     case ReplayComparisonKind.Diverged:
                         return ReplayReport.Diverged(position, site, typed.Diff);
                     default:
-                        // Semantically equal under the profile. ExactArtifact
-                        // demands canonical equality regardless (§5.3).
-                        return mode == ReplayMode.ExactArtifact
-                            ? ReplayReport.Diverged(position, "CanonicalMismatch", null)
-                            : null;
+                        return null;
                 }
             }
 
@@ -560,24 +655,41 @@ namespace SignalRouter.V2.Replay
             }
 
             private bool HasTerminal(RequestId request) =>
-                capture.TryGet(request, out var captured) && captured.Terminal != null;
+                capture.TryGet(MapId(request), out var captured) && captured.Terminal != null;
 
-            private void PumpTurns(int maxTurns)
+            private PumpReport PumpTurns(int maxTurns)
             {
-                runtime.Pump(new PumpBudget(
+                return runtime.Pump(new PumpBudget(
                     maxTurns, long.MaxValue, new LogicalTime(logicalNow++), FramePhase.Update));
             }
 
             private void PumpUntil(Func<bool> condition)
             {
-                for (var pump = 0; pump < MaxPumpsPerStep; pump++)
+                // One turn at a time: the condition gates every step, so the
+                // twin can never run past a boundary the driver has not yet
+                // compared (an admission-only entry must not reach its effect).
+                // An idle twin gets a bounded grace window for an asynchronous
+                // executor to report its completion before it counts as stalled.
+                const int MaxTurnsPerStep = 65536;
+                var idleGrace = 256;
+                for (var turn = 0; turn < MaxTurnsPerStep; turn++)
                 {
                     if (condition())
                     {
                         return;
                     }
 
-                    PumpTurns(64);
+                    var report = PumpTurns(1);
+                    if (!report.WorkRemaining && !condition())
+                    {
+                        if (--idleGrace <= 0)
+                        {
+                            throw new InvalidOperationException(
+                                "The twin stalled: the expected evidence never arrived.");
+                        }
+
+                        System.Threading.Thread.Sleep(1);
+                    }
                 }
 
                 if (!condition())
