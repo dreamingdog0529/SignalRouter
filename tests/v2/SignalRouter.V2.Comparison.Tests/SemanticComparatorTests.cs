@@ -155,7 +155,7 @@ public sealed class SemanticComparatorTests
     public void IdenticalCompleteInputsCompareEqual()
     {
         var result = Comparator().CompareState(Representative(), Representative(), Profile());
-        Assert.That(result.Outcome, Is.EqualTo(ComparisonOutcome.Equal));
+        Assert.That(result.Outcome, Is.EqualTo(ReplayComparisonOutcome.Equal));
         Assert.That(result.Diff, Is.Null, "a diff never exists for Equal (guarantees.md §3.3)");
     }
 
@@ -172,17 +172,13 @@ public sealed class SemanticComparatorTests
                 new ComparedSourceRule(
                     new StateSourceKey("inventory"), ValueArray<string>.From(new[] { "count" })),
             },
-            collectionRules: new[]
-            {
-                new CollectionRule("nodes/save/children", CollectionComparison.Ordered),
-            },
             normalizationRules: new[]
             {
                 new NormalizationRule("nodes/save/attributes/label", NormalizationRule.Identity),
             },
             extensions: new[] { new ExtensionPolicy("futureext", mandatory: false) });
         var result = Comparator().CompareState(Representative(), Representative(), profile);
-        Assert.That(result.Outcome, Is.EqualTo(ComparisonOutcome.Equal));
+        Assert.That(result.Outcome, Is.EqualTo(ReplayComparisonOutcome.Equal));
     }
 
     // ── The four comparator inputs (recording-replay.md §5.2) ────────────────
@@ -212,13 +208,13 @@ public sealed class SemanticComparatorTests
                 if (left == right)
                 {
                     Assert.That(
-                        result.Outcome, Is.EqualTo(ComparisonOutcome.Equal),
+                        result.Outcome, Is.EqualTo(ReplayComparisonOutcome.Equal),
                         $"{left} vs {right}");
                 }
                 else
                 {
                     Assert.That(
-                        result.Outcome, Is.EqualTo(ComparisonOutcome.Diverged),
+                        result.Outcome, Is.EqualTo(ReplayComparisonOutcome.Diverged),
                         $"{left} vs {right}");
                     Assert.That(result.Diff!.Entries[0].DetailCode, Is.EqualTo("StateMismatch"));
                     Assert.That(
@@ -240,7 +236,7 @@ public sealed class SemanticComparatorTests
             }),
         });
         var result = Comparator().CompareState(left, right, Profile());
-        Assert.That(result.Outcome, Is.EqualTo(ComparisonOutcome.Diverged));
+        Assert.That(result.Outcome, Is.EqualTo(ReplayComparisonOutcome.Diverged));
         var entry = result.Diff!.Entries[0];
         Assert.That(entry.DetailCode, Is.EqualTo("ValueMismatch"));
         Assert.That(entry.Recorded, Is.EqualTo("value:Save"));
@@ -333,11 +329,11 @@ public sealed class SemanticComparatorTests
 
         Assert.That(
             Comparator().CompareState(left, right, narrowed).Outcome,
-            Is.EqualTo(ComparisonOutcome.Equal),
+            Is.EqualTo(ReplayComparisonOutcome.Equal),
             "the rule excludes the differing tooltip");
         Assert.That(
             Comparator().CompareState(left, right, Profile()).Outcome,
-            Is.EqualTo(ComparisonOutcome.Diverged),
+            Is.EqualTo(ReplayComparisonOutcome.Diverged),
             "default-strict compares every field");
     }
 
@@ -364,11 +360,11 @@ public sealed class SemanticComparatorTests
 
         Assert.That(
             Comparator().CompareState(left, right, scoped).Outcome,
-            Is.EqualTo(ComparisonOutcome.Equal),
+            Is.EqualTo(ReplayComparisonOutcome.Equal),
             "unlisted sources are outside strict scope");
         Assert.That(
             Comparator().CompareState(left, right, Profile()).Outcome,
-            Is.EqualTo(ComparisonOutcome.Diverged),
+            Is.EqualTo(ReplayComparisonOutcome.Diverged),
             "default-strict compares every source");
     }
 
@@ -386,9 +382,9 @@ public sealed class SemanticComparatorTests
 
         Assert.That(
             Comparator().CompareState(unavailable, unavailable, Profile()).Outcome,
-            Is.EqualTo(ComparisonOutcome.Equal));
+            Is.EqualTo(ReplayComparisonOutcome.Equal));
         var mixed = Comparator().CompareState(unavailable, present, Profile());
-        Assert.That(mixed.Outcome, Is.EqualTo(ComparisonOutcome.Diverged));
+        Assert.That(mixed.Outcome, Is.EqualTo(ReplayComparisonOutcome.Diverged));
         Assert.That(mixed.Diff!.Entries[0].DetailCode, Is.EqualTo("StateMismatch"));
         Assert.That(mixed.Diff.Entries[0].Recorded, Is.EqualTo("unavailable"));
     }
@@ -402,7 +398,7 @@ public sealed class SemanticComparatorTests
             Source("inventory", fields: new[] { new NamedField("count", FieldValue.Of(1L)) }),
         });
         var result = Comparator().CompareState(stale, fresh, Profile());
-        Assert.That(result.Outcome, Is.EqualTo(ComparisonOutcome.Incomparable("Stale")));
+        Assert.That(result.Outcome, Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("Stale"))));
 
         var unsupported = State(sources: new[]
         {
@@ -410,7 +406,7 @@ public sealed class SemanticComparatorTests
         });
         Assert.That(
             Comparator().CompareState(unsupported, fresh, Profile()).Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable("UnsupportedContract")));
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("UnsupportedContract"))));
     }
 
     [Test]
@@ -466,10 +462,10 @@ public sealed class SemanticComparatorTests
 
         Assert.That(
             comparator.CompareState(left, right, normalized).Outcome,
-            Is.EqualTo(ComparisonOutcome.Equal));
+            Is.EqualTo(ReplayComparisonOutcome.Equal));
         Assert.That(
             comparator.CompareState(left, right, Profile()).Outcome,
-            Is.EqualTo(ComparisonOutcome.Diverged),
+            Is.EqualTo(ReplayComparisonOutcome.Diverged),
             "without the rule the raw values differ");
     }
 
@@ -482,7 +478,7 @@ public sealed class SemanticComparatorTests
         });
         var result = Comparator().CompareState(
             WithLabelState("value"), WithLabelState("value"), profile);
-        Assert.That(result.Outcome, Is.EqualTo(ComparisonOutcome.Incomparable("UnknownNormalizer")));
+        Assert.That(result.Outcome, Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("UnknownNormalizer"))));
     }
 
     // ── Incomparable gates ───────────────────────────────────────────────────
@@ -496,7 +492,7 @@ public sealed class SemanticComparatorTests
         var result = Comparator().CompareState(incomplete, State(), Profile());
         Assert.That(
             result.Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable(IncomparableReasons.Incompleteness)));
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(IncomparableReason.Incompleteness)));
     }
 
     [Test]
@@ -510,12 +506,12 @@ public sealed class SemanticComparatorTests
         Assert.That(
             Comparator().CompareState(
                 State(completeness: Truncated()), State(completeness: Truncated()), relaxed).Outcome,
-            Is.EqualTo(ComparisonOutcome.Equal),
+            Is.EqualTo(ReplayComparisonOutcome.Equal),
             "unknown is the fourth input at region granularity — coinciding regions compare");
         Assert.That(
             Comparator().CompareState(
                 State(completeness: Truncated()), State(), relaxed).Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable(IncomparableReasons.Incompleteness)),
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(IncomparableReason.Incompleteness)),
             "differing unknown regions cannot be told apart from divergence");
     }
 
@@ -525,7 +521,7 @@ public sealed class SemanticComparatorTests
         var profile = Profile(extensions: new[] { new ExtensionPolicy("futureext", mandatory: true) });
         Assert.That(
             Comparator().CompareState(State(), State(), profile).Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable(IncomparableReasons.UnknownMandatoryExtension)));
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(IncomparableReason.UnknownMandatoryExtension)));
     }
 
     [Test]
@@ -533,19 +529,184 @@ public sealed class SemanticComparatorTests
     {
         Assert.That(
             Comparator().CompareState(State(), State(), Profile(nodeMatching: "Locator")).Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable("UnsupportedNodeMatching")));
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("UnsupportedNodeMatching"))));
         Assert.That(
             Comparator().CompareState(State(), State(), Profile(itemKeyRules: new[]
             {
                 new ItemKeyRule("nodes/list/children", "id"),
             })).Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable("UnsupportedProfileRule")));
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("UnsupportedProfileRule"))));
         Assert.That(
             Comparator().CompareState(State(), State(), Profile(collectionRules: new[]
             {
-                new CollectionRule("nodes/list/children", CollectionComparison.Set),
+                new CollectionRule("nodes/list/children", CollectionComparison.Ordered),
             })).Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable("UnsupportedProfileRule")));
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("UnsupportedProfileRule"))),
+            "v2.0 has no collection-valued fields: accepting Ordered as a no-op would lie");
+        Assert.That(
+            Comparator().CompareState(State(), State(), Profile(nodeRules: new[]
+            {
+                new ComparedNodeRule("button", ValueArray<string>.From(new[] { "attributes/label" })),
+            })).Outcome,
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("UnsupportedProfileRule"))),
+            "a multi-segment rule path would silently select nothing — refused, never fail-open");
+    }
+
+    [Test]
+    public void AListedSourceAbsentOnBothSidesIsEqualAbsence()
+    {
+        var scoped = Profile(sourceRules: new[]
+        {
+            new ComparedSourceRule(
+                new StateSourceKey("inventory"), ValueArray<string>.From(new[] { "count" })),
+        });
+        Assert.That(
+            Comparator().CompareState(State(), State(), scoped).Outcome,
+            Is.EqualTo(ReplayComparisonOutcome.Equal));
+    }
+
+    [Test]
+    public void MultipleVersionsOfOneCapabilityPairExactly()
+    {
+        var invoke2 = new CapabilityContractRef(
+            new CapabilityContractId("Invoke"), new ContractVersion(2, 0));
+        var left = State(nodes: new[]
+        {
+            Node("save", capabilities: new[]
+            {
+                new MaterializedCapability(Invoke, true),
+                new MaterializedCapability(invoke2, true),
+            }),
+        });
+        var right = State(nodes: new[]
+        {
+            Node("save", capabilities: new[] { new MaterializedCapability(invoke2, true) }),
+        });
+        var result = Comparator().CompareState(left, right, Profile());
+        Assert.That(result.Outcome, Is.EqualTo(ReplayComparisonOutcome.Diverged));
+        Assert.That(
+            result.Diff!.Entries.Count, Is.EqualTo(1),
+            "1.0 is missing and 2.0 pairs exactly — id-only pairing would mispair the run");
+        Assert.That(result.Diff.Entries[0].DetailCode, Is.EqualTo("CapabilityMissing"));
+        Assert.That(result.Diff.Entries[0].Recorded, Is.EqualTo("1.0"));
+    }
+
+    [Test]
+    public void ResidualContentInsideCoincidingUnknownRegionsIsMasked()
+    {
+        CompletenessMap Truncated() => CompletenessMap.From(
+            new[] { new CompletenessEntry(new FieldPath("nodes/save"), CompletenessReason.BudgetTruncated) },
+            maxEntries: 8);
+        var relaxed = Profile(requireCompleteForScope: false);
+
+        // The residual under the truncated region differs — but a truncated
+        // region's remainder is not comparison material.
+        var left = State(
+            nodes: new[]
+            {
+                Node("other"),
+                Node("save", attributes: new[]
+                {
+                    new MaterializedAttribute("label", FieldValue.Of("partial-a"), false),
+                }),
+            },
+            completeness: Truncated());
+        var right = State(
+            nodes: new[] { Node("other") },
+            completeness: Truncated());
+
+        Assert.That(
+            Comparator().CompareState(left, right, relaxed).Outcome,
+            Is.EqualTo(ReplayComparisonOutcome.Equal),
+            "content at or under a coinciding unknown region is masked out of the walk");
+    }
+
+    [Test]
+    public void CoincidingRootTruncationComparesEqual()
+    {
+        CompletenessMap Root() => CompletenessMap.From(
+            System.Array.Empty<CompletenessEntry>(), maxEntries: 8, rootTruncated: true);
+        var relaxed = Profile(requireCompleteForScope: false);
+        var left = State(nodes: new[] { Node("alpha") }, completeness: Root());
+        var right = State(nodes: new[] { Node("beta") }, completeness: Root());
+        Assert.That(
+            Comparator().CompareState(left, right, relaxed).Outcome,
+            Is.EqualTo(ReplayComparisonOutcome.Equal),
+            "the root marker covers every path");
+    }
+
+    [Test]
+    public void AStaleSourceInsideACoincidingUnknownRegionStaysIncomparable()
+    {
+        // The projector records an omission region for a stale source; masking
+        // it away would let two stale documents compare Equal.
+        CompletenessMap WithStaleRegion() => CompletenessMap.From(
+            new[] { new CompletenessEntry(new FieldPath("sources/inventory"), CompletenessReason.Stale) },
+            maxEntries: 8);
+        var relaxed = Profile(requireCompleteForScope: false);
+        var stale = State(
+            sources: new[] { Source("inventory", omission: CompletenessReason.Stale) },
+            completeness: WithStaleRegion());
+
+        var result = Comparator().CompareState(stale, stale, relaxed);
+        Assert.That(
+            result.Outcome,
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("Stale"))));
+    }
+
+    [Test]
+    public void AMaximumLengthAuthorKeyStillProducesAReportableDivergence()
+    {
+        var longKey = new string('k', 1024);
+        var left = State(nodes: new[] { Node(longKey) });
+        var result = Comparator().CompareState(left, State(), Profile());
+        Assert.That(result.Outcome, Is.EqualTo(ReplayComparisonOutcome.Diverged));
+        Assert.That(result.Diff!.Entries[0].DetailCode, Is.EqualTo("NodeMissing"));
+    }
+
+    [Test]
+    public void CapabilityIdsAroundTheCanonicalSeparatorMergeCorrectly()
+    {
+        // Canonical id@version order puts "a0@1.0" before "a@1.0" ('0' < '@'):
+        // a raw-id walk over these lists would emit contradictory entries.
+        var a = new CapabilityContractRef(new CapabilityContractId("a"), new ContractVersion(1, 0));
+        var a0 = new CapabilityContractRef(new CapabilityContractId("a0"), new ContractVersion(1, 0));
+        var left = State(nodes: new[]
+        {
+            Node("save", capabilities: new[]
+            {
+                new MaterializedCapability(a, true),
+                new MaterializedCapability(a0, true),
+            }),
+        });
+        var right = State(nodes: new[]
+        {
+            Node("save", capabilities: new[] { new MaterializedCapability(a, true) }),
+        });
+
+        var result = Comparator().CompareState(left, right, Profile());
+        Assert.That(result.Diff!.Entries.Count, Is.EqualTo(1), "exactly the one absent capability");
+        Assert.That(result.Diff.Entries[0].DetailCode, Is.EqualTo("CapabilityMissing"));
+        Assert.That(result.Diff.Entries[0].Path, Is.EqualTo("nodes/save/capabilities/a0"));
+    }
+
+    [Test]
+    public void ADomainMismatchBetweenTheSidesIsIncomparable()
+    {
+        var otherDomain = new ObservationMaterialization(
+            new ObservationBasis(
+                new RuntimeIncarnationId("incarnation-1"),
+                new SourceRevision(5),
+                RecordView,
+                new SecurityDomainId("agent-domain"),
+                "root"),
+            ValueArray<MaterializedNode>.Empty,
+            ValueArray<MaterializedSource>.Empty,
+            CompletenessMap.Complete);
+        Assert.That(
+            Comparator().CompareState(State(), otherDomain, Profile()).Outcome,
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("ViewMismatch"))),
+            "different exposures are not the same observation surface");
     }
 
     [Test]
@@ -563,7 +724,7 @@ public sealed class SemanticComparatorTests
             CompletenessMap.Complete);
         Assert.That(
             Comparator().CompareState(otherView, State(), Profile()).Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable("ViewMismatch")));
+            Is.EqualTo(ReplayComparisonOutcome.Incomparable(new IncomparableReason("ViewMismatch"))));
     }
 
     [Test]
@@ -583,7 +744,7 @@ public sealed class SemanticComparatorTests
             CompletenessMap.Complete);
         Assert.That(
             Comparator().CompareState(Representative(), later, Profile()).Outcome,
-            Is.EqualTo(ComparisonOutcome.Equal));
+            Is.EqualTo(ReplayComparisonOutcome.Equal));
     }
 
     [Test]

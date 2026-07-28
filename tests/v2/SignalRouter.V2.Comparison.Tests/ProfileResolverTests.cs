@@ -59,7 +59,8 @@ public sealed class ProfileResolverTests
         var recorded = Profile("strict", new ContractVersion(1, 0));
         var supported = Profile("strict", new ContractVersion(1, 0));
         var resolution = ProfileResolver.Resolve(recorded, supported, new ComparisonVocabulary());
-        Assert.That(resolution.Outcome, Is.EqualTo(ComparisonOutcome.Equal));
+        Assert.That(resolution.IsResolved, Is.True);
+        Assert.That(resolution.IncomparableReason, Is.Null);
         Assert.That(
             resolution.Effective, Is.SameAs(recorded),
             "the embedded document is authoritative — registry drift never rewrites a recording");
@@ -72,9 +73,10 @@ public sealed class ProfileResolverTests
             Profile("other", new ContractVersion(1, 0)),
             Profile("strict", new ContractVersion(1, 0)),
             new ComparisonVocabulary());
+        Assert.That(resolution.IsResolved, Is.False);
         Assert.That(
-            resolution.Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable(IncomparableReasons.UnsupportedProfileVersion)));
+            resolution.IncomparableReason,
+            Is.EqualTo(IncomparableReason.UnsupportedProfileVersion));
         Assert.That(resolution.Effective, Is.Null);
     }
 
@@ -86,8 +88,8 @@ public sealed class ProfileResolverTests
             Profile("strict", new ContractVersion(2, 0), new[] { new ContractVersion(1, 0) }),
             new ComparisonVocabulary());
         Assert.That(
-            resolution.Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable(IncomparableReasons.UnsupportedProfileVersion)));
+            resolution.IncomparableReason,
+            Is.EqualTo(IncomparableReason.UnsupportedProfileVersion));
     }
 
     [Test]
@@ -98,8 +100,8 @@ public sealed class ProfileResolverTests
             Profile("strict", new ContractVersion(2, 0)),
             new ComparisonVocabulary());
         Assert.That(
-            resolution.Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable(IncomparableReasons.UnsupportedProfileVersion)));
+            resolution.IncomparableReason,
+            Is.EqualTo(IncomparableReason.UnsupportedProfileVersion));
     }
 
     [Test]
@@ -110,8 +112,7 @@ public sealed class ProfileResolverTests
             Profile("strict", new ContractVersion(2, 0), new[] { new ContractVersion(1, 0) }),
             new ComparisonVocabulary());
         Assert.That(
-            resolution.Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable(IncomparableReasons.MissingMigration)));
+            resolution.IncomparableReason, Is.EqualTo(IncomparableReason.MissingMigration));
     }
 
     [Test]
@@ -123,7 +124,7 @@ public sealed class ProfileResolverTests
         vocabulary.RegisterMigration(recorded.Reference, new ProjectToSupported(supported));
 
         var resolution = ProfileResolver.Resolve(recorded, supported, vocabulary);
-        Assert.That(resolution.Outcome, Is.EqualTo(ComparisonOutcome.Equal));
+        Assert.That(resolution.IsResolved, Is.True);
         Assert.That(resolution.Effective!.Reference, Is.EqualTo(supported.Reference));
     }
 
@@ -137,7 +138,6 @@ public sealed class ProfileResolverTests
 
         var resolution = ProfileResolver.Resolve(recorded, supported, vocabulary);
         Assert.That(
-            resolution.Outcome,
-            Is.EqualTo(ComparisonOutcome.Incomparable(IncomparableReasons.MissingMigration)));
+            resolution.IncomparableReason, Is.EqualTo(IncomparableReason.MissingMigration));
     }
 }

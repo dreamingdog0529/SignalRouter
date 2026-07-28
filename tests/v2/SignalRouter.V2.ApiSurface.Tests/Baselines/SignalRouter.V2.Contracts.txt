@@ -1554,6 +1554,7 @@ sealed class SignalRouter.V2.Contracts.SemanticDiffEntry
   property DetailCode : System.String { public get; }
   property Path : System.String { public get; }
   property Recorded : System.String { public get; }
+  public const field MaxPathLength : System.Int32 = 4096
   public ctor(System.String path, System.String detailCode, System.String recorded, System.String actual)
   public method Equals(SignalRouter.V2.Contracts.SemanticDiffEntry? other) : System.Boolean
   public override method Equals(System.Object? obj) : System.Boolean

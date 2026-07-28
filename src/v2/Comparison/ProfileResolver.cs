@@ -3,25 +3,32 @@ using SignalRouter.V2.Contracts;
 
 namespace SignalRouter.V2.Comparison
 {
-    /// <summary>The answer of a profile resolution: the effective document, or why none exists.</summary>
+    /// <summary>
+    /// The answer of a profile resolution: the effective document, or the
+    /// Incomparable reason why none exists. Deliberately not a comparison
+    /// outcome — resolution success is not a state comparison answering Equal.
+    /// </summary>
     public sealed class ProfileResolution
     {
-        private ProfileResolution(ReplayComparisonProfile? effective, ComparisonOutcome outcome)
+        private ProfileResolution(ReplayComparisonProfile? effective, IncomparableReason? incomparableReason)
         {
             Effective = effective;
-            Outcome = outcome;
+            IncomparableReason = incomparableReason;
         }
 
-        /// <summary>Non-null exactly when <see cref="Outcome"/> is not Incomparable.</summary>
+        public bool IsResolved => Effective != null;
+
+        /// <summary>Non-null exactly when <see cref="IsResolved"/>.</summary>
         public ReplayComparisonProfile? Effective { get; }
 
-        public ComparisonOutcome Outcome { get; }
+        /// <summary>Non-null exactly when the resolution failed (guarantees.md §3.5).</summary>
+        public IncomparableReason? IncomparableReason { get; }
 
         internal static ProfileResolution Resolved(ReplayComparisonProfile effective) =>
-            new ProfileResolution(effective, ComparisonOutcome.Equal);
+            new ProfileResolution(effective, null);
 
-        internal static ProfileResolution Incomparable(string reason) =>
-            new ProfileResolution(null, ComparisonOutcome.Incomparable(reason));
+        internal static ProfileResolution Incomparable(IncomparableReason reason) =>
+            new ProfileResolution(null, reason);
     }
 
     /// <summary>
@@ -56,7 +63,7 @@ namespace SignalRouter.V2.Comparison
 
             if (!recorded.Reference.Id.Equals(supported.Reference.Id))
             {
-                return ProfileResolution.Incomparable(IncomparableReasons.UnsupportedProfileVersion);
+                return ProfileResolution.Incomparable(IncomparableReason.UnsupportedProfileVersion);
             }
 
             if (recorded.Reference.Version.Equals(supported.Reference.Version))
@@ -78,14 +85,14 @@ namespace SignalRouter.V2.Comparison
 
             if (!declared)
             {
-                return ProfileResolution.Incomparable(IncomparableReasons.UnsupportedProfileVersion);
+                return ProfileResolution.Incomparable(IncomparableReason.UnsupportedProfileVersion);
             }
 
             if (!vocabulary.TryGetMigration(recorded.Reference, out var migration))
             {
                 // Projectability is declared but no projection is registered:
                 // there is no common comparison profile (guarantees.md §3.5).
-                return ProfileResolution.Incomparable(IncomparableReasons.MissingMigration);
+                return ProfileResolution.Incomparable(IncomparableReason.MissingMigration);
             }
 
             var projected = migration.Project(recorded);
@@ -94,7 +101,7 @@ namespace SignalRouter.V2.Comparison
             {
                 // A projection that answers the wrong version is a registration
                 // bug, surfaced as the same honest refusal — never a guess.
-                return ProfileResolution.Incomparable(IncomparableReasons.MissingMigration);
+                return ProfileResolution.Incomparable(IncomparableReason.MissingMigration);
             }
 
             return ProfileResolution.Resolved(projected);
