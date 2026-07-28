@@ -314,8 +314,8 @@ namespace SignalRouter.V2.Codec.Recording
                                 break;
                             }
 
-                            if (prefix + insert + suffix != resultLength ||
-                                prefix + suffix > baseBytes.Length)
+                            if ((long)prefix + insert + suffix != resultLength ||
+                                (long)prefix + suffix > baseBytes.Length)
                             {
                                 Degrade("Record " + recordCount + " carries an inconsistent delta.");
                                 break;

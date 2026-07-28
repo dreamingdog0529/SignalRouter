@@ -208,6 +208,9 @@ public sealed class RecordingEndToEndTests
             new IdentityEnvelope(Agent, IngressPath.Mcp, Provenance.Automation, Causality.Root()),
             observer: null));
 
+        internal void PumpOnce() => Runtime.Pump(new PumpBudget(
+            64, long.MaxValue, new LogicalTime(logicalNow++), FramePhase.Update));
+
         internal void PumpUntilIdle(int maxPumps = 24)
         {
             for (var i = 0; i < maxPumps; i++)
@@ -630,6 +633,85 @@ public sealed class RecordingEndToEndTests
         Assert.That(((EffectPermit)result.Cuts[2]).ReusedCheckpointBlob, Is.True);
         Assert.That(((EffectPermit)result.Cuts[5]).ReusedCheckpointBlob, Is.True);
         Assert.That(result.DeltaBlobCount, Is.Zero);
+    }
+
+    [Test]
+    public void AFailedOpenLeavesNoDeltaOrTokenStateBehind()
+    {
+        // The failed open commits its base blob (priming the delta base and
+        // the token) before the E1 cut faults; the next artifact must not
+        // inherit either — a delta base the new file does not carry throws.
+        var world = new World();
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed); // header
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed); // profile
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed); // base blob
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Fault);     // E1 cut
+        var refused = new Observer();
+        world.Runtime.Recording.OpenRecording(OpenRequest(), refused);
+        world.PumpUntilIdle();
+        Assert.That(refused.Answers, Is.EqualTo(new[] { "OpenRefused:OpenFailed" }));
+
+        var (result, _) = RecordMutatingSession(world);
+        Assert.That(result.DeltaBlobCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void APendingPermitDecisionNeverOutlivesItsWorld()
+    {
+        // The E3 cut answers InFlight and the permit parks with its decision
+        // cached; a publication lands before the retry. Whatever order the
+        // kernel serializes, the committed cut must speak for its own
+        // watermark: an unmoved watermark reuses the base checkpoint, a moved
+        // one carries a fresh materialization (guarantees.md §5.3) — a cached
+        // decision from the old world must never commit against the new one.
+        var control = new World();
+        var controlObserver = new Observer();
+        var controlRecording =
+            control.Runtime.Recording.OpenRecording(OpenRequest(), controlObserver);
+        control.PumpUntilIdle();
+        control.Submit("r-1");
+        control.PumpUntilIdle();
+        control.Executor.CompleteLast();
+        control.PumpUntilIdle();
+        control.Runtime.Recording.CloseRecording(controlRecording, controlObserver);
+        control.PumpUntilIdle();
+        var controlResult = ArtifactReader.Read(
+            control.Store.ReadAll(controlRecording.Value, Limits.MaxArtifactBytes), Limits);
+        var quietWatermark = ((EffectPermit)controlResult.Cuts[2]).Watermark;
+
+        var world = new World();
+        var observer = new Observer();
+        var recording = world.Runtime.Recording.OpenRecording(OpenRequest(), observer);
+        world.PumpUntilIdle();
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed); // E2 cut
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.InFlight);  // E3 cut parks
+        world.Submit("r-1");
+        world.PumpOnce();
+        world.PublishCount(1, EventCausation.OfRequest(new RequestId("r-1")));
+        world.PumpUntilIdle();
+        world.Executor.CompleteLast();
+        world.PumpUntilIdle();
+        world.Runtime.Recording.CloseRecording(recording, observer);
+        world.PumpUntilIdle();
+
+        var result = ArtifactReader.Read(
+            world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes), Limits);
+        Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
+        var opened = (RecordingOpened)result.Cuts[0];
+        var permit = (EffectPermit)result.Cuts[2];
+        if (permit.Watermark.Equals(quietWatermark))
+        {
+            Assert.That(permit.ReusedCheckpointBlob, Is.True);
+            Assert.That(permit.BeforeView, Is.EqualTo(opened.BaseSnapshot));
+        }
+        else
+        {
+            Assert.That(permit.ReusedCheckpointBlob, Is.False,
+                "a moved watermark voids the cached reuse decision");
+            Assert.That(permit.BeforeView, Is.Not.EqualTo(opened.BaseSnapshot),
+                "the committed permit must carry the fresh materialization");
+            Assert.That(result.TryGetBlob(permit.BeforeView, out _), Is.True);
+        }
     }
 
     private sealed class MovingSampledReader : ISampledSourceReader

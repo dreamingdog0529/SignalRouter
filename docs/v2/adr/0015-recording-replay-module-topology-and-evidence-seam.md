@@ -286,7 +286,9 @@ PR — explicitly not invented here.
   reuse uses the same-`ContentId` re-materialization condition of
   [guarantees.md](../spec/guarantees.md) §5.3 (sound because ADR 0012 keeps
   the temporal legs out of the payload). Delta production, invalidation
-  tokens, chain bounds (`min(profile, StateStore.MaxChainLength)`), and the
+  tokens, chain bounds (`min(declared, StateStore.MaxChainLength)` — the
+  bound is declared with the recording sink bounds, not in the comparison
+  profile: storage encoding, never comparison semantics), and the
   TimelineTrack lane land as the module's final PR against a record kind the
   schema reserves from day one — no schema major bump.
 - `AdaptiveGoal` mode is declared and refused as unsupported in v2.0; strict

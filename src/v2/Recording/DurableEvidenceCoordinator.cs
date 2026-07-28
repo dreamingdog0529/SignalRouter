@@ -41,6 +41,13 @@ namespace SignalRouter.V2.Recording
         private ContentId pendingPermitContentId;
         private bool pendingPermitReused;
         private bool pendingPermitLeased;
+        private SourceRevision pendingPermitWatermark;
+        private long pendingPermitBarrierEpoch;
+
+        // Counts committed-or-attempted E5 barriers: a permit decision cached
+        // across a Pending retry is void once a barrier intervened, even at an
+        // unmoved revision (guarantees.md §5.3 — no reuse across a barrier).
+        private long barrierEpoch;
 
         // Delta chain state (1.1): the last appended blob is the next delta
         // base; depths are tracked per ContentId so a dedup hit can never
@@ -192,6 +199,12 @@ namespace SignalRouter.V2.Recording
             writer?.Dispose();
             writer = null;
             openStep = 0;
+            // A failed open already primed per-artifact state (the base blob
+            // sets the delta base and the token; a write fault raises
+            // CloseRequested): a survivor would poison the next artifact — a
+            // stale delta base throws, a standing close request closes it.
+            ResetPerArtifactState();
+            CloseRequested = null;
             return EvidenceReadiness.Fault;
         }
 
@@ -236,7 +249,19 @@ namespace SignalRouter.V2.Recording
             // The permit is a resumable step: the reuse decision and the lease
             // are cached across Pending retries, so a retry can neither flip
             // reusedCheckpointBlob (the blob it wrote itself would read as a
-            // checkpoint) nor leak or duplicate the lease.
+            // checkpoint) nor leak or duplicate the lease. But a cached
+            // decision speaks only for the world it was made in: a watermark
+            // advance or an intervening E5 barrier voids it (guarantees.md
+            // §5.3) — release and re-decide at the current watermark.
+            if (pendingPermitRequest.HasValue &&
+                pendingPermitRequest.Value.Equals(evidence.Request) &&
+                (!pendingPermitWatermark.Equals(evidence.Watermark) ||
+                    pendingPermitBarrierEpoch != barrierEpoch))
+            {
+                ReleasePendingPermitLease(pendingPermitContentId);
+                ClearPendingPermit();
+            }
+
             if (!pendingPermitRequest.HasValue || !pendingPermitRequest.Value.Equals(evidence.Request))
             {
                 if (lastPermitBlobBasis.HasValue &&
@@ -255,6 +280,8 @@ namespace SignalRouter.V2.Recording
                     pendingPermitContentId = lastPermitBlobId;
                     pendingPermitReused = true;
                     pendingPermitLeased = false;
+                    pendingPermitWatermark = evidence.Watermark;
+                    pendingPermitBarrierEpoch = barrierEpoch;
                 }
                 else if (services!.TryMaterializeView(
                     recordView, scope, evidence.Watermark, out var before, out _))
@@ -264,6 +291,8 @@ namespace SignalRouter.V2.Recording
                     pendingPermitContentId = before!.Snapshot.ContentId;
                     pendingPermitReused = writer!.ContainsBlob(pendingPermitContentId);
                     pendingPermitLeased = false;
+                    pendingPermitWatermark = evidence.Watermark;
+                    pendingPermitBarrierEpoch = barrierEpoch;
                 }
                 else
                 {
@@ -341,6 +370,8 @@ namespace SignalRouter.V2.Recording
             pendingPermitContentId = default;
             pendingPermitReused = false;
             pendingPermitLeased = false;
+            pendingPermitWatermark = default;
+            pendingPermitBarrierEpoch = 0;
         }
 
         public EvidenceReadiness CommitTerminalEvidence(TerminalEvidence evidence)
@@ -407,9 +438,11 @@ namespace SignalRouter.V2.Recording
             }
 
             // No checkpoint reuse across a barrier (guarantees.md §5.3): the
-            // token is cleared before anything else, even on Pending.
+            // token is cleared — and any cached Pending permit decision voided
+            // via the epoch — before anything else, even on Pending.
             lastPermitBlobBasis = null;
             lastPermitBlobId = default;
+            barrierEpoch++;
 
             // The interval endpoints are append positions (guarantees.md §5.5):
             // the last already-durable cut is the clean bound, and the barrier
@@ -754,9 +787,13 @@ namespace SignalRouter.V2.Recording
 
         private void AppendTimelineRecord(TimelineRecord entry)
         {
+            // Two caps: the lane's own byte budget, and an evidence floor —
+            // the last MaxBlobBytes of the artifact budget stay reserved for
+            // the non-droppable lane, so diagnostics can never be what pushes
+            // evidence into Incomplete(SizeLimit).
             var before = writer!.WrittenBytes;
             var budget = Math.Min(
-                options.MaxArtifactBytes,
+                options.MaxArtifactBytes - options.MaxBlobBytes,
                 before + (options.TimelineByteBudget - timelineWrittenBytes));
             switch (writer.AppendTimeline(entry, budget))
             {
@@ -842,11 +879,17 @@ namespace SignalRouter.V2.Recording
             unresolvedCommitments.Clear();
             CloseRequested = null;
             openStep = 0;
+            ResetPerArtifactState();
+        }
+
+        private void ResetPerArtifactState()
+        {
             deltaBaseBytes = null;
             deltaBaseId = default;
             blobDepths.Clear();
             lastPermitBlobId = default;
             lastPermitBlobBasis = null;
+            barrierEpoch = 0;
             timelineWrittenBytes = 0;
             droppedTimelineEvents = 0;
             closeGapWritten = false;

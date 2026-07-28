@@ -238,6 +238,89 @@ public sealed class DeltaAndTimelineTests
         Assert.That(read.Timeline[0].Kind, Is.EqualTo(TimelineRecordKinds.Gap));
     }
 
+    [Test]
+    public void TheDeltaRecordLayoutMatchesTheIndependentDerivation()
+    {
+        // A hundred 0x41 bytes with byte 50 changed to 0xEE: prefix 50,
+        // suffix 49, insert EE. Payload := contentId(result) ‖ contentId(base)
+        //   ‖ varuint(100) ‖ varuint(50) ‖ varuint(49) ‖ varuint(1) ‖ EE,
+        // framed like every record — derived here independently of the writer
+        // (ADR 0016 golden discipline for the 1.1 grammar).
+        var baseBytes = Payload(100, 0x41);
+        var result = Payload(100, 0x41);
+        result[50] = 0xEE;
+
+        var store = new MemoryArtifactStore();
+        long headerAndBase;
+        using (var writer = Open(store, "layout"))
+        {
+            writer.AppendBlob(IdOf(baseBytes), baseBytes);
+            headerAndBase = writer.WrittenBytes;
+            writer.AppendBlobOrDelta(
+                IdOf(result), result, IdOf(baseBytes), baseBytes, long.MaxValue, out var wroteDelta);
+            Assert.That(wroteDelta, Is.True);
+        }
+
+        var bytes = store.ReadAll("layout", ArtifactRoundTripTests.Limits.MaxArtifactBytes);
+        var actual = bytes.Skip((int)headerAndBase).ToArray();
+
+        var payload = EncodedContentId(result)
+            .Concat(EncodedContentId(baseBytes))
+            .Concat(new byte[] { 0x64, 0x32, 0x31, 0x01, 0xEE })
+            .ToArray();
+        var expected = Frame((byte)RecordKind.DeltaBlob, payload);
+        Assert.That(actual, Is.EqualTo(expected));
+    }
+
+    [Test]
+    public void TheGapRecordLayoutMatchesTheIndependentDerivation()
+    {
+        // Payload := str("TimelineGap") ‖ int64(3) as eight big-endian bytes.
+        var store = new MemoryArtifactStore();
+        long headerLength;
+        using (var writer = Open(store, "gaplayout"))
+        {
+            headerLength = writer.WrittenBytes;
+            writer.AppendTimeline(TimelineRecord.Gap(3), long.MaxValue);
+        }
+
+        var bytes = store.ReadAll("gaplayout", ArtifactRoundTripTests.Limits.MaxArtifactBytes);
+        var actual = bytes.Skip((int)headerLength).ToArray();
+
+        var kind = System.Text.Encoding.ASCII.GetBytes("TimelineGap");
+        var payload = new byte[] { (byte)kind.Length }
+            .Concat(kind)
+            .Concat(new byte[] { 0, 0, 0, 0, 0, 0, 0, 3 })
+            .ToArray();
+        Assert.That(actual, Is.EqualTo(Frame((byte)RecordKind.Timeline, payload)));
+    }
+
+    private static byte[] EncodedContentId(byte[] payload)
+    {
+        var digest = SHA256.HashData(payload);
+        return new byte[] { 0x06 }
+            .Concat(System.Text.Encoding.ASCII.GetBytes("sha256"))
+            .Concat(new byte[] { 0x01, 0x20 })
+            .Concat(digest)
+            .ToArray();
+    }
+
+    private static byte[] Frame(byte kind, byte[] payload)
+    {
+        Assert.That(payload.Length, Is.LessThan(128), "single-byte varuint framing only");
+        var framed = new byte[1 + 1 + payload.Length + 5];
+        framed[0] = kind;
+        framed[1] = (byte)payload.Length;
+        payload.CopyTo(framed, 2);
+        var crc = TestCrc(framed.Take(2 + payload.Length).ToArray());
+        framed[2 + payload.Length] = (byte)(crc >> 24);
+        framed[3 + payload.Length] = (byte)(crc >> 16);
+        framed[4 + payload.Length] = (byte)(crc >> 8);
+        framed[5 + payload.Length] = (byte)crc;
+        framed[6 + payload.Length] = RecordingSchema.CommitByte;
+        return framed;
+    }
+
     private static uint TestCrc(byte[] data)
     {
         var crc = 0xFFFFFFFFu;
