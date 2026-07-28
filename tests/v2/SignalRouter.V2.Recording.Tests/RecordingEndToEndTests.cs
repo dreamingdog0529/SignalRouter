@@ -113,7 +113,9 @@ public sealed class RecordingEndToEndTests
 
         private long logicalNow = 100;
 
-        internal World(RecordingCoordinatorOptions? options = null)
+        internal World(
+            RecordingCoordinatorOptions? options = null,
+            ISampledSourceReader? sampledReader = null)
         {
             Coordinator = new DurableEvidenceCoordinator(
                 Store,
@@ -164,6 +166,25 @@ public sealed class RecordingEndToEndTests
                     maxDocumentBytes: 4096),
                 StateSourceClass.RevisionBound));
             Runtime.Bootstrap.RegisterPredicateContract(CountIsFive, CountIsFiveDefinition());
+            if (sampledReader != null)
+            {
+                Runtime.Bootstrap.RegisterStateSource(new StateSourceRegistration(
+                    new StateSourceKey("gauge"),
+                    new StateSourceContractDescriptor(
+                        new StateSourceContractRef(
+                            new StateSourceContractId("gauge"), new ContractVersion(1, 0)),
+                        ValueArray<SourceFieldSchema>.From(new[]
+                        {
+                            new SourceFieldSchema("level", FieldType.Integer, Sensitivity.Standard),
+                        }),
+                        agentVisible: true,
+                        recordVisible: true,
+                        maxDocumentBytes: 256),
+                    StateSourceClass.Sampled,
+                    sampledReader,
+                    freshnessBoundLogicalTime: long.MaxValue));
+            }
+
             Runtime.Start(Executor);
         }
 
@@ -186,6 +207,9 @@ public sealed class RecordingEndToEndTests
             InvocationPayload.Empty,
             new IdentityEnvelope(Agent, IngressPath.Mcp, Provenance.Automation, Causality.Root()),
             observer: null));
+
+        internal void PumpOnce() => Runtime.Pump(new PumpBudget(
+            64, long.MaxValue, new LogicalTime(logicalNow++), FramePhase.Update));
 
         internal void PumpUntilIdle(int maxPumps = 24)
         {
@@ -515,5 +539,357 @@ public sealed class RecordingEndToEndTests
             observer);
         world.PumpUntilIdle();
         Assert.That(observer.Answers, Is.EqualTo(new[] { "OpenRefused:OpenFailed" }));
+    }
+
+    // ── Delta production and the invalidation token (1.1) ────────────────────
+
+    private (ArtifactReadResult Result, Observer Observer) RecordMutatingSession(World world)
+    {
+        var observer = new Observer();
+        var recording = world.Runtime.Recording.OpenRecording(OpenRequest(), observer);
+        world.PumpUntilIdle();
+        Assert.That(observer.Answers, Is.EqualTo(new[] { "Opened" }));
+
+        world.PublishCount(1, EventCausation.OfRequest(new RequestId("r-seed")));
+        world.PumpUntilIdle();
+        world.Submit("r-1");
+        world.PumpUntilIdle();
+        world.PublishCount(2, EventCausation.OfRequest(new RequestId("r-1")));
+        world.Executor.CompleteLast();
+        world.PumpUntilIdle();
+
+        world.Runtime.Recording.CloseRecording(recording, observer);
+        world.PumpUntilIdle();
+        Assert.That(observer.ClosedReason!.Value.IsCompleted, Is.True);
+        var result = ArtifactReader.Read(
+            world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes), Limits);
+        Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
+        Assert.That(
+            EvidenceSemantics.ClassifyArtifact(result.Facts).Outcome.Kind,
+            Is.EqualTo(RecordingOutcomeKind.Completed));
+        return (result, observer);
+    }
+
+    [Test]
+    public void ChangedStatesDeltaEncodeTheirBlobsAndReadBackVerified()
+    {
+        // Base (no document), before (count 1), after (count 2): the two later
+        // blobs are near-identical to their predecessors, so both arrive as
+        // delta records; the reader reconstructs and digest-verifies each.
+        var world = new World();
+        var (result, _) = RecordMutatingSession(world);
+        Assert.That(result.DeltaBlobCount, Is.EqualTo(2));
+        var permit = (EffectPermit)result.Cuts[2];
+        Assert.That(result.TryGetBlob(permit.BeforeView, out _), Is.True);
+    }
+
+    [Test]
+    public void AZeroChainBoundWritesFullBlobsOnly()
+    {
+        var world = new World(new RecordingCoordinatorOptions(
+            Profile(), allowNonDurableStore: true, maxDeltaChainLength: 0));
+        var (result, _) = RecordMutatingSession(world);
+        Assert.That(result.DeltaBlobCount, Is.Zero);
+    }
+
+    [Test]
+    public void TheChainBoundForcesAPeriodicFullCheckpoint()
+    {
+        // With a chain bound of one, the before deltas against the base (depth
+        // 1) and the after must then be a full checkpoint — a chain never
+        // outruns min(declared, store) (recording-replay.md §4).
+        var world = new World(new RecordingCoordinatorOptions(
+            Profile(), allowNonDurableStore: true, maxDeltaChainLength: 1));
+        var (result, _) = RecordMutatingSession(world);
+        Assert.That(result.DeltaBlobCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void AnUnchangedWatermarkReusesTheBeforeCheckpoint()
+    {
+        // No mutations at all: every permit's before-state is the recorded
+        // base, both E3 cuts record the reuse, and no delta records appear —
+        // the invalidation token answers without re-materializing
+        // (guarantees.md §5.3).
+        var world = new World();
+        var observer = new Observer();
+        var recording = world.Runtime.Recording.OpenRecording(OpenRequest(), observer);
+        world.PumpUntilIdle();
+
+        foreach (var request in new[] { "r-1", "r-2" })
+        {
+            world.Submit(request);
+            world.PumpUntilIdle();
+            world.Executor.CompleteLast();
+            world.PumpUntilIdle();
+        }
+
+        world.Runtime.Recording.CloseRecording(recording, observer);
+        world.PumpUntilIdle();
+
+        var result = ArtifactReader.Read(
+            world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes), Limits);
+        Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
+        Assert.That(((EffectPermit)result.Cuts[2]).ReusedCheckpointBlob, Is.True);
+        Assert.That(((EffectPermit)result.Cuts[5]).ReusedCheckpointBlob, Is.True);
+        Assert.That(result.DeltaBlobCount, Is.Zero);
+    }
+
+    [Test]
+    public void AFailedOpenLeavesNoDeltaOrTokenStateBehind()
+    {
+        // The failed open commits its base blob (priming the delta base and
+        // the token) before the E1 cut faults; the next artifact must not
+        // inherit either — a delta base the new file does not carry throws.
+        var world = new World();
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed); // header
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed); // profile
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed); // base blob
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Fault);     // E1 cut
+        var refused = new Observer();
+        world.Runtime.Recording.OpenRecording(OpenRequest(), refused);
+        world.PumpUntilIdle();
+        Assert.That(refused.Answers, Is.EqualTo(new[] { "OpenRefused:OpenFailed" }));
+
+        var (result, _) = RecordMutatingSession(world);
+        Assert.That(result.DeltaBlobCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void APendingPermitDecisionNeverOutlivesItsWorld()
+    {
+        // The E3 cut answers InFlight and the permit parks with its decision
+        // cached; a publication lands before the retry. Whatever order the
+        // kernel serializes, the committed cut must speak for its own
+        // watermark: an unmoved watermark reuses the base checkpoint, a moved
+        // one carries a fresh materialization (guarantees.md §5.3) — a cached
+        // decision from the old world must never commit against the new one.
+        var control = new World();
+        var controlObserver = new Observer();
+        var controlRecording =
+            control.Runtime.Recording.OpenRecording(OpenRequest(), controlObserver);
+        control.PumpUntilIdle();
+        control.Submit("r-1");
+        control.PumpUntilIdle();
+        control.Executor.CompleteLast();
+        control.PumpUntilIdle();
+        control.Runtime.Recording.CloseRecording(controlRecording, controlObserver);
+        control.PumpUntilIdle();
+        var controlResult = ArtifactReader.Read(
+            control.Store.ReadAll(controlRecording.Value, Limits.MaxArtifactBytes), Limits);
+        var quietWatermark = ((EffectPermit)controlResult.Cuts[2]).Watermark;
+
+        var world = new World();
+        var observer = new Observer();
+        var recording = world.Runtime.Recording.OpenRecording(OpenRequest(), observer);
+        world.PumpUntilIdle();
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.Committed); // E2 cut
+        world.Store.ScriptedAnswers.Enqueue(WriteAnswer.InFlight);  // E3 cut parks
+        world.Submit("r-1");
+        world.PumpOnce();
+        world.PublishCount(1, EventCausation.OfRequest(new RequestId("r-1")));
+        world.PumpUntilIdle();
+        world.Executor.CompleteLast();
+        world.PumpUntilIdle();
+        world.Runtime.Recording.CloseRecording(recording, observer);
+        world.PumpUntilIdle();
+
+        var result = ArtifactReader.Read(
+            world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes), Limits);
+        Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
+        var opened = (RecordingOpened)result.Cuts[0];
+        var permit = (EffectPermit)result.Cuts[2];
+        if (permit.Watermark.Equals(quietWatermark))
+        {
+            Assert.That(permit.ReusedCheckpointBlob, Is.True);
+            Assert.That(permit.BeforeView, Is.EqualTo(opened.BaseSnapshot));
+        }
+        else
+        {
+            Assert.That(permit.ReusedCheckpointBlob, Is.False,
+                "a moved watermark voids the cached reuse decision");
+            Assert.That(permit.BeforeView, Is.Not.EqualTo(opened.BaseSnapshot),
+                "the committed permit must carry the fresh materialization");
+            Assert.That(result.TryGetBlob(permit.BeforeView, out _), Is.True);
+        }
+    }
+
+    private sealed class MovingSampledReader : ISampledSourceReader
+    {
+        internal long Level { get; set; }
+
+        public SampledDocument? Read() => new SampledDocument(
+            new SourceDocument(ValueArray<NamedField>.From(new[]
+            {
+                new NamedField("level", FieldValue.Of(Level)),
+            })),
+            producedAtLogicalTime: 100);
+    }
+
+    [Test]
+    public void SampledExposureDisablesTheInvalidationToken()
+    {
+        // A sampled source can move without any revision advance, so an
+        // unchanged watermark proves nothing (observation-state.md §7): each
+        // permit must re-materialize. The second permit sees the moved gauge —
+        // a fresh ContentId, never a reused checkpoint.
+        var reader = new MovingSampledReader { Level = 1 };
+        var world = new World(sampledReader: reader);
+        var observer = new Observer();
+        var recording = world.Runtime.Recording.OpenRecording(OpenRequest(), observer);
+        world.PumpUntilIdle();
+
+        world.Submit("r-1");
+        world.PumpUntilIdle();
+        world.Executor.CompleteLast();
+        world.PumpUntilIdle();
+
+        reader.Level = 2;
+        world.Submit("r-2");
+        world.PumpUntilIdle();
+        world.Executor.CompleteLast();
+        world.PumpUntilIdle();
+
+        world.Runtime.Recording.CloseRecording(recording, observer);
+        world.PumpUntilIdle();
+
+        var result = ArtifactReader.Read(
+            world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes), Limits);
+        Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
+        var first = (EffectPermit)result.Cuts[2];
+        var second = (EffectPermit)result.Cuts[5];
+        Assert.That(second.BeforeView, Is.Not.EqualTo(first.BeforeView),
+            "the moved gauge must be observed — a reused checkpoint here is unsound");
+        Assert.That(second.ReusedCheckpointBlob, Is.False);
+    }
+
+    // ── TimelineTrack (1.1) ──────────────────────────────────────────────────
+
+    private static (ArtifactReadResult Result, long FileLength) RecordPollingSession(World world)
+    {
+        var observer = new Observer();
+        var recording = world.Runtime.Recording.OpenRecording(OpenRequest(), observer);
+        world.PumpUntilIdle();
+
+        var waitObserver = new WaitObserver();
+        world.Runtime.Control.ArmWait(
+            CountIsFive, Agent, timeoutAtLogicalTime: long.MaxValue, waitObserver);
+        world.PumpUntilIdle();
+
+        world.PublishCount(1, EventCausation.OfRequest(new RequestId("r-c")));
+        world.PumpUntilIdle();
+        world.PublishCount(2, EventCausation.OfRequest(new RequestId("r-c")));
+        world.PumpUntilIdle();
+        world.PublishCount(5, EventCausation.OfRequest(new RequestId("r-c")));
+        world.PumpUntilIdle();
+        Assert.That(waitObserver.Resolutions, Is.EqualTo(new[] { PredicateResolution.Satisfied }));
+
+        world.Runtime.Recording.CloseRecording(recording, observer);
+        world.PumpUntilIdle();
+        Assert.That(observer.ClosedReason!.Value.IsCompleted, Is.True,
+            "the polling session must close Completed");
+
+        var bytes = world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes);
+        return (ArtifactReader.Read(bytes, Limits), bytes.LongLength);
+    }
+
+    [Test]
+    public void UnsatisfiedWaitPollsLandOnTheTimelineLane()
+    {
+        var (result, _) = RecordPollingSession(new World(new RecordingCoordinatorOptions(
+            Profile(), allowNonDurableStore: true, timelineByteBudget: 4096)));
+        Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
+        Assert.That(result.Timeline.Count, Is.EqualTo(2), "two unsatisfied polls, then E6b");
+        foreach (var entry in result.Timeline)
+        {
+            Assert.That(entry.Kind, Is.EqualTo(TimelineRecordKinds.WaitPoll));
+            Assert.That(entry.Predicate, Is.EqualTo(CountIsFive));
+        }
+
+        Assert.That(
+            EvidenceSemantics.ClassifyArtifact(result.Facts).Outcome.Kind,
+            Is.EqualTo(RecordingOutcomeKind.Completed),
+            "the timeline lane never bears on classification");
+    }
+
+    [Test]
+    public void TimelineBytesNeverDisplaceEvidence()
+    {
+        var (control, controlLength) = RecordPollingSession(new World(
+            new RecordingCoordinatorOptions(Profile(), allowNonDurableStore: true)));
+        Assert.That(control.Timeline.Count, Is.Zero);
+
+        // The tightest possible evidence bound — exactly the lane-off file.
+        // Every timeline byte lifts the evidence ceiling by the same amount,
+        // so the same evidence still fits: the droppable lane never consumes
+        // capacity the non-droppable lane needs.
+        var (result, _) = RecordPollingSession(new World(new RecordingCoordinatorOptions(
+            Profile(), maxArtifactBytes: controlLength, allowNonDurableStore: true,
+            timelineByteBudget: 4096)));
+        Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
+        Assert.That(result.Timeline.Count, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void AnUnlimitedTimelineBudgetDoesNotOverflow()
+    {
+        var (result, _) = RecordPollingSession(new World(new RecordingCoordinatorOptions(
+            Profile(), allowNonDurableStore: true, timelineByteBudget: long.MaxValue)));
+        Assert.That(result.Timeline.Count, Is.EqualTo(2), "an effectively unlimited lane records");
+    }
+
+    [Test]
+    public void TheTimelineByteBudgetDropsAndMarksTheLoss()
+    {
+        // A budget too small for any poll record: both polls drop, and the
+        // close marks the loss with one gap record (loss is permitted and
+        // marked, recording-replay.md §3).
+        var world = new World(new RecordingCoordinatorOptions(
+            Profile(), allowNonDurableStore: true, timelineByteBudget: 4));
+        var observer = new Observer();
+        var recording = world.Runtime.Recording.OpenRecording(OpenRequest(), observer);
+        world.PumpUntilIdle();
+
+        var waitObserver = new WaitObserver();
+        world.Runtime.Control.ArmWait(
+            CountIsFive, Agent, timeoutAtLogicalTime: long.MaxValue, waitObserver);
+        world.PumpUntilIdle();
+        world.PublishCount(1, EventCausation.OfRequest(new RequestId("r-c")));
+        world.PumpUntilIdle();
+        world.PublishCount(2, EventCausation.OfRequest(new RequestId("r-c")));
+        world.PumpUntilIdle();
+
+        world.Runtime.Recording.CloseRecording(recording, observer);
+        world.PumpUntilIdle();
+
+        var result = ArtifactReader.Read(
+            world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes), Limits);
+        Assert.That(result.IntegrityFailure, Is.False, result.IntegrityDetail);
+        Assert.That(result.Timeline.Count, Is.EqualTo(1));
+        Assert.That(result.Timeline[0].Kind, Is.EqualTo(TimelineRecordKinds.Gap));
+        Assert.That(result.Timeline[0].DroppedCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void ADisabledTimelineLaneWritesNothing()
+    {
+        var world = new World();
+        var observer = new Observer();
+        var recording = world.Runtime.Recording.OpenRecording(OpenRequest(), observer);
+        world.PumpUntilIdle();
+
+        var waitObserver = new WaitObserver();
+        world.Runtime.Control.ArmWait(
+            CountIsFive, Agent, timeoutAtLogicalTime: long.MaxValue, waitObserver);
+        world.PumpUntilIdle();
+        world.PublishCount(1, EventCausation.OfRequest(new RequestId("r-c")));
+        world.PumpUntilIdle();
+
+        world.Runtime.Recording.CloseRecording(recording, observer);
+        world.PumpUntilIdle();
+
+        var result = ArtifactReader.Read(
+            world.Store.ReadAll(recording.Value, Limits.MaxArtifactBytes), Limits);
+        Assert.That(result.Timeline.Count, Is.Zero, "the lane is off by default — no gap either");
     }
 }

@@ -1773,8 +1773,8 @@ namespace SignalRouter.V2.Kernel
             Emit(EventKind.PredicateArmed, EventCausation.None, operation: message.Operation);
             var recordedArm = RecordWaitArmed(message.Operation, message.Predicate, definition);
             var entry = new WaitEntry(
-                message.Operation, definition, domain, message.TimeoutAtLogicalTime,
-                message.Observer, recordedArm);
+                message.Operation, message.Predicate, definition, domain,
+                message.TimeoutAtLogicalTime, message.Observer, recordedArm);
             var result = PredicateEvaluator.Evaluate(
                 definition, PinReader(domain), PredicateStructuralBounds.Default);
             if (result.Outcome.Kind == PredicateEvaluationKind.Satisfied)
@@ -1933,6 +1933,13 @@ namespace SignalRouter.V2.Kernel
                 if (result.Outcome.Kind == PredicateEvaluationKind.Satisfied)
                 {
                     (satisfied ??= new List<OperationId>()).Add(pair.Key);
+                }
+                else if (pair.Value.RecordedArm && recordingPhase == RecordingPhase.Active)
+                {
+                    // TimelineTrack: an unsatisfied poll of a recorded wait is
+                    // droppable diagnostics — offered, never owed.
+                    recordingCoordinator!.OfferWaitPoll(new WaitPollEvidence(
+                        pair.Key, pair.Value.Predicate, new SourceRevision(revision)));
                 }
             }
 
@@ -2895,6 +2902,7 @@ namespace SignalRouter.V2.Kernel
         {
             internal WaitEntry(
                 OperationId operation,
+                PredicateContractRef predicate,
                 PredicateDefinition definition,
                 SecurityDomainId domain,
                 long timeoutAtLogicalTime,
@@ -2902,6 +2910,7 @@ namespace SignalRouter.V2.Kernel
                 bool recordedArm)
             {
                 Operation = operation;
+                Predicate = predicate;
                 Definition = definition;
                 Domain = domain;
                 TimeoutAtLogicalTime = timeoutAtLogicalTime;
@@ -2910,6 +2919,8 @@ namespace SignalRouter.V2.Kernel
             }
 
             internal OperationId Operation { get; }
+
+            internal PredicateContractRef Predicate { get; }
 
             internal PredicateDefinition Definition { get; }
 
@@ -3403,6 +3414,8 @@ namespace SignalRouter.V2.Kernel
 
             public bool CanAddress =>
                 runtime.options.CanonicalStateCodec != null && !runtime.tornDown;
+
+            public bool RecordViewIsRevisionPure => !runtime.sampledVisibleToRecord;
 
             public bool TryMaterializeView(
                 ViewContractRef view,

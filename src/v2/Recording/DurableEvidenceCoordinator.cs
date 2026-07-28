@@ -38,8 +38,36 @@ namespace SignalRouter.V2.Recording
         private int openStep;
         private RequestId? pendingPermitRequest;
         private RecordMaterialization? pendingPermitBefore;
+        private ContentId pendingPermitContentId;
         private bool pendingPermitReused;
         private bool pendingPermitLeased;
+        private SourceRevision pendingPermitWatermark;
+        private long pendingPermitBarrierEpoch;
+
+        // Counts committed-or-attempted E5 barriers: a permit decision cached
+        // across a Pending retry is void once a barrier intervened, even at an
+        // unmoved revision (guarantees.md §5.3 — no reuse across a barrier).
+        private long barrierEpoch;
+
+        // Delta chain state (1.1): the last appended blob is the next delta
+        // base; depths are tracked per ContentId so a dedup hit can never
+        // launder a deep delta into a fresh checkpoint.
+        private byte[]? deltaBaseBytes;
+        private ContentId deltaBaseId;
+        private readonly Dictionary<ContentId, int> blobDepths = new Dictionary<ContentId, int>();
+
+        // Invalidation-token E3 reuse (guarantees.md §5.3): the record-view
+        // blob most recently made durable, with the watermark it materialized
+        // at. Cleared by an E5 barrier — no checkpoint reuse across one.
+        private ContentId lastPermitBlobId;
+        private SourceRevision? lastPermitBlobBasis;
+
+        // TimelineTrack accounting (recording-replay.md §3).
+        private long timelineWrittenBytes;
+        private long droppedTimelineEvents;
+        private bool closeGapWritten;
+        private OperationId lastPollOperation;
+        private SourceRevision lastPollRevision;
 
         public DurableEvidenceCoordinator(IArtifactStore store, RecordingCoordinatorOptions options)
         {
@@ -133,6 +161,8 @@ namespace SignalRouter.V2.Recording
                     return answer == EvidenceReadiness.Fault ? FailOpen() : answer;
                 }
 
+                lastPermitBlobId = evidence.BaseSnapshot.Snapshot.ContentId;
+                lastPermitBlobBasis = evidence.BaseSnapshot.Snapshot.Basis.Revision;
                 openStep = 4;
             }
 
@@ -169,6 +199,12 @@ namespace SignalRouter.V2.Recording
             writer?.Dispose();
             writer = null;
             openStep = 0;
+            // A failed open already primed per-artifact state (the base blob
+            // sets the delta base and the token; a write fault raises
+            // CloseRequested): a survivor would poison the next artifact — a
+            // stale delta base throws, a standing close request closes it.
+            ResetPerArtifactState();
+            CloseRequested = null;
             return EvidenceReadiness.Fault;
         }
 
@@ -213,28 +249,64 @@ namespace SignalRouter.V2.Recording
             // The permit is a resumable step: the reuse decision and the lease
             // are cached across Pending retries, so a retry can neither flip
             // reusedCheckpointBlob (the blob it wrote itself would read as a
-            // checkpoint) nor leak or duplicate the lease.
+            // checkpoint) nor leak or duplicate the lease. But a cached
+            // decision speaks only for the world it was made in: a watermark
+            // advance or an intervening E5 barrier voids it (guarantees.md
+            // §5.3) — release and re-decide at the current watermark.
+            if (pendingPermitRequest.HasValue &&
+                pendingPermitRequest.Value.Equals(evidence.Request) &&
+                (!pendingPermitWatermark.Equals(evidence.Watermark) ||
+                    pendingPermitBarrierEpoch != barrierEpoch))
+            {
+                ReleasePendingPermitLease(pendingPermitContentId);
+                ClearPendingPermit();
+            }
+
             if (!pendingPermitRequest.HasValue || !pendingPermitRequest.Value.Equals(evidence.Request))
             {
-                if (!services!.TryMaterializeView(
+                if (lastPermitBlobBasis.HasValue &&
+                    lastPermitBlobBasis.Value.Equals(evidence.Watermark) &&
+                    services!.RecordViewIsRevisionPure &&
+                    writer!.ContainsBlob(lastPermitBlobId))
+                {
+                    // The invalidation token (guarantees.md §5.3): the watermark
+                    // has not moved since the checkpoint materialized and the
+                    // record view is a pure function of the revision, so
+                    // NoRelevantMutation is proven — the prior checkpoint is
+                    // this permit's before-state without a re-materialization.
+                    // The barrier rule holds because an E5 clears the token.
+                    pendingPermitRequest = evidence.Request;
+                    pendingPermitBefore = null;
+                    pendingPermitContentId = lastPermitBlobId;
+                    pendingPermitReused = true;
+                    pendingPermitLeased = false;
+                    pendingPermitWatermark = evidence.Watermark;
+                    pendingPermitBarrierEpoch = barrierEpoch;
+                }
+                else if (services!.TryMaterializeView(
                     recordView, scope, evidence.Watermark, out var before, out _))
+                {
+                    pendingPermitRequest = evidence.Request;
+                    pendingPermitBefore = before!;
+                    pendingPermitContentId = before!.Snapshot.ContentId;
+                    pendingPermitReused = writer!.ContainsBlob(pendingPermitContentId);
+                    pendingPermitLeased = false;
+                    pendingPermitWatermark = evidence.Watermark;
+                    pendingPermitBarrierEpoch = barrierEpoch;
+                }
+                else
                 {
                     CloseRequested ??= new IncompleteReason("SinkFault");
                     return EvidenceReadiness.Fault;
                 }
-
-                pendingPermitRequest = evidence.Request;
-                pendingPermitBefore = before!;
-                pendingPermitReused = writer!.ContainsBlob(before!.Snapshot.ContentId);
-                pendingPermitLeased = false;
             }
 
-            var beforeId = pendingPermitBefore!.Snapshot.ContentId;
+            var beforeId = pendingPermitContentId;
             if (!pendingPermitReused)
             {
                 if (!pendingPermitLeased)
                 {
-                    if (services!.TryLease(pendingPermitBefore, recording) != LeaseAnswer.Retained)
+                    if (services!.TryLease(pendingPermitBefore!, recording) != LeaseAnswer.Retained)
                     {
                         CloseRequested ??= new IncompleteReason("SizeLimit");
                         ClearPendingPermit();
@@ -244,7 +316,7 @@ namespace SignalRouter.V2.Recording
                     pendingPermitLeased = true;
                 }
 
-                var blobAnswer = AppendBlobBounded(beforeId, pendingPermitBefore);
+                var blobAnswer = AppendBlobBounded(beforeId, pendingPermitBefore!);
                 if (blobAnswer == EvidenceReadiness.Pending)
                 {
                     return EvidenceReadiness.Pending;
@@ -271,6 +343,12 @@ namespace SignalRouter.V2.Recording
                 return EvidenceReadiness.Pending;
             }
 
+            if (answer == EvidenceReadiness.Ready)
+            {
+                lastPermitBlobId = beforeId;
+                lastPermitBlobBasis = evidence.Watermark;
+            }
+
             ReleasePendingPermitLease(beforeId);
             ClearPendingPermit();
             return answer;
@@ -289,8 +367,11 @@ namespace SignalRouter.V2.Recording
         {
             pendingPermitRequest = null;
             pendingPermitBefore = null;
+            pendingPermitContentId = default;
             pendingPermitReused = false;
             pendingPermitLeased = false;
+            pendingPermitWatermark = default;
+            pendingPermitBarrierEpoch = 0;
         }
 
         public EvidenceReadiness CommitTerminalEvidence(TerminalEvidence evidence)
@@ -315,6 +396,11 @@ namespace SignalRouter.V2.Recording
                     return blobAnswer;
                 }
             }
+
+            // The after-state is the freshest record-view checkpoint: the next
+            // E3 at an unmoved watermark reuses it under the token condition.
+            lastPermitBlobId = afterId;
+            lastPermitBlobBasis = after.Snapshot.Basis.Revision;
 
             var cut = new TerminalCut(
                 new EvidenceSequence(nextSequence),
@@ -350,6 +436,13 @@ namespace SignalRouter.V2.Recording
             {
                 return BarrierAnswer.Continue(EvidenceReadiness.Ready);
             }
+
+            // No checkpoint reuse across a barrier (guarantees.md §5.3): the
+            // token is cleared — and any cached Pending permit decision voided
+            // via the epoch — before anything else, even on Pending.
+            lastPermitBlobBasis = null;
+            lastPermitBlobId = default;
+            barrierEpoch++;
 
             // The interval endpoints are append positions (guarantees.md §5.5):
             // the last already-durable cut is the clean bound, and the barrier
@@ -496,6 +589,7 @@ namespace SignalRouter.V2.Recording
                 return EvidenceReadiness.Fault;
             }
 
+            MarkTimelineLoss();
             var finalId = evidence.FinalSnapshot.Snapshot.ContentId;
             if (!writer!.ContainsBlob(finalId))
             {
@@ -549,6 +643,7 @@ namespace SignalRouter.V2.Recording
             // Best-effort durable Incomplete(IncarnationChanged): observation
             // services are still addressable here (ADR 0015 teardown order). A
             // failure leaves the artifact for the reader to classify Interrupted.
+            MarkTimelineLoss();
             if (services!.TryMaterializeView(recordView, scope, null, out var final, out _) &&
                 final != null)
             {
@@ -587,7 +682,7 @@ namespace SignalRouter.V2.Recording
             }
 
             switch (writer!.AppendCut(
-                cut, enforceBounds ? options.MaxArtifactBytes : long.MaxValue))
+                cut, enforceBounds ? EvidenceByteBudget() : long.MaxValue))
             {
                 case WriteAnswer.OverBudget:
                     CloseRequested ??= new IncompleteReason("SizeLimit");
@@ -615,15 +710,137 @@ namespace SignalRouter.V2.Recording
                 return EvidenceReadiness.Fault;
             }
 
-            return writer!.AppendBlob(
-                id, payload, enforceBounds ? options.MaxArtifactBytes : long.MaxValue) switch
+            // Delta-encode against the previous blob while the chain bound
+            // allows (recording-replay.md §4): every delta records base →
+            // result; the bound forces a periodic full checkpoint. The close
+            // path (enforceBounds: false) always writes full — an artifact's
+            // final checkpoint never depends on a chain.
+            var budget = enforceBounds ? EvidenceByteBudget() : long.MaxValue;
+            var effectiveChain = Math.Min(
+                options.MaxDeltaChainLength, RecordingCoordinatorOptions.StoreMaxChainLength);
+            WriteAnswer written;
+            var wroteDelta = false;
+            if (enforceBounds && effectiveChain > 0 && deltaBaseBytes != null &&
+                blobDepths[deltaBaseId] < effectiveChain && !writer!.ContainsBlob(id))
             {
-                WriteAnswer.Committed => EvidenceReadiness.Ready,
-                WriteAnswer.InFlight => EvidenceReadiness.Pending,
-                WriteAnswer.OverBudget => OverBudgetAnswer(),
-                _ => FaultWithSink(),
-            };
+                written = writer.AppendBlobOrDelta(
+                    id, payload, deltaBaseId, deltaBaseBytes, budget, out wroteDelta);
+            }
+            else
+            {
+                written = writer!.AppendBlob(id, payload, budget);
+            }
+
+            switch (written)
+            {
+                case WriteAnswer.Committed:
+                    int depth;
+                    if (wroteDelta)
+                    {
+                        depth = blobDepths[deltaBaseId] + 1;
+                    }
+                    else if (!blobDepths.TryGetValue(id, out depth))
+                    {
+                        depth = 0;
+                    }
+
+                    blobDepths[id] = depth;
+                    deltaBaseBytes = payload;
+                    deltaBaseId = id;
+                    return EvidenceReadiness.Ready;
+                case WriteAnswer.InFlight:
+                    return EvidenceReadiness.Pending;
+                case WriteAnswer.OverBudget:
+                    return OverBudgetAnswer();
+                default:
+                    return FaultWithSink();
+            }
         }
+
+        // ── TimelineTrack (droppable diagnostics) ────────────────────────────
+
+        public void OfferWaitPoll(WaitPollEvidence evidence)
+        {
+            if (evidence == null)
+            {
+                throw new ArgumentNullException(nameof(evidence));
+            }
+
+            if (!recordingActive || options.TimelineByteBudget < 1)
+            {
+                return;
+            }
+
+            // Coalesce: one poll per (wait, revision) — a repeat carries no
+            // information (recording-replay.md §3 per-profile coalescing).
+            if (evidence.Operation.Equals(lastPollOperation) &&
+                evidence.Revision.Equals(lastPollRevision))
+            {
+                return;
+            }
+
+            lastPollOperation = evidence.Operation;
+            lastPollRevision = evidence.Revision;
+            AppendTimelineRecord(TimelineRecord.WaitPoll(
+                evidence.Operation, evidence.Predicate, evidence.Revision));
+        }
+
+        private void AppendTimelineRecord(TimelineRecord entry)
+        {
+            // The lane spends only its own byte budget: every timeline byte
+            // lifts the evidence ceiling by the same amount (see
+            // EvidenceByteBudget), so the droppable lane can never consume
+            // capacity the non-droppable lane needs — the declared file bound
+            // is MaxArtifactBytes + TimelineByteBudget.
+            var before = writer!.WrittenBytes;
+            var budget = SaturatingAdd(
+                before, options.TimelineByteBudget - timelineWrittenBytes);
+            switch (writer.AppendTimeline(entry, budget))
+            {
+                case WriteAnswer.Committed:
+                    timelineWrittenBytes += writer.WrittenBytes - before;
+                    break;
+                case WriteAnswer.OverBudget:
+                    droppedTimelineEvents++;
+                    break;
+                case WriteAnswer.InFlight:
+                    // Nothing produces InFlight in v2.0 (ADR 0015); a droppable
+                    // lane has no retry obligation — the event counts as lost.
+                    droppedTimelineEvents++;
+                    break;
+                default:
+                    // A physical write fault poisons the stream for every later
+                    // record — the sink discipline is the evidence lane's.
+                    droppedTimelineEvents++;
+                    CloseRequested ??= new IncompleteReason("SinkFault");
+                    break;
+            }
+        }
+
+        private void MarkTimelineLoss()
+        {
+            // Loss is marked once, best-effort and byte-exempt like the close
+            // records themselves — a failure here must never block the close.
+            if (!closeGapWritten && droppedTimelineEvents > 0 &&
+                options.TimelineByteBudget > 0)
+            {
+                closeGapWritten = true;
+                _ = writer!.AppendTimeline(
+                    TimelineRecord.Gap(droppedTimelineEvents), long.MaxValue);
+            }
+        }
+
+        /// <summary>
+        /// The evidence lane's byte ceiling: the declared bound plus every
+        /// byte the timeline lane has spent — diagnostics never displace
+        /// evidence, so the total file bound is MaxArtifactBytes +
+        /// TimelineByteBudget (RecordingCoordinatorOptions).
+        /// </summary>
+        private long EvidenceByteBudget() =>
+            SaturatingAdd(options.MaxArtifactBytes, timelineWrittenBytes);
+
+        private static long SaturatingAdd(long value, long addend) =>
+            value > long.MaxValue - addend ? long.MaxValue : value + addend;
 
         private EvidenceReadiness OverBudgetAnswer()
         {
@@ -674,6 +891,22 @@ namespace SignalRouter.V2.Recording
             unresolvedCommitments.Clear();
             CloseRequested = null;
             openStep = 0;
+            ResetPerArtifactState();
+        }
+
+        private void ResetPerArtifactState()
+        {
+            deltaBaseBytes = null;
+            deltaBaseId = default;
+            blobDepths.Clear();
+            lastPermitBlobId = default;
+            lastPermitBlobBasis = null;
+            barrierEpoch = 0;
+            timelineWrittenBytes = 0;
+            droppedTimelineEvents = 0;
+            closeGapWritten = false;
+            lastPollOperation = default;
+            lastPollRevision = default;
         }
     }
 }

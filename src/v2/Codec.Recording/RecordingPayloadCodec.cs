@@ -116,6 +116,50 @@ namespace SignalRouter.V2.Codec.Recording
                 "UnknownReasonCode", position, "Unknown provenance code."),
         };
 
+        // ── Timeline grammar (1.1) ───────────────────────────────────────────
+
+        internal static void WriteTimeline(ref PayloadWriter writer, TimelineRecord entry)
+        {
+            writer.WriteString(entry.Kind);
+            switch (entry.Kind)
+            {
+                case TimelineRecordKinds.WaitPoll:
+                    writer.WriteString(entry.Operation.Value);
+                    WriteContract(ref writer, entry.Predicate.Id.Value, entry.Predicate.Version);
+                    writer.WriteInt64(unchecked((long)entry.Revision.Value));
+                    break;
+                case TimelineRecordKinds.Gap:
+                    writer.WriteInt64(entry.DroppedCount);
+                    break;
+                default:
+                    throw new CodecFormatException(
+                        "UnknownReasonCode", -1, "Unencodable timeline kind.");
+            }
+        }
+
+        /// <summary>Null for a timeline kind this reader does not know — the lane is droppable, the record is skipped.</summary>
+        internal static TimelineRecord? ReadTimeline(PayloadReader reader)
+        {
+            var kind = reader.ReadString();
+            switch (kind)
+            {
+                case TimelineRecordKinds.WaitPoll:
+                {
+                    var operation = new OperationId(reader.ReadString());
+                    var predicate = new PredicateContractRef(
+                        new PredicateContractId(reader.ReadString()), ReadVersion(reader));
+                    var revision = new SourceRevision(unchecked((ulong)reader.ReadInt64()));
+                    return TimelineRecord.WaitPoll(operation, predicate, revision);
+                }
+
+                case TimelineRecordKinds.Gap:
+                    return TimelineRecord.Gap(reader.ReadInt64());
+
+                default:
+                    return null;
+            }
+        }
+
         // ── Common value grammars ────────────────────────────────────────────
 
         private static void WriteContract(ref PayloadWriter writer, string id, ContractVersion version)

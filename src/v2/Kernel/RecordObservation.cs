@@ -86,6 +86,16 @@ namespace SignalRouter.V2.Kernel
         RecordingCatalog SnapshotCatalog();
 
         /// <summary>
+        /// True when a Record-family materialization is a pure function of the
+        /// revision — no sampled source is exposed to the record family
+        /// (observation-state.md §7). The guarantees.md §5.3 invalidation-token
+        /// condition: with this true, an unchanged watermark proves
+        /// NoRelevantMutation, so an E3 may reuse the prior checkpoint blob
+        /// without re-materializing. False fails closed to fresh materialization.
+        /// </summary>
+        bool RecordViewIsRevisionPure { get; }
+
+        /// <summary>
         /// Cut-level release (ADR 0015): a blob's pin is held from lease until
         /// its cut is durable, then released here; <see cref="ReleaseRecording"/>
         /// remains the whole-artifact terminal release.

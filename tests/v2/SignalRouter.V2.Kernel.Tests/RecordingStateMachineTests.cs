@@ -60,6 +60,10 @@ public sealed class RecordingStateMachineTests
         public RecordingAdmissionPolicy AdmissionPolicy =>
             RecordingAdmissionPolicy.RefuseUnkeyedTargets;
 
+        public List<WaitPollEvidence> WaitPolls { get; } = new List<WaitPollEvidence>();
+
+        public void OfferWaitPoll(WaitPollEvidence evidence) => WaitPolls.Add(evidence);
+
         public void Bind(IRecordObservationServices services)
         {
             if (Bound != null)

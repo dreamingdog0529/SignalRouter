@@ -33,8 +33,35 @@ transcoding layer.
   artifact   := fileHeader record*
   fileHeader := "SRRE" varuint(major) varuint(minor) str(artifactId) str(incarnationId)
   record     := kind:byte varuint(payloadLength) payload crc32c commit:0xC7
-  kind       := 0x01 evidence cut · 0x02 blob · 0x03 timeline (reserved) · 0x04 comparison profile
+  kind       := 0x01 evidence cut · 0x02 blob · 0x03 timeline (1.1) · 0x04 comparison profile
+              · 0x05 delta blob (1.1)
   ```
+
+  Schema 1.1 payload grammars for the two staged kinds:
+
+  ```
+  deltaBlob  := contentId(result) contentId(base) varuint(resultLength)
+                varuint(prefixLength) varuint(suffixLength)
+                varuint(insertLength) insertBytes
+  timeline   := str(timelineKind) fields…
+    WaitPoll    := str(operationId) contract(predicate) int64(sourceRevision)
+    TimelineGap := int64(droppedCount)
+  ```
+
+  A delta blob reconstructs `base[0..prefix] ‖ insert ‖ base[len−suffix..]`,
+  must satisfy `prefix + insert + suffix = resultLength` and
+  `prefix + suffix ≤ baseLength`, references a base the artifact carries
+  earlier in byte order, and verifies against the result `ContentId` exactly
+  like a full blob — verify-before-use, never writer trust. Chains between
+  full checkpoints are bounded by `min(declared, StateStore.MaxChainLength)`
+  writer-side; the reader refuses a chain deeper than
+  `StateStore.MaxChainLength` as structural. The chain bound is declared at
+  open in the coordinator options, not in the comparison-profile document —
+  chain length is storage encoding, and comparison semantics never depend on
+  how a blob was encoded. Timeline records carry no `EvidenceSequence`, are
+  excluded from closure, classification, and the declared event count, and an
+  unknown timeline kind is skipped whole (the lane is droppable diagnostics;
+  loss is marked with a `TimelineGap` record).
 
   `crc32c` covers `kind ‖ payloadLength ‖ payload` (CRC32C in software —
   netstandard2.1 has no BCL CRC and the codec leaf takes no packages; the
@@ -123,9 +150,11 @@ transcoding layer.
   reserved code strings — readers present unknown codes verbatim). Any change
   that alters an outcome taxonomy, a cut's durability rule, a terminal shape,
   or the failure matrix is a schema **major** plus an ADR
-  ([guarantees.md](../spec/guarantees.md) §10). Writers emit no timeline
-  (0x03) records until the delta/timeline PR lands; a 1.0 reader accepts the
-  reserved kind and excludes it from closure.
+  ([guarantees.md](../spec/guarantees.md) §10). Schema 1.1 (the delta/timeline
+  PR) consumed the staged kinds: writers emit timeline (0x03) and delta-blob
+  (0x05) records; a 1.0 reader accepts 0x03 and excludes it from closure, and
+  refuses a 1.1 artifact whose evidence references delta-supplied content it
+  cannot reconstruct — an honest closure failure, never a misreading.
 - **Durability is defined at the store seam.** `IArtifactStore` append
   answers `Committed` only after an operating-system-level flush of the
   written record; the test memory backend is `IsDurable = false` and is

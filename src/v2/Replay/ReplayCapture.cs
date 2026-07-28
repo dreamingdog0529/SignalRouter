@@ -126,6 +126,11 @@ namespace SignalRouter.V2.Replay
 
         public RecordingAdmissionPolicy AdmissionPolicy => RecordingAdmissionPolicy.RefuseUnkeyedTargets;
 
+        public void OfferWaitPoll(WaitPollEvidence evidence)
+        {
+            // Droppable diagnostics — the capture compares evidence, never timelines.
+        }
+
         private CapturedEntry Entry(RequestId request)
         {
             if (!entries.TryGetValue(request, out var entry))

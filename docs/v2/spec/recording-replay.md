@@ -63,7 +63,10 @@ guaranteed tiers ([guarantees.md](guarantees.md) §4).
   reachability updated. A crash can orphan a blob (GC-eligible) but never a dangling
   evidence reference.
 - Every delta blob records `baseContentId → resultContentId`; chains between
-  checkpoints are bounded by the profile's maximum chain length; periodic checkpoints
+  checkpoints are bounded by the recording's declared chain bound capped at
+  `StateStore.MaxChainLength` ([security-resources.md](security-resources.md) §5) —
+  chain length is storage encoding, never comparison semantics, so it is declared
+  with the recording sink bounds, not in the comparison profile; periodic checkpoints
   are full materializations.
 - On close, the artifact either becomes **self-contained** (blobs embedded/copied) or
   explicitly declares its external `StateStore` dependency; a reader MUST be able to
