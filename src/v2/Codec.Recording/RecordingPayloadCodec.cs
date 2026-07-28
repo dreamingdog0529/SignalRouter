@@ -173,10 +173,15 @@ namespace SignalRouter.V2.Codec.Recording
                     writer.WriteString("b");
                     writer.WriteBool(value.AsBoolean);
                     break;
-                default:
+                case FieldValueKind.Float:
                     writer.WriteString("f");
                     writer.WriteFloatBits(value.AsFloat);
                     break;
+                default:
+                    // A future kind must extend the grammar explicitly, never
+                    // fall through to a wrong encoding.
+                    throw new CodecFormatException(
+                        "UnknownValueTag", -1, "Unencodable field value kind.");
             }
         }
 

@@ -72,12 +72,15 @@ transcoding layer.
   unconstrained.
 
 - **The comparison profile is a record, not a cut.** Record kind 0x04 embeds
-  the declarative `ReplayComparisonProfile` document and its digest once,
-  before E1; E1 continues to pin only the `ReplayComparisonProfileRef`, and
-  the reader verifies that the E1 ref and the embedded document's identity
-  and digest agree. A reader judges the artifact against the embedded
-  document (registry drift cannot reinterpret an old artifact) and
-  cross-checks the target runtime's catalog at pre-scan.
+  the declarative `ReplayComparisonProfile` document, exactly once, before
+  E1; E1 continues to pin only the `ReplayComparisonProfileRef`. The reader
+  enforces single occurrence, pre-E1 position, and agreement between the
+  document's identity and E1's pinned reference — a violation degrades the
+  artifact. A separate embedded digest of the document would be recomputable
+  by any author and adds nothing beyond the record's commit checksum and the
+  reference check, so there is none. A reader judges the artifact against
+  the embedded document (registry drift cannot reinterpret an old artifact)
+  and cross-checks the target runtime's catalog at pre-scan.
 
 - **Secret references.** Sensitive values appear in cut payloads only as
   `SecretReference` (identifier + digest) per

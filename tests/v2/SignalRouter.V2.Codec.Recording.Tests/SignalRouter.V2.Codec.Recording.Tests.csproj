@@ -13,6 +13,7 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../../../src/v2/Codec.CanonicalState/SignalRouter.V2.Codec.CanonicalState.csproj" />
     <ProjectReference Include="../../../src/v2/Codec.Recording/SignalRouter.V2.Codec.Recording.csproj" />
     <ProjectReference Include="../../../src/v2/Contracts/SignalRouter.V2.Contracts.csproj" />
   </ItemGroup>

@@ -16,11 +16,18 @@ namespace SignalRouter.V2.Codec.Shared
             encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
         private readonly byte[] data;
+        private readonly int maxStringLength;
         private int position;
 
         internal PayloadReader(byte[] data)
+            : this(data, int.MaxValue)
+        {
+        }
+
+        internal PayloadReader(byte[] data, int maxStringLength)
         {
             this.data = data;
+            this.maxStringLength = maxStringLength;
         }
 
         internal int Position => position;
@@ -79,6 +86,12 @@ namespace SignalRouter.V2.Codec.Shared
         {
             var start = position;
             var length = ReadVaruint();
+            if (length > maxStringLength)
+            {
+                throw new CodecFormatException(
+                    "OverBudget", start, "A string exceeds the caller's string budget.");
+            }
+
             if (length > Remaining)
             {
                 throw new CodecFormatException(

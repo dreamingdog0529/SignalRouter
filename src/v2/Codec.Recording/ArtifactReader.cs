@@ -121,7 +121,7 @@ namespace SignalRouter.V2.Codec.Recording
             int minor;
             try
             {
-                var header = new PayloadReader(data);
+                var header = new PayloadReader(data, limits.MaxStringLength);
                 if (header.ReadByte() != 0x53 || header.ReadByte() != 0x52 ||
                     header.ReadByte() != 0x52 || header.ReadByte() != 0x45)
                 {
@@ -147,6 +147,14 @@ namespace SignalRouter.V2.Codec.Recording
                 throw new RecordingFormatException(
                     exception.Code, exception.Position, exception.Message);
             }
+            catch (ArgumentException exception)
+            {
+                // A framed header whose identifiers violate the contract grammar
+                // is equally not an artifact (the reader contract: unreadable
+                // headers throw the structured exception).
+                throw new RecordingFormatException(
+                    "InvalidStructure", 0, "The header is invalid: " + exception.Message);
+            }
 
             var cuts = new List<EvidenceCut>();
             var blobs = new Dictionary<ContentId, byte[]>();
@@ -165,6 +173,7 @@ namespace SignalRouter.V2.Codec.Recording
             }
 
             var recordCount = 0;
+            var sawOpened = false;
             while (position < data.Length)
             {
                 if (++recordCount > limits.MaxRecordCount)
@@ -188,15 +197,43 @@ namespace SignalRouter.V2.Codec.Recording
                     {
                         case (byte)RecordKind.EvidenceCut:
                         {
-                            var reader = new PayloadReader(payload);
-                            cuts.Add(RecordingPayloadCodec.ReadCut(reader));
+                            var reader = new PayloadReader(payload, limits.MaxStringLength);
+                            var cut = RecordingPayloadCodec.ReadCut(reader);
                             reader.ExpectEnd();
+
+                            // Blob-before-reference is byte order (ADR 0016): a
+                            // cut referencing a blob the artifact has not yet
+                            // carried — or never carries — is an integrity
+                            // failure, not evidence.
+                            foreach (var reference in ReferencedContentIds(cut))
+                            {
+                                if (!blobs.ContainsKey(reference))
+                                {
+                                    Degrade("Record " + recordCount
+                                        + " references a blob the artifact does not carry before it.");
+                                }
+                            }
+
+                            if (cut is RecordingOpened openedCut)
+                            {
+                                sawOpened = true;
+                                if (profile == null)
+                                {
+                                    Degrade("E1 appears before the comparison-profile record.");
+                                }
+                                else if (!profile.Reference.Equals(openedCut.Profile))
+                                {
+                                    Degrade("The embedded profile does not match E1's pinned reference.");
+                                }
+                            }
+
+                            cuts.Add(cut);
                             break;
                         }
 
                         case (byte)RecordKind.Blob:
                         {
-                            var reader = new PayloadReader(payload);
+                            var reader = new PayloadReader(payload, limits.MaxStringLength);
                             var id = RecordingPayloadCodec.ReadContentId(reader);
                             var length = reader.ReadCount(1);
                             if (length > limits.MaxBlobBytes)
@@ -226,7 +263,13 @@ namespace SignalRouter.V2.Codec.Recording
 
                         case (byte)RecordKind.ComparisonProfile:
                         {
-                            var reader = new PayloadReader(payload);
+                            if (profile != null)
+                            {
+                                Degrade("The artifact carries more than one comparison-profile record.");
+                                break;
+                            }
+
+                            var reader = new PayloadReader(payload, limits.MaxStringLength);
                             profile = RecordingPayloadCodec.ReadProfile(reader);
                             reader.ExpectEnd();
                             break;
@@ -243,15 +286,25 @@ namespace SignalRouter.V2.Codec.Recording
                 }
                 catch (CodecFormatException exception)
                 {
+                    // A committed-but-malformed record truncates the artifact
+                    // exactly like a torn one, and additionally degrades it —
+                    // "the first torn or invalid record truncates" (ADR 0016).
                     Degrade("Record " + recordCount + " is malformed: "
                         + exception.Code + " — " + exception.Message);
+                    truncated = true;
+                    break;
                 }
                 catch (ArgumentException exception)
                 {
-                    // A cut that parses but violates a Contracts invariant is not
-                    // evidence; the artifact degrades, never the reader.
                     Degrade("Record " + recordCount + " violates a cut invariant: " + exception.Message);
+                    truncated = true;
+                    break;
                 }
+            }
+
+            if (sawOpened && profile == null)
+            {
+                Degrade("An opened artifact carries no comparison-profile record.");
             }
 
             // Evidence sequences are the append positions: strictly monotonic,
@@ -311,37 +364,93 @@ namespace SignalRouter.V2.Codec.Recording
             }
             while ((group & 0x80) != 0);
 
-            if ((bytesRead > 1 && (group & 0x7F) == 0) || value > limits.MaxRecordBytes)
+            if (bytesRead > 1 && (group & 0x7F) == 0)
             {
-                // A non-minimal or over-budget length in the tail reads as torn;
-                // over-budget in a committed record throws below once verified.
+                // Non-minimal framing in the tail reads as torn.
+                position = start;
+                return false;
+            }
+
+            if (value > limits.MaxRecordBytes)
+            {
+                // A fully committed over-budget record is a budget violation the
+                // caller must see as such — a resource refusal must never be
+                // indistinguishable from crash truncation. Anything less than a
+                // committed record is torn.
+                var overEnd = (long)cursor + value + 5;
+                if (overEnd <= data.LongLength &&
+                    IsCommitted(data, start, cursor, (long)value))
+                {
+                    throw new RecordingFormatException(
+                        "OverBudget", start, "A committed record exceeds the record budget.");
+                }
+
                 position = start;
                 return false;
             }
 
             payloadLength = (int)value;
             payloadStart = cursor;
-            var afterPayload = cursor + payloadLength;
-            if (afterPayload + 5 > data.Length)
+            var afterPayload = (long)cursor + payloadLength;
+            if (afterPayload + 5 > data.LongLength)
             {
                 position = start;
                 return false;
             }
 
+            var crcOffset = (int)afterPayload;
             var expectedCrc =
-                ((uint)data[afterPayload] << 24) |
-                ((uint)data[afterPayload + 1] << 16) |
-                ((uint)data[afterPayload + 2] << 8) |
-                data[afterPayload + 3];
-            var actualCrc = Crc32C.Compute(new ReadOnlySpan<byte>(data, start, afterPayload - start));
-            if (expectedCrc != actualCrc || data[afterPayload + 4] != RecordingSchema.CommitByte)
+                ((uint)data[crcOffset] << 24) |
+                ((uint)data[crcOffset + 1] << 16) |
+                ((uint)data[crcOffset + 2] << 8) |
+                data[crcOffset + 3];
+            var actualCrc = Crc32C.Compute(new ReadOnlySpan<byte>(data, start, crcOffset - start));
+            if (expectedCrc != actualCrc || data[crcOffset + 4] != RecordingSchema.CommitByte)
             {
                 position = start;
                 return false;
             }
 
-            position = afterPayload + 5;
+            position = crcOffset + 5;
             return true;
+        }
+
+        private static bool IsCommitted(byte[] data, int recordStart, int payloadStart, long payloadLength)
+        {
+            var crcOffset = payloadStart + payloadLength;
+            var expectedCrc =
+                ((uint)data[crcOffset] << 24) |
+                ((uint)data[crcOffset + 1] << 16) |
+                ((uint)data[crcOffset + 2] << 8) |
+                data[crcOffset + 3];
+            var actualCrc = Crc32C.Compute(
+                new ReadOnlySpan<byte>(data, recordStart, (int)(crcOffset - recordStart)));
+            return expectedCrc == actualCrc && data[crcOffset + 4] == RecordingSchema.CommitByte;
+        }
+
+        private static IEnumerable<ContentId> ReferencedContentIds(EvidenceCut cut)
+        {
+            switch (cut)
+            {
+                case RecordingOpened opened:
+                    yield return opened.BaseSnapshot;
+                    break;
+                case EffectPermit permit:
+                    yield return permit.BeforeView;
+                    break;
+                case TerminalCut terminal:
+                    yield return terminal.AfterView;
+                    break;
+                case PredicateResolved resolved:
+                    yield return resolved.WitnessOrFinalObservation;
+                    break;
+                case AssertionEvaluated assertion:
+                    yield return assertion.Snapshot;
+                    break;
+                case RecordingClosed closed:
+                    yield return closed.FinalCheckpoint;
+                    break;
+            }
         }
 
         private static bool VerifyBlob(ContentId id, byte[] payload)

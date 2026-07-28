@@ -65,7 +65,7 @@ namespace SignalRouter.V2.Codec.Recording
                 throw new ArgumentException("A store root is required.", nameof(root));
             }
 
-            this.root = Path.GetFullPath(root);
+            this.root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
         }
 
         public IArtifactStorage Create(string artifactId) =>
@@ -95,7 +95,7 @@ namespace SignalRouter.V2.Codec.Recording
             }
 
             var path = Path.GetFullPath(Path.Combine(root, artifactId + ".srre"));
-            if (!path.StartsWith(root, StringComparison.Ordinal))
+            if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             {
                 throw new ArgumentException(
                     "The artifact id escapes the configured root.", nameof(artifactId));
