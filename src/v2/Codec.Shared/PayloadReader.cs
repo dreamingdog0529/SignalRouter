@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace SignalRouter.V2.Codec.CanonicalState
+namespace SignalRouter.V2.Codec.Shared
 {
     /// <summary>
     /// Parses canonical representation v1 primitives (ADR 0012) with structured
@@ -16,11 +16,18 @@ namespace SignalRouter.V2.Codec.CanonicalState
             encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
         private readonly byte[] data;
+        private readonly int maxStringLength;
         private int position;
 
         internal PayloadReader(byte[] data)
+            : this(data, int.MaxValue)
+        {
+        }
+
+        internal PayloadReader(byte[] data, int maxStringLength)
         {
             this.data = data;
+            this.maxStringLength = maxStringLength;
         }
 
         internal int Position => position;
@@ -31,7 +38,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
         {
             if (Remaining < 1)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "Truncated", position, "Unexpected end of payload.");
             }
 
@@ -49,7 +56,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
             {
                 if (length == 5)
                 {
-                    throw new CanonicalStateFormatException(
+                    throw new CodecFormatException(
                         "VarintOverflow", start, "A varint exceeds five bytes.");
                 }
 
@@ -62,13 +69,13 @@ namespace SignalRouter.V2.Codec.CanonicalState
 
             if (length > 1 && (group & 0x7F) == 0)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "NonMinimalVarint", start, "A varint must use its minimal form.");
             }
 
             if (value > int.MaxValue)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "VarintOverflow", start, "A varint value exceeds Int32.MaxValue.");
             }
 
@@ -79,9 +86,15 @@ namespace SignalRouter.V2.Codec.CanonicalState
         {
             var start = position;
             var length = ReadVaruint();
+            if (length > maxStringLength)
+            {
+                throw new CodecFormatException(
+                    "OverBudget", start, "A string exceeds the caller's string budget.");
+            }
+
             if (length > Remaining)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "Truncated", start, "A string length exceeds the remaining payload.");
             }
 
@@ -92,7 +105,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
             }
             catch (DecoderFallbackException exception)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "InvalidUtf8", position, "A string body is not strict UTF-8: " + exception.Message);
             }
 
@@ -106,7 +119,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
             var value = ReadByte();
             if (value > 0x01)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "InvalidBoolean", start, "A boolean must be 0x00 or 0x01.");
             }
 
@@ -119,7 +132,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
             var value = ReadByte();
             if (value > 0x01)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "InvalidOption", start, "An option discriminator must be 0x00 or 0x01.");
             }
 
@@ -130,7 +143,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
         {
             if (Remaining < 8)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "Truncated", position, "Unexpected end of payload inside a 64-bit value.");
             }
 
@@ -149,7 +162,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
             var value = BitConverter.Int64BitsToDouble(ReadInt64());
             if (double.IsNaN(value))
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "NaNFloat", start, "NaN never appears in a canonical payload.");
             }
 
@@ -163,7 +176,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
             var count = ReadVaruint();
             if (count > 0 && (long)count * minimumItemBytes > Remaining)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "Truncated", start, "A list count exceeds what the remaining payload can hold.");
             }
 
@@ -174,7 +187,7 @@ namespace SignalRouter.V2.Codec.CanonicalState
         {
             if (Remaining != 0)
             {
-                throw new CanonicalStateFormatException(
+                throw new CodecFormatException(
                     "TrailingBytes", position, "The payload carries bytes past the canonical content.");
             }
         }

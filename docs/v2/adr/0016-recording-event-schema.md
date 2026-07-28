@@ -1,8 +1,10 @@
 # ADR 0016 (v2): RecordingEventSchema@1.0 — Artifact Format
 
-> **Status:** Accepted (v2 design); the per-cut payload grammar appendix is
-> **staged** — it is frozen in the codec PR after the portable replay-input
-> contracts fix the cut shapes, with the same committed-worksheet discipline
+> **Status:** Accepted (v2 design). The per-cut payload grammar is frozen in
+> the codec leaf (`src/v2/Codec.Recording/RecordingPayloadCodec.cs` — field
+> order is constructor order, closed vocabularies as code strings) and pinned
+> by the golden vectors and byte worksheet in
+> `tests/v2/SignalRouter.V2.Codec.Recording.Tests`, with the same discipline
 > as [adr 0012](0012-canonical-state-representation-and-digest-policy.md)
 > **Date:** 2026-07-28
 > **Normative reference:** [../spec/recording-replay.md](../spec/recording-replay.md) §2, §4 ·
@@ -70,12 +72,15 @@ transcoding layer.
   unconstrained.
 
 - **The comparison profile is a record, not a cut.** Record kind 0x04 embeds
-  the declarative `ReplayComparisonProfile` document and its digest once,
-  before E1; E1 continues to pin only the `ReplayComparisonProfileRef`, and
-  the reader verifies that the E1 ref and the embedded document's identity
-  and digest agree. A reader judges the artifact against the embedded
-  document (registry drift cannot reinterpret an old artifact) and
-  cross-checks the target runtime's catalog at pre-scan.
+  the declarative `ReplayComparisonProfile` document, exactly once, before
+  E1; E1 continues to pin only the `ReplayComparisonProfileRef`. The reader
+  enforces single occurrence, pre-E1 position, and agreement between the
+  document's identity and E1's pinned reference — a violation degrades the
+  artifact. A separate embedded digest of the document would be recomputable
+  by any author and adds nothing beyond the record's commit checksum and the
+  reference check, so there is none. A reader judges the artifact against
+  the embedded document (registry drift cannot reinterpret an old artifact)
+  and cross-checks the target runtime's catalog at pre-scan.
 
 - **Secret references.** Sensitive values appear in cut payloads only as
   `SecretReference` (identifier + digest) per

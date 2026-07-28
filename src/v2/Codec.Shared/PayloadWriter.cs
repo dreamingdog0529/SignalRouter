@@ -2,7 +2,7 @@ using System;
 using System.Buffers;
 using System.Text;
 
-namespace SignalRouter.V2.Codec.CanonicalState
+namespace SignalRouter.V2.Codec.Shared
 {
     /// <summary>
     /// Emits canonical representation v1 primitives (ADR 0012): minimal-form LEB128
@@ -76,13 +76,13 @@ namespace SignalRouter.V2.Codec.CanonicalState
             buffer[written++] = value;
         }
 
-        internal void WriteMagic()
+        internal void WriteMagic(byte b0, byte b1, byte b2, byte b3)
         {
             Ensure(4);
-            buffer[written++] = 0x53;
-            buffer[written++] = 0x52;
-            buffer[written++] = 0x43;
-            buffer[written++] = 0x53;
+            buffer[written++] = b0;
+            buffer[written++] = b1;
+            buffer[written++] = b2;
+            buffer[written++] = b3;
         }
 
         internal void WriteVaruint(int value)
@@ -133,6 +133,13 @@ namespace SignalRouter.V2.Codec.CanonicalState
         {
             Ensure(1);
             buffer[written++] = value ? (byte)0x01 : (byte)0x00;
+        }
+
+        /// <summary>An option presence byte — same wire form as a boolean, kept distinct for grammar clarity.</summary>
+        internal void WriteOption(bool present)
+        {
+            Ensure(1);
+            buffer[written++] = present ? (byte)0x01 : (byte)0x00;
         }
 
         internal void WriteInt64(long value)
