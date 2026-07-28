@@ -1,0 +1,62 @@
+# API surface of SignalRouter.V2.Comparison
+
+enum SignalRouter.V2.Comparison.ComparisonKind
+  : System.Int32
+  Diverged = 1
+  Equal = 0
+  Incomparable = 2
+
+readonly struct SignalRouter.V2.Comparison.ComparisonOutcome
+  implements System.IEquatable<SignalRouter.V2.Comparison.ComparisonOutcome>
+  property Kind : SignalRouter.V2.Comparison.ComparisonKind { public get; }
+  property Reason : System.String { public get; }
+  public method Equals(SignalRouter.V2.Comparison.ComparisonOutcome other) : System.Boolean
+  public operator op_Equality(SignalRouter.V2.Comparison.ComparisonOutcome left, SignalRouter.V2.Comparison.ComparisonOutcome right) : System.Boolean
+  public operator op_Inequality(SignalRouter.V2.Comparison.ComparisonOutcome left, SignalRouter.V2.Comparison.ComparisonOutcome right) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+  public override method ToString() : System.String
+  public static method Incomparable(System.String reason) : SignalRouter.V2.Comparison.ComparisonOutcome
+  static property Diverged : SignalRouter.V2.Comparison.ComparisonOutcome { public get; }
+  static property Equal : SignalRouter.V2.Comparison.ComparisonOutcome { public get; }
+
+sealed class SignalRouter.V2.Comparison.ComparisonResult
+  property Diff : SignalRouter.V2.Contracts.SemanticDiff? { public get; }
+  property Outcome : SignalRouter.V2.Comparison.ComparisonOutcome { public get; }
+  public static method Diverged(SignalRouter.V2.Contracts.SemanticDiff diff) : SignalRouter.V2.Comparison.ComparisonResult
+  public static method Incomparable(System.String reason) : SignalRouter.V2.Comparison.ComparisonResult
+  static property Equal : SignalRouter.V2.Comparison.ComparisonResult { public get; }
+
+sealed class SignalRouter.V2.Comparison.ComparisonVocabulary
+  public ctor()
+  public method RegisterMigration(SignalRouter.V2.Contracts.ReplayComparisonProfileRef recordedVersion, SignalRouter.V2.Comparison.IProfileMigration migration) : System.Void
+  public method RegisterNormalizer(System.String code, SignalRouter.V2.Comparison.IValueNormalizer normalizer) : System.Void
+  public method TryGetMigration(SignalRouter.V2.Contracts.ReplayComparisonProfileRef recordedVersion, out SignalRouter.V2.Comparison.IProfileMigration migration) : System.Boolean
+  public method TryGetNormalizer(System.String code, out SignalRouter.V2.Comparison.IValueNormalizer normalizer) : System.Boolean
+
+interface SignalRouter.V2.Comparison.IProfileMigration
+  public method Project(SignalRouter.V2.Contracts.ReplayComparisonProfile recorded) : SignalRouter.V2.Contracts.ReplayComparisonProfile
+
+interface SignalRouter.V2.Comparison.IValueNormalizer
+  public method Normalize(SignalRouter.V2.Contracts.FieldValue value) : SignalRouter.V2.Contracts.FieldValue
+
+static class SignalRouter.V2.Comparison.IncomparableReasons
+  public const field CancellationTiming : System.String = "CancellationTiming"
+  public const field Contamination : System.String = "Contamination"
+  public const field Incompleteness : System.String = "Incompleteness"
+  public const field MissingMigration : System.String = "MissingMigration"
+  public const field PredicateFault : System.String = "PredicateFault"
+  public const field TemporalPredicate : System.String = "TemporalPredicate"
+  public const field UnknownMandatoryExtension : System.String = "UnknownMandatoryExtension"
+  public const field UnsupportedProfileVersion : System.String = "UnsupportedProfileVersion"
+
+sealed class SignalRouter.V2.Comparison.ProfileResolution
+  property Effective : SignalRouter.V2.Contracts.ReplayComparisonProfile? { public get; }
+  property Outcome : SignalRouter.V2.Comparison.ComparisonOutcome { public get; }
+
+static class SignalRouter.V2.Comparison.ProfileResolver
+  public static method Resolve(SignalRouter.V2.Contracts.ReplayComparisonProfile recorded, SignalRouter.V2.Contracts.ReplayComparisonProfile supported, SignalRouter.V2.Comparison.ComparisonVocabulary vocabulary) : SignalRouter.V2.Comparison.ProfileResolution
+
+sealed class SignalRouter.V2.Comparison.SemanticComparator
+  public ctor(SignalRouter.V2.Comparison.ComparisonVocabulary vocabulary)
+  public method CompareState(SignalRouter.V2.Contracts.ObservationMaterialization recorded, SignalRouter.V2.Contracts.ObservationMaterialization actual, SignalRouter.V2.Contracts.ReplayComparisonProfile profile) : SignalRouter.V2.Comparison.ComparisonResult
