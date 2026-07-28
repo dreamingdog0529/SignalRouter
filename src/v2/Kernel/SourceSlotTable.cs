@@ -42,6 +42,26 @@ namespace SignalRouter.V2.Kernel
         }
 
         /// <summary>
+        /// The E1-pinned source-contract table (guarantees.md §5.1), in ordinal
+        /// key order for determinism. Registration is bootstrap-only, so the
+        /// snapshot cannot go stale under an active recording.
+        /// </summary>
+        internal ValueArray<StateSourceBinding> SnapshotBindings()
+        {
+            var bindings = new StateSourceBinding[registrations.Count];
+            var index = 0;
+            foreach (var registration in registrations.Values)
+            {
+                bindings[index++] = new StateSourceBinding(
+                    registration.Key, registration.Descriptor.Contract);
+            }
+
+            Array.Sort(bindings, static (left, right) =>
+                string.CompareOrdinal(left.Key.Value, right.Key.Value));
+            return ValueArray<StateSourceBinding>.From(bindings);
+        }
+
+        /// <summary>
         /// Pump-thread adoption: the document is validated against its contract
         /// (declared fields, types, byte ceiling — security-resources.md §5),
         /// redacted at production (sensitive values never enter the slot,

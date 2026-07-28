@@ -200,23 +200,40 @@ single-use — a closed operation is never reopened. `Bind` is valid exactly
 once, before `Start` completes; a second or late bind is a
 `KernelFaultException`.
 
-Which hooks are legal per state:
+Which calls carry artifact obligations per state. The kernel's E2/E3/E4 sites
+fire in every phase — suppressing them would break the drain itself — so
+"none" means the coordinator answers **vacuously Ready and persists nothing**;
+its own recording flag runs from `PrepareOpenEvidence` answering Ready to the
+close completing, and it MUST NOT fault or raise `CloseRequested` before E1:
 
-| State | Legal coordinator calls |
+| State | Artifact-bearing coordinator calls |
 |---|---|
-| `NotRecording` | none (hooks are not invoked) |
-| `OpeningDraining` | none — pre-open interactions drain against the no-op discipline; their cuts are not part of the artifact |
+| `NotRecording` | none — lifecycle hooks are not invoked; the evidence gate is vacuous |
+| `OpeningDraining` | none — pre-open interactions drain vacuously; their cuts are not part of the artifact |
 | `OpeningCommitting` | `PrepareOpenEvidence` (retried while `Pending`) |
 | `Active` | E2/E3/E4, `CommitExternalMutation`, E6a/E6b, E8 |
-| `ClosingDraining` | E3/E4 for draining members, E6b (close-fence cancellations), retries of parked E4/E5/E6/E8 |
+| `ClosingDraining` | E2 for pre-fence stalls and fence members' continuations, E3/E4 for draining members, E6b (close-fence cancellations), retries of parked commits |
 | `ClosingCommitting` | `CommitCloseEvidence` (retried while `Pending`) |
 | any | `NotifyTeardown`; `CloseRequested`/`AdmissionPolicy` reads |
 
+`CloseRequested` is read at turn granularity while `Active` and while
+`ClosingDraining` (where it downgrades an orderly close's reason to
+`Incomplete`, once); it is not read during opening — a coordinator faulting
+before E1 must answer the open itself. The coordinator clears the request
+when its recording ends; a standing value would close the next recording. An
+orderly `CloseRecording`'s observer receives that close's `Closed`/`Failed`
+answer; the open-time observer receives the open answers and any
+coordinator-initiated close.
+
 - **Draining is a dedicated admission freeze**, not the exclusive-control
-  gate: all new mutations are held, human-intent refusals trace
-  `HumanIntentBlocked`, and the fence completes when in-flight work — active
-  interactions, parked E4/E5/E6/E8 commits, and any admission stalled on E2
-  `Pending` from before the fence — has reached durability. A parked,
+  gate: new mutations — submissions and source publications alike — are
+  **held in the mailbox, never refused** (so no `HumanIntentBlocked` trace
+  arises here; that trace belongs to the exclusive-control gate's refusals),
+  and the fence completes when in-flight work — active interactions, parked
+  E4/E5/E6/E8 commits, and any admission stalled on E2 `Pending` from before
+  the fence — has reached durability. Publications stay frozen through the
+  Committing phases too: a revision advance between the fixed base/final
+  snapshot and its durable cut would invalidate the linearization point. A parked,
   already-designated E8 is ReplayEvidence and drains before the close; the
   "close neither waits for nor cancels assertions"
   rule ([guarantees.md](../spec/guarantees.md) §5.10) speaks about
