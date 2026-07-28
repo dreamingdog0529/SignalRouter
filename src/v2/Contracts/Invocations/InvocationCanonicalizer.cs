@@ -163,13 +163,19 @@ namespace SignalRouter.V2.Contracts
                 if (declared.Sensitivity == Sensitivity.Sensitive &&
                     value.Kind != FieldValueKind.Null)
                 {
+                    // Both variable components are length-framed: contract ids and
+                    // argument names may legally contain '@' and '/', so bare
+                    // concatenation would not be injective.
+                    var contractId = contract.Id.Value;
                     var reference = new SecretReference(
-                        contract.Id.Value + "@"
-                        + contract.Version.Major.ToString(CultureInfo.InvariantCulture) + "."
-                        + contract.Version.Minor.ToString(CultureInfo.InvariantCulture) + "/"
-                        + name);
+                        contractId.Length.ToString(CultureInfo.InvariantCulture) + ":" + contractId
+                        + "@" + contract.Version.Major.ToString(CultureInfo.InvariantCulture)
+                        + "." + contract.Version.Minor.ToString(CultureInfo.InvariantCulture)
+                        + "/" + name.Length.ToString(CultureInfo.InvariantCulture) + ":" + name);
                     fields[index] = RecordedArgument.OfSecret(
-                        name, reference, new ArgumentDigest(HmacHex(redactionKey, value.ToString())));
+                        name,
+                        reference,
+                        new ArgumentDigest(HmacHex(redactionKey, CanonicalRendering(value))));
                 }
                 else
                 {
@@ -197,24 +203,48 @@ namespace SignalRouter.V2.Contracts
             for (var index = 0; index < recorded.Fields.Count; index++)
             {
                 var field = recorded.Fields[index];
-                AppendFramed(builder, field.Name);
-                builder.Append(FieldSeparator);
                 if (field.IsSecret)
                 {
-                    builder.Append("sensitive").Append(FieldSeparator)
-                        .Append(field.SecretValueDigest.Value);
+                    AppendSensitiveContribution(builder, field.Name, field.SecretValueDigest.Value);
                 }
                 else
                 {
-                    builder.Append(FieldKindTag(field.Value.Kind)).Append(FieldSeparator);
-                    AppendFramed(builder, field.Value.ToString());
+                    AppendValueContribution(builder, field.Name, field.Value);
                 }
-
-                builder.Append(RecordSeparator);
             }
 
             return new ArgumentDigest(Sha256Hex(builder.ToString()));
         }
+
+        // The single source of one field's canonical contribution — the projection
+        // and the live digest path must never drift apart.
+        private static void AppendSensitiveContribution(
+            StringBuilder builder, string name, string keyedDigestHex)
+        {
+            AppendFramed(builder, name);
+            builder.Append(FieldSeparator)
+                .Append("sensitive").Append(FieldSeparator)
+                .Append(keyedDigestHex)
+                .Append(RecordSeparator);
+        }
+
+        private static void AppendValueContribution(StringBuilder builder, string name, FieldValue value)
+        {
+            AppendFramed(builder, name);
+            builder.Append(FieldSeparator)
+                .Append(FieldKindTag(value.Kind)).Append(FieldSeparator);
+            AppendFramed(builder, CanonicalRendering(value));
+            builder.Append(RecordSeparator);
+        }
+
+        // Floats contribute their IEEE-754 bit pattern, aligning argument identity
+        // with the observation codec (ADR 0012): 0.0 and -0.0 are distinct
+        // payloads, and digest inequality implies nothing. FieldValue.Equals stays
+        // numeric; identity and DTO equality are deliberately different relations.
+        private static string CanonicalRendering(FieldValue value) =>
+            value.Kind == FieldValueKind.Float
+                ? BitConverter.DoubleToInt64Bits(value.AsFloat).ToString("x16", CultureInfo.InvariantCulture)
+                : value.ToString();
 
         private static void ValidatePayload(InvocationPayload payload, ArgumentSchema schema)
         {
@@ -284,21 +314,16 @@ namespace SignalRouter.V2.Contracts
             {
                 payload.TryGetValue(name, out var value);
                 schema.TryGetField(name, out var declared);
-                AppendFramed(builder, name);
-                builder.Append(FieldSeparator);
                 if (declared.Sensitivity == Sensitivity.Sensitive &&
                     value.Kind != FieldValueKind.Null)
                 {
-                    builder.Append("sensitive").Append(FieldSeparator)
-                        .Append(HmacHex(redactionKey, value.ToString()));
+                    AppendSensitiveContribution(
+                        builder, name, HmacHex(redactionKey, CanonicalRendering(value)));
                 }
                 else
                 {
-                    builder.Append(FieldKindTag(value.Kind)).Append(FieldSeparator);
-                    AppendFramed(builder, value.ToString());
+                    AppendValueContribution(builder, name, value);
                 }
-
-                builder.Append(RecordSeparator);
             }
 
             return builder.ToString();

@@ -16,7 +16,7 @@ namespace SignalRouter.V2.Contracts
         public ComparedNodeRule(string roleCode, ValueArray<string> fields)
         {
             RoleCode = ContractGrammar.ValidateCode(roleCode, nameof(roleCode));
-            ValidateSortedUniqueIdentifiers(fields, nameof(fields));
+            ValidateSortedUniquePaths(fields, nameof(fields));
             Fields = fields;
         }
 
@@ -36,11 +36,13 @@ namespace SignalRouter.V2.Contracts
             ContractGrammar.CombineHashes(
                 StringComparer.Ordinal.GetHashCode(RoleCode), SequenceHash(Fields));
 
-        internal static void ValidateSortedUniqueIdentifiers(ValueArray<string> values, string parameterName)
+        internal static void ValidateSortedUniquePaths(ValueArray<string> values, string parameterName)
         {
             for (var index = 0; index < values.Count; index++)
             {
-                ContractGrammar.ValidateIdentifier(values[index], parameterName);
+                // Rule paths follow the FieldPath grammar so they can be matched
+                // against segmented materialization paths deterministically.
+                _ = new FieldPath(values[index]);
                 if (index > 0)
                 {
                     var comparison = string.CompareOrdinal(values[index - 1], values[index]);
@@ -95,7 +97,7 @@ namespace SignalRouter.V2.Contracts
                     "A compared source rule requires a non-default source key.", nameof(source));
             }
 
-            ComparedNodeRule.ValidateSortedUniqueIdentifiers(fields, nameof(fields));
+            ComparedNodeRule.ValidateSortedUniquePaths(fields, nameof(fields));
             Source = source;
             Fields = fields;
         }
@@ -116,12 +118,46 @@ namespace SignalRouter.V2.Contracts
                 Source.GetHashCode(), ComparedNodeRule.SequenceHash(Fields));
     }
 
+    /// <summary>
+    /// The stable item key that pairs the items of one dynamic collection
+    /// (recording-replay.md §5; semantic-model.md §3.2 — dynamic collections use
+    /// scope-stable item keys).
+    /// </summary>
+    public sealed class ItemKeyRule : IEquatable<ItemKeyRule>
+    {
+        public ItemKeyRule(string collectionPath, string keyField)
+        {
+            _ = new FieldPath(collectionPath);
+            _ = new FieldPath(keyField);
+            CollectionPath = collectionPath;
+            KeyField = keyField;
+        }
+
+        public string CollectionPath { get; }
+
+        /// <summary>The item field whose value pairs recorded and live items.</summary>
+        public string KeyField { get; }
+
+        public bool Equals(ItemKeyRule? other) =>
+            other != null &&
+            string.Equals(CollectionPath, other.CollectionPath, StringComparison.Ordinal) &&
+            string.Equals(KeyField, other.KeyField, StringComparison.Ordinal);
+
+        public override bool Equals(object? obj) => Equals(obj as ItemKeyRule);
+
+        public override int GetHashCode() =>
+            ContractGrammar.CombineHashes(
+                StringComparer.Ordinal.GetHashCode(CollectionPath),
+                StringComparer.Ordinal.GetHashCode(KeyField));
+    }
+
     /// <summary>One field's collection-comparison rule (recording-replay.md §5).</summary>
     public sealed class CollectionRule : IEquatable<CollectionRule>
     {
         public CollectionRule(string fieldPath, CollectionComparison comparison)
         {
-            FieldPath = ContractGrammar.ValidateIdentifier(fieldPath, nameof(fieldPath));
+            _ = new FieldPath(fieldPath);
+            FieldPath = fieldPath;
             if (comparison < CollectionComparison.Ordered || comparison > CollectionComparison.Multiset)
             {
                 throw new ArgumentOutOfRangeException(nameof(comparison));
@@ -157,7 +193,8 @@ namespace SignalRouter.V2.Contracts
 
         public NormalizationRule(string fieldPath, string normalizerCode)
         {
-            FieldPath = ContractGrammar.ValidateIdentifier(fieldPath, nameof(fieldPath));
+            _ = new FieldPath(fieldPath);
+            FieldPath = fieldPath;
             NormalizerCode = ContractGrammar.ValidateCode(normalizerCode, nameof(normalizerCode));
         }
 
@@ -207,8 +244,14 @@ namespace SignalRouter.V2.Contracts
     /// The declarative content of a comparison profile — everything strict replay
     /// compares and how (recording-replay.md §5; ADR 0015). The artifact embeds
     /// this document with its digest; E1 pins only the
-    /// <see cref="ReplayComparisonProfileRef"/>. The node-matching vocabulary is
-    /// open; v2.0 reserves only <see cref="MatchByAuthorKey"/>.
+    /// <see cref="ReplayComparisonProfileRef"/>.
+    ///
+    /// v2.0 freezes deliberately coarse forms: node matching is
+    /// <see cref="MatchByAuthorKey"/> only (the vocabulary is open for future
+    /// modes); the completeness requirement is whole-scope
+    /// (<see cref="RequireCompleteForScope"/>), not per-region; and terminal
+    /// evidence (outcome, fault code, completion evidence) is always fully
+    /// compared — it is not profile-selectable.
     /// </summary>
     public sealed class ReplayComparisonProfile
     {
@@ -222,6 +265,7 @@ namespace SignalRouter.V2.Contracts
             string nodeMatching,
             ValueArray<ComparedNodeRule> nodeRules,
             ValueArray<ComparedSourceRule> sourceRules,
+            ValueArray<ItemKeyRule> itemKeyRules,
             ValueArray<CollectionRule> collectionRules,
             ValueArray<NormalizationRule> normalizationRules,
             bool requireCompleteForScope,
@@ -253,11 +297,39 @@ namespace SignalRouter.V2.Contracts
             NodeMatching = ContractGrammar.ValidateCode(nodeMatching, nameof(nodeMatching));
             NodeRules = ValidateRuleOrder(nodeRules, nameof(nodeRules));
             SourceRules = ValidateSourceOrder(sourceRules, nameof(sourceRules));
+            ItemKeyRules = ValidateItemKeyOrder(itemKeyRules, nameof(itemKeyRules));
             CollectionRules = ValidateCollectionOrder(collectionRules, nameof(collectionRules));
             NormalizationRules = ValidateNormalizationOrder(
                 normalizationRules, nameof(normalizationRules));
             RequireCompleteForScope = requireCompleteForScope;
             ExtensionPolicies = ValidateExtensionOrder(extensionPolicies, nameof(extensionPolicies));
+            for (var index = 0; index < projectableFromVersions.Count; index++)
+            {
+                var version = projectableFromVersions[index];
+                var isOlder = version.Major < reference.Version.Major ||
+                    (version.Major == reference.Version.Major &&
+                     version.Minor < reference.Version.Minor);
+                if (!isOlder)
+                {
+                    throw new ArgumentException(
+                        "Projectable versions must be strictly older than the profile's own version.",
+                        nameof(projectableFromVersions));
+                }
+
+                if (index > 0)
+                {
+                    var previous = projectableFromVersions[index - 1];
+                    var ascending = previous.Major < version.Major ||
+                        (previous.Major == version.Major && previous.Minor < version.Minor);
+                    if (!ascending)
+                    {
+                        throw new ArgumentException(
+                            "Projectable versions must be ascending and unique.",
+                            nameof(projectableFromVersions));
+                    }
+                }
+            }
+
             ProjectableFromVersions = projectableFromVersions;
         }
 
@@ -276,6 +348,9 @@ namespace SignalRouter.V2.Contracts
         public ValueArray<ComparedNodeRule> NodeRules { get; }
 
         public ValueArray<ComparedSourceRule> SourceRules { get; }
+
+        /// <summary>Stable item-key pairing for dynamic collections in strict scope.</summary>
+        public ValueArray<ItemKeyRule> ItemKeyRules { get; }
 
         public ValueArray<CollectionRule> CollectionRules { get; }
 
@@ -314,6 +389,23 @@ namespace SignalRouter.V2.Contracts
                 {
                     throw new ArgumentException(
                         "Source rules must be ordinal-sorted by key and unique.", parameterName);
+                }
+            }
+
+            return rules;
+        }
+
+        private static ValueArray<ItemKeyRule> ValidateItemKeyOrder(
+            ValueArray<ItemKeyRule> rules, string parameterName)
+        {
+            for (var index = 1; index < rules.Count; index++)
+            {
+                if (string.CompareOrdinal(
+                    rules[index - 1].CollectionPath, rules[index].CollectionPath) >= 0)
+                {
+                    throw new ArgumentException(
+                        "Item-key rules must be ordinal-sorted by collection path and unique.",
+                        parameterName);
                 }
             }
 

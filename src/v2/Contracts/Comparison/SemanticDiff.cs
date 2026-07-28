@@ -16,8 +16,8 @@ namespace SignalRouter.V2.Contracts
         {
             Path = ContractGrammar.ValidateIdentifier(path, nameof(path));
             DetailCode = ContractGrammar.ValidateCode(detailCode, nameof(detailCode));
-            Recorded = recorded ?? throw new ArgumentNullException(nameof(recorded));
-            Actual = actual ?? throw new ArgumentNullException(nameof(actual));
+            Recorded = ContractGrammar.ValidateScalarText(recorded, nameof(recorded));
+            Actual = ContractGrammar.ValidateScalarText(actual, nameof(actual));
         }
 
         public string Path { get; }

@@ -13,8 +13,10 @@ public sealed class ReplayComparisonProfileTests
 {
     private static ReplayComparisonProfile Profile(
         ValueArray<ComparedNodeRule>? nodeRules = null,
+        ValueArray<ItemKeyRule>? itemKeyRules = null,
         ValueArray<CollectionRule>? collectionRules = null,
-        ValueArray<ExtensionPolicy>? extensions = null) =>
+        ValueArray<ExtensionPolicy>? extensions = null,
+        ValueArray<ContractVersion>? projectable = null) =>
         new(
             TestData.ComparisonProfile,
             TestData.RecordView,
@@ -23,11 +25,12 @@ public sealed class ReplayComparisonProfileTests
             ReplayComparisonProfile.MatchByAuthorKey,
             nodeRules ?? ValueArray<ComparedNodeRule>.Empty,
             ValueArray<ComparedSourceRule>.Empty,
+            itemKeyRules ?? ValueArray<ItemKeyRule>.Empty,
             collectionRules ?? ValueArray<CollectionRule>.Empty,
             ValueArray<NormalizationRule>.Empty,
             requireCompleteForScope: true,
             extensions ?? ValueArray<ExtensionPolicy>.Empty,
-            ValueArray<ContractVersion>.Empty);
+            projectable ?? ValueArray<ContractVersion>.Empty);
 
     [Test]
     public void AMinimalProfileIsDefaultStrict()
@@ -63,6 +66,33 @@ public sealed class ReplayComparisonProfileTests
             })));
         AssertEx.Throws<ArgumentException>(() => _ = new ComparedNodeRule(
             "button", ValueArray<string>.From(new[] { "value", "label" })));
+        AssertEx.Throws<ArgumentException>(() => Profile(itemKeyRules:
+            ValueArray<ItemKeyRule>.From(new[]
+            {
+                new ItemKeyRule("nodes/list/items", "key"),
+                new ItemKeyRule("nodes/list/items", "id"),
+            })));
+    }
+
+    [Test]
+    public void RulePathsFollowTheFieldPathGrammar()
+    {
+        AssertEx.Throws<ArgumentException>(() => _ = new CollectionRule(
+            "/nodes/save", CollectionComparison.Ordered));
+        AssertEx.Throws<ArgumentException>(() => _ = new ComparedNodeRule(
+            "button", ValueArray<string>.From(new[] { "nodes//save" })));
+        AssertEx.Throws<ArgumentException>(() => _ = new ItemKeyRule(
+            "nodes/list/", "key"));
+    }
+
+    [Test]
+    public void ProjectableVersionsMustBeStrictlyOlderAscendingUnique()
+    {
+        // The test profile reference is version 1.0 — nothing is older.
+        AssertEx.Throws<ArgumentException>(() => Profile(projectable:
+            ValueArray<ContractVersion>.From(new[] { new ContractVersion(1, 0) })));
+        AssertEx.Throws<ArgumentException>(() => Profile(projectable:
+            ValueArray<ContractVersion>.From(new[] { new ContractVersion(2, 0) })));
     }
 
     [Test]
@@ -76,6 +106,7 @@ public sealed class ReplayComparisonProfileTests
             ReplayComparisonProfile.MatchByAuthorKey,
             ValueArray<ComparedNodeRule>.Empty,
             ValueArray<ComparedSourceRule>.Empty,
+            ValueArray<ItemKeyRule>.Empty,
             ValueArray<CollectionRule>.Empty,
             ValueArray<NormalizationRule>.Empty,
             true,

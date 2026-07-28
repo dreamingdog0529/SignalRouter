@@ -856,6 +856,15 @@ sealed class SignalRouter.V2.Contracts.InvocationPayload
   public method TryGetValue(System.String name, out SignalRouter.V2.Contracts.FieldValue value) : System.Boolean
   static property Empty : SignalRouter.V2.Contracts.InvocationPayload { public get; }
 
+sealed class SignalRouter.V2.Contracts.ItemKeyRule
+  implements System.IEquatable<SignalRouter.V2.Contracts.ItemKeyRule>
+  property CollectionPath : System.String { public get; }
+  property KeyField : System.String { public get; }
+  public ctor(System.String collectionPath, System.String keyField)
+  public method Equals(SignalRouter.V2.Contracts.ItemKeyRule? other) : System.Boolean
+  public override method Equals(System.Object? obj) : System.Boolean
+  public override method GetHashCode() : System.Int32
+
 readonly struct SignalRouter.V2.Contracts.LogicalOrder
   implements System.IComparable<SignalRouter.V2.Contracts.LogicalOrder>, System.IEquatable<SignalRouter.V2.Contracts.LogicalOrder>
   property Value : System.UInt64 { public get; }
@@ -1412,6 +1421,7 @@ readonly struct SignalRouter.V2.Contracts.ReplayComparisonOutcome
 sealed class SignalRouter.V2.Contracts.ReplayComparisonProfile
   property CollectionRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CollectionRule> { public get; }
   property ExtensionPolicies : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ExtensionPolicy> { public get; }
+  property ItemKeyRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ItemKeyRule> { public get; }
   property NodeMatching : System.String { public get; }
   property NodeRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedNodeRule> { public get; }
   property NormalizationRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.NormalizationRule> { public get; }
@@ -1423,7 +1433,7 @@ sealed class SignalRouter.V2.Contracts.ReplayComparisonProfile
   property Scope : System.String { public get; }
   property SourceRules : SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedSourceRule> { public get; }
   public const field MatchByAuthorKey : System.String = "AuthorKey"
-  public ctor(SignalRouter.V2.Contracts.ReplayComparisonProfileRef reference, SignalRouter.V2.Contracts.ViewContractRef recordView, System.String scope, SignalRouter.V2.Contracts.RedactionPolicyId redactionPolicy, System.String nodeMatching, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedNodeRule> nodeRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedSourceRule> sourceRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CollectionRule> collectionRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.NormalizationRule> normalizationRules, System.Boolean requireCompleteForScope, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ExtensionPolicy> extensionPolicies, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ContractVersion> projectableFromVersions)
+  public ctor(SignalRouter.V2.Contracts.ReplayComparisonProfileRef reference, SignalRouter.V2.Contracts.ViewContractRef recordView, System.String scope, SignalRouter.V2.Contracts.RedactionPolicyId redactionPolicy, System.String nodeMatching, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedNodeRule> nodeRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ComparedSourceRule> sourceRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ItemKeyRule> itemKeyRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.CollectionRule> collectionRules, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.NormalizationRule> normalizationRules, System.Boolean requireCompleteForScope, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ExtensionPolicy> extensionPolicies, SignalRouter.V2.Contracts.ValueArray<SignalRouter.V2.Contracts.ContractVersion> projectableFromVersions)
 
 readonly struct SignalRouter.V2.Contracts.ReplayComparisonProfileId
   implements System.IEquatable<SignalRouter.V2.Contracts.ReplayComparisonProfileId>

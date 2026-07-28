@@ -56,8 +56,8 @@ public sealed class RecordedArgumentsTests
         Assert.That(token.IsSecret, Is.True);
         Assert.That(
             token.Secret.Value,
-            Is.EqualTo($"{TestData.Capability.Id.Value}@{TestData.Capability.Version.Major}.{TestData.Capability.Version.Minor}/token"),
-            "the reference id is contract-scoped so the resolver answers stable names");
+            Is.EqualTo("6:Invoke@1.0/5:token"),
+            "the reference id is contract-scoped with length-framed components (injective)");
         Assert.That(token.SecretValueDigest.Value, Does.Not.Contain("hunter2"));
         Assert.That(token.ToString(), Does.Not.Contain("hunter2"));
         AssertEx.Throws<InvalidOperationException>(() => _ = token.Value);
