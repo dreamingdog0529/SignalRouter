@@ -9,6 +9,10 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
   # Lockfile for the apply-settings helper (.github/scripts/apply-settings.js).
   - package-ecosystem: npm
